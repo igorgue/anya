@@ -49,6 +49,23 @@ function M.create_fold(bufnr, start_row, end_row, summary)
     return
   end
   
+  -- Validate that the range exists in the buffer (convert to 1-based for comparison)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  vim.notify(
+    string.format('Fold request: %d,%d (buffer has %d lines)', 
+      start_row + 1, end_row + 1, line_count),
+    vim.log.levels.INFO
+  )
+  
+  if end_row + 1 > line_count then
+    vim.notify(
+      string.format('Cannot fold: range %d,%d exceeds buffer length %d', 
+        start_row + 1, end_row + 1, line_count),
+      vim.log.levels.WARN
+    )
+    return
+  end
+  
   -- Store fold summary
   M.fold_summaries[bufnr] = M.fold_summaries[bufnr] or {}
   M.fold_summaries[bufnr][start_row] = summary
@@ -56,12 +73,14 @@ function M.create_fold(bufnr, start_row, end_row, summary)
   -- Create the fold
   local ok, err = pcall(function()
     vim.api.nvim_buf_call(bufnr, function()
-      vim.cmd(string.format('%d,%dfold', start_row + 1, end_row + 1))
+      vim.cmd(string.format('%d,%d fold', start_row + 1, end_row + 1))
     end)
   end)
   
   if not ok then
-    vim.notify('Failed to create fold: ' .. tostring(err), vim.log.levels.DEBUG)
+    vim.notify('Fold creation failed: ' .. tostring(err), vim.log.levels.ERROR)
+  else
+    vim.notify(string.format('Fold created: %d,%d', start_row + 1, end_row + 1), vim.log.levels.INFO)
   end
 end
 

@@ -119,16 +119,20 @@ def display_tool_result(tool_result, nvim, logger, append_content_fn, content_bu
         if hasattr(display_tool_call, '_pending') and display_tool_call._pending:
             # Get the most recent pending tool call
             tool_info = display_tool_call._pending.popitem()[1]
+            logger.info(f"Found pending tool call: {tool_info['tool_name']}")
+        else:
+            logger.info("No pending tool call found")
 
-        # Build combined output
+
+        # Build combined output (no leading blank line)
         output_lines = []
         
         if tool_info:
             tool_name = tool_info['tool_name']
             args = tool_info['args']
-            output_lines.append(f"**  {tool_name}**")
+            output_lines.append(f"  🔧 {tool_name}")
             output_lines.append("````")
-            output_lines.append("**Arguments**:\n")
+            output_lines.append("**Arguments**:")
             
             if args:
                 for key, value in args.items():
@@ -137,41 +141,18 @@ def display_tool_result(tool_result, nvim, logger, append_content_fn, content_bu
                     output_lines.append(f"  - `{key}`: `{value}`")
             else:
                 output_lines.append("  (no arguments)")
-
-            output_lines.append("\n")
         
         output_lines.append("**Result**:")
-        output_lines.append("\n")
+        output_lines.append("```")
         output_lines.append(result_str)
+        output_lines.append("```")
         output_lines.append("````")
-        output_lines.append("\n")
         
         # Calculate fold boundaries
         num_lines = len(output_lines)
         
-        def append_and_fold():
-            if content_bufnr is None:
-                append_content_fn(output_lines)
-                return
-                
-            # Get line count before appending
-            start_line = nvim.api.buf_line_count(content_bufnr)
-            
-            # Append the content
-            append_content_fn(output_lines)
-            
-            # Calculate end_line based on how many lines we appended
-            end_line = start_line + num_lines - 1
-            
-            # Create fold if we have multiple lines
-            if end_line > start_line:
-                summary = f"  {tool_info['tool_name'] if tool_info else 'Tool result'}"
-                nvim.exec_lua(
-                    "require('agent_nvim.folds').create_fold(...)",
-                    content_bufnr, start_line, end_line, summary
-                )
-        
-        nvim.async_call(append_and_fold)
+        # Just append without trying to fold (folding timing is complex)
+        nvim.async_call(lambda: append_content_fn(output_lines))
 
     except Exception as e:
         logger.error(f"Error displaying tool result: {e}")
@@ -274,16 +255,17 @@ def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn
             num_lines = len(lines)
 
             def append_and_fold():
-                # Get line count before appending (0-based index where new content starts)
+                # Get line count before appending (this is 1-based count)
+                # buf_line_count returns total lines; next insert is at 0-based index equal to that count
                 start_line = nvim.api.buf_line_count(content_bufnr)
                 
                 # Append the content
                 append_content_fn(lines)
                 
-                # Calculate end_line based on how many lines we appended
+                # Calculate end_line: we appended num_lines, so end is at start + num_lines - 1
                 end_line = start_line + num_lines - 1
                 
-                # Create fold if we have multiple lines
+                # Create fold if we have multiple lines (need start < end, not <=)
                 if end_line > start_line:
                     summary = "Tool result"
                     nvim.exec_lua(
