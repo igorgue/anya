@@ -1,5 +1,7 @@
 # agent.nvim
 
+<!-- Testing something -->
+
 An agentic Neovim plugin powered by the OpenAI Agents SDK.
 
 ## Features
@@ -7,6 +9,7 @@ An agentic Neovim plugin powered by the OpenAI Agents SDK.
 - **Chat Interface**: Split-window layout with streaming responses.
 - **Context Awareness**: Reference files using `@filename` (with autocompletion).
 - **Tools**: The agent can read files, list directories, and search the repository.
+- **Tool Folding**: Tool calls and results are automatically folded to reduce clutter. Use `za` to toggle folds.
 - **Patching**: The agent can propose patches, which you can review and apply.
 - **Project Instructions**: Customize the agent's behavior with `AGENTS.md`.
 
@@ -66,6 +69,16 @@ export AGENT_MODEL="gpt-4-turbo-preview"
 ### Mentions
 
 Type `@` followed by a filename to include its content in your prompt. Use `<C-x><C-u>` (User Completion) to autocomplete file paths.
+
+### Tool Folding
+
+When the agent uses tools (like reading files or searching the repository), the tool calls and their results are displayed in the chat but automatically folded to keep the interface clean. You can:
+
+- Press `za` to toggle a fold open/closed
+- Press `zo` to open a fold
+- Press `zc` to close a fold
+- Press `zR` to open all folds
+- Press `zM` to close all folds
 
 ### Patching
 

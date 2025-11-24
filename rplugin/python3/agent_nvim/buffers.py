@@ -1,0 +1,422 @@
+"""Buffer management for agent.nvim plugin."""
+
+import os
+import subprocess
+import tempfile
+
+
+class BufferManager:
+    """Manages Neovim buffers for agent.nvim plugin."""
+    
+    def __init__(self, nvim, logger):
+        """Initialize buffer manager.
+        
+        Args:
+            nvim: Neovim instance
+            logger: Logger instance
+        """
+        self.nvim = nvim
+        self.logger = logger
+        self.content_buf = None
+        self.prompt_buf = None
+        self._agent_response_started = False
+    
+    def create_layout(self):
+        """Create the agent UI layout with content and prompt buffers."""
+        # Check if buffers already exist
+        content_buf = None
+        prompt_buf = None
+
+        # Try to find existing buffers
+        for buf in self.nvim.buffers:
+            if buf.name.endswith("AgentContent"):
+                content_buf = buf
+            elif buf.name.endswith("AgentPrompt"):
+                prompt_buf = buf
+
+        # Create content buffer if needed
+        if not content_buf or not content_buf.valid:
+            content_buf = self.nvim.api.create_buf(False, True)
+            self.nvim.api.buf_set_name(content_buf, "AgentContent")
+            self.nvim.api.buf_set_option(content_buf, "filetype", "agent-content")
+            self.nvim.api.buf_set_option(content_buf, "buftype", "nofile")
+            self.nvim.api.buf_set_option(content_buf, "swapfile", False)
+            # Set buffer variable to identify this as agent content
+            self.nvim.api.buf_set_var(content_buf, "agent_buffer", "content")
+
+        # Create prompt buffer if needed
+        if not prompt_buf or not prompt_buf.valid:
+            prompt_buf = self.nvim.api.create_buf(False, True)
+            self.nvim.api.buf_set_name(prompt_buf, "AgentPrompt")
+            self.nvim.api.buf_set_option(prompt_buf, "filetype", "agent-prompt")
+            self.nvim.api.buf_set_option(prompt_buf, "buftype", "nofile")
+            self.nvim.api.buf_set_option(prompt_buf, "swapfile", False)
+
+        # Create split layout
+        # Use current buffer instead of new tab
+        self.nvim.command("enew")
+
+        # Set content buffer to current window
+        content_win = self.nvim.api.get_current_win()
+        self.nvim.api.win_set_buf(content_win, content_buf)
+        # Set wrap for content window
+        self.nvim.api.win_set_option(content_win, "wrap", True)
+        self.nvim.api.win_set_option(content_win, "linebreak", True)
+
+        # Create split for prompt
+        self.nvim.command("botright split")
+        self.nvim.command("resize 5")
+        self.nvim.api.win_set_buf(0, prompt_buf)
+
+        # Store buffer handles
+        self.content_buf = content_buf
+        self.prompt_buf = prompt_buf
+
+        # Add welcome message if empty
+        if len(content_buf) <= 1:
+            welcome = [
+                "```",
+                "         ▗       ▘    ",
+                " ▀▌▛▌█▌▛▌▜▘  ▛▌▌▌▌▛▛▌ ",
+                " █▌▙▌▙▖▌▌▐▖▗ ▌▌▚▘▌▌▌▌ ",
+                "   ▄▌                 ",
+                "```",
+                "",
+                "> Type your request in the prompt below.",
+            ]
+            self.nvim.api.buf_set_lines(content_buf, 0, -1, False, welcome)
+
+        # Enable render-markdown for the content buffer
+        self.enable_render_markdown()
+        
+        # Initialize folding for content buffer
+        try:
+            self.nvim.exec_lua("require('agent_nvim.folds').setup(...)", content_buf)
+        except Exception as e:
+            self.logger.error(f"Failed to initialize folds: {e}")
+    
+    def create_diff_buffer(self, patch_str):
+        """Create or update the diff buffer with patch content.
+        
+        Args:
+            patch_str: Patch content as string
+        """
+        # Create or reuse AgentDiff buffer
+        diff_buf = None
+        for buf in self.nvim.buffers:
+            if buf.name.endswith("AgentDiff"):
+                diff_buf = buf
+                break
+
+        if not diff_buf or not diff_buf.valid:
+            diff_buf = self.nvim.api.create_buf(False, True)
+            self.nvim.api.buf_set_name(diff_buf, "AgentDiff")
+            self.nvim.api.buf_set_option(diff_buf, "filetype", "diff")
+            self.nvim.api.buf_set_option(diff_buf, "buftype", "nofile")
+            self.nvim.api.buf_set_option(diff_buf, "swapfile", False)
+
+        # Set content
+        lines = patch_str.split("\n")
+        self.nvim.api.buf_set_lines(diff_buf, 0, -1, False, lines)
+
+        # Open in a split if not visible
+        win_found = False
+        for win in self.nvim.windows:
+            if win.buffer == diff_buf:
+                win_found = True
+                break
+
+        if not win_found:
+            self.nvim.command("vsplit")
+            self.nvim.api.win_set_buf(0, diff_buf)
+            self.nvim.out_write("Patch proposed in AgentDiff buffer.\n")
+    
+    def apply_patch(self):
+        """Apply the patch from the AgentDiff buffer."""
+        # Find AgentDiff buffer
+        diff_buf = None
+        for buf in self.nvim.buffers:
+            if buf.name.endswith("AgentDiff"):
+                diff_buf = buf
+                break
+
+        if not diff_buf or not diff_buf.valid:
+            self.nvim.err_write("No AgentDiff buffer found.\n")
+            return
+
+        # Get content
+        lines = diff_buf[:]
+        patch_content = "\n".join(lines)
+
+        if not patch_content.strip():
+            self.nvim.err_write("AgentDiff buffer is empty.\n")
+            return
+
+        # Apply patch using git apply
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
+                tmp.write(patch_content)
+                tmp_path = tmp.name
+
+            cwd = self.nvim.call("getcwd")
+            cmd = [
+                "git",
+                "apply",
+                "--ignore-space-change",
+                "--ignore-whitespace",
+                tmp_path,
+            ]
+
+            proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+
+            if proc.returncode == 0:
+                self.nvim.out_write("Patch applied successfully!\n")
+                # Close diff buffer/window? Maybe keep it for reference.
+                self.nvim.command("checktime")  # Reload buffers
+            else:
+                self.nvim.err_write(f"Failed to apply patch: {proc.stderr}\n")
+
+            os.remove(tmp_path)
+        except Exception as e:
+            self.nvim.err_write(f"Exception applying patch: {e}\n")
+    
+    def get_completions(self, findstart, base):
+        """Provide file path completions for @mentions.
+        
+        Args:
+            findstart: 1 to find start position, 0 to return matches
+            base: Partial string to complete
+            
+        Returns:
+            Start position (when findstart=1) or list of matches (when findstart=0)
+        """
+        if findstart == 1:
+            # Find start of the word to complete
+            # We want to complete after '@'
+            line = self.nvim.current.line
+            col = self.nvim.current.window.cursor[1]
+
+            # Search backwards for '@'
+            start = -1
+            for i in range(col - 1, -1, -1):
+                if line[i] == "@":
+                    start = i
+                    break
+                if line[i] == " ":  # Stop at space
+                    break
+
+            if start != -1:
+                return start + 1  # Return index after '@'
+            return -1
+        else:
+            # Return list of matches
+            # base is the string after '@'
+            try:
+                cwd = self.nvim.call("getcwd")
+                matches = []
+
+                # Simple recursive search
+                for root, _, filenames in os.walk(cwd):
+                    if ".git" in root:
+                        continue
+                    for filename in filenames:
+                        rel_path = os.path.relpath(os.path.join(root, filename), cwd)
+                        if rel_path.startswith(base):
+                            matches.append(rel_path)
+                            if len(matches) > 50:  # Limit results
+                                break
+                    if len(matches) > 50:
+                        break
+
+                return matches
+            except Exception:
+                return []
+    
+    def append_content(self, lines):
+        """Append one or more lines to the content buffer.
+        
+        Args:
+            lines: List of strings to append
+        """
+        if hasattr(self, "content_buf") and self.content_buf and self.content_buf.valid:
+            # Ensure every item is a single line
+            processed = []
+            for item in lines:
+                if isinstance(item, str) and "\n" in item:
+                    # Split on newlines, keep empty parts (blank lines)
+                    processed.extend([ln for ln in item.split("\n")])
+                else:
+                    processed.append(item)
+            # Write the processed list to the buffer
+            self.nvim.async_call(lambda: self._append_and_scroll(processed))
+            # Enable render-markdown after content is added
+            self.nvim.async_call(self.enable_render_markdown)
+    
+    def _append_and_scroll(self, processed):
+        """Helper to append lines and autoscroll content buffer."""
+        if not hasattr(self, "content_buf") or not self.content_buf or not self.content_buf.valid:
+            return
+
+        # Append lines
+        self.nvim.api.buf_set_lines(self.content_buf, -1, -1, False, processed)
+
+        # Autoscroll to bottom
+        for win in self.nvim.windows:
+            if win.buffer == self.content_buf:
+                line_count = len(
+                    self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+                )
+                win.cursor = (line_count, 0)
+    
+    def append_stream_lua_direct(self, text, bufnr):
+        """Append text using Lua animation for smooth typing effect.
+        
+        Args:
+            text: Text to append
+            bufnr: Buffer number (must be passed in, can't access from async context)
+        """
+        # Handle initial spacing for agent responses
+        # Ensure we start on the blank line that was added after the header
+        if not self._agent_response_started:
+            self._agent_response_started = True
+
+            # Ensure the text starts with a non-empty character to maintain spacing
+            # This works for both chat_completions and responses APIs
+            processed_text = text
+            if text and not text[0].isspace():
+                # If text doesn't start with whitespace, we're already positioned correctly
+                # The blank line after the header provides the spacing
+                pass
+            elif text.startswith("\n"):
+                # If text starts with newlines, remove the extra blank line
+                # since the model is providing its own spacing
+                self.nvim.async_call(self.remove_last_line)
+            # If text starts with other whitespace (space, tab), we're good
+
+        # Escape text for Lua string
+        escaped_text = (
+            text.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("'", "\\'")
+        )
+
+        # Use a timer to animate character-by-character
+        lua_code = f"""
+        local bufnr = {bufnr}
+        local text = "{escaped_text}"
+
+        -- Initialize animation queue if it doesn't exist
+        if not _G.agent_stream_queue then
+            _G.agent_stream_queue = {{}}
+            _G.agent_stream_timer = nil
+        end
+
+        -- Add text to queue
+        table.insert(_G.agent_stream_queue, {{bufnr = bufnr, text = text}})
+
+        -- Start timer if not already running
+        if not _G.agent_stream_timer then
+            local function timer_callback()
+                if #_G.agent_stream_queue == 0 then
+                    _G.agent_stream_timer:stop()
+                    _G.agent_stream_timer = nil
+                    return
+                end
+
+                local item = _G.agent_stream_queue[1]
+                if not vim.api.nvim_buf_is_valid(item.bufnr) then
+                    table.remove(_G.agent_stream_queue, 1)
+                    return
+                end
+
+                -- Vary characters written: mostly 3, sometimes 2 or 4 for irregularity
+                local rand = math.random()
+                local chars_to_write = 3
+                if rand < 0.15 then
+                    chars_to_write = 2  -- 15% slower
+                elseif rand > 0.85 then
+                    chars_to_write = 4  -- 15% faster
+                end
+
+                local chunk = item.text:sub(1, chars_to_write)
+                item.text = item.text:sub(chars_to_write + 1)
+
+                if chunk ~= "" then
+                    local line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                    local last_line_idx = line_count - 1
+                    local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
+                    local last_column = #(last_line[1] or "")
+
+                    local lines = vim.split(chunk, "\\n", {{plain = true}})
+                    vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
+
+                    -- Autoscroll
+                    for _, win in ipairs(vim.api.nvim_list_wins()) do
+                        if vim.api.nvim_win_get_buf(win) == item.bufnr then
+                            local new_line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                            pcall(vim.api.nvim_win_set_cursor, win, {{new_line_count, 0}})
+                        end
+                    end
+                end
+
+                -- Remove item if all text written
+                if item.text == "" then
+                    table.remove(_G.agent_stream_queue, 1)
+                end
+            end
+
+            _G.agent_stream_timer = vim.loop.new_timer()
+            -- Start with random delay and keep repeating with slight variation
+            local base_interval = 15
+            _G.agent_stream_timer:start(math.random(10, 20), base_interval, vim.schedule_wrap(timer_callback))
+        end
+        """
+        try:
+            self.nvim.exec_lua(lua_code)
+        except Exception as e:
+            self.logger.error(f"Error in _append_stream_lua: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+    
+    def remove_last_line(self):
+        """Remove the last line from the content buffer."""
+        if hasattr(self, "content_buf") and self.content_buf and self.content_buf.valid:
+            line_count = len(
+                self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+            )
+            if line_count > 0:
+                self.nvim.api.buf_set_lines(self.content_buf, -2, -1, False, [])
+    
+    def append_cancel_message(self):
+        """Append cancellation message with smart spacing."""
+        if hasattr(self, "content_buf") and self.content_buf and self.content_buf.valid:
+            lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+
+            # Check if there's any response content after the agent header
+            response_started = False
+            if len(lines) > 4:
+                # Check the lines after the header structure
+                for i in range(4, len(lines)):
+                    if lines[i].strip():  # Non-empty line
+                        response_started = True
+                        break
+
+            if response_started:
+                # There's already content, so add the cancellation message with spacing
+                self.append_content(["", "**[Request cancelled by user]**"])
+            else:
+                # No content yet, just add the cancellation message
+                self.append_content(["**[Request cancelled by user]**"])
+    
+    def enable_render_markdown(self):
+        """Enable render-markdown for the content buffer."""
+        try:
+            # Try to enable render-markdown if it's available
+            self.nvim.command("silent! RenderMarkdown enable")
+        except Exception:
+            pass
+    
+    def reset_agent_response_flag(self):
+        """Reset the agent response started flag."""
+        self._agent_response_started = False
