@@ -43,9 +43,8 @@ class AgentPlugin(object):
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
         self.logger.setLevel(logging.INFO)
-        # Queue for text chunks to stream
-        self._text_queue = []
-        self._is_processing_queue = False
+        # Stream buffer for accumulating text
+        self._stream_buffer = ""
         # Conversation history
         self._conversation_history = []
         # Cancellation flag for stopping agent execution
@@ -136,8 +135,8 @@ class AgentPlugin(object):
             self.nvim.api.buf_set_option(prompt_buf, 'swapfile', False)
 
         # Create split layout
-        # Clear current tabpage
-        self.nvim.command('tabnew')
+        # Use current buffer instead of new tab
+        self.nvim.command('enew')
         
         # Set content buffer to current window
         content_win = self.nvim.api.get_current_win()
@@ -353,7 +352,7 @@ class AgentPlugin(object):
             
             # Display agent header with model name
             display_model = model if model else "gpt-4o"
-            self.nvim.async_call(self._append_content, ["", f"## Agent ({display_model})", "", ""])
+            self.nvim.async_call(self._append_content, ["", f"## Agent ({display_model})", ""])
 
             # Build input from conversation history
             # The history already includes the current prompt (added in _handle_user_prompt)
@@ -364,8 +363,8 @@ class AgentPlugin(object):
             # Pass the message list as 'input' parameter
             result_stream = Runner.run_streamed(agent, input=input_messages)
             
-            # Accumulate all text and send it via queue
-            stream_buffer = []
+            # Cache buffer number before async loop (can't access nvim API from async context)
+            content_bufnr = self.content_buf.handle if hasattr(self.content_buf, 'handle') else self.content_buf.number
             
             async for event in result_stream.stream_events():
                 # Check for cancellation
@@ -384,14 +383,9 @@ class AgentPlugin(object):
                     # Only process actual output text, not reasoning/thinking
                     if data_type == 'ResponseTextDeltaEvent':
                         delta = data.delta
-                        if delta:  # Only accumulate non-empty deltas
-                            stream_buffer.append(delta)
-                            
-                            # Send every few deltas to get streaming effect
-                            if len(stream_buffer) >= 3:
-                                text_to_send = ''.join(stream_buffer)
-                                stream_buffer = []
-                                self._queue_text(text_to_send)
+                        if delta:
+                            # Just send the delta directly - let vim.schedule handle it
+                            self._append_stream_lua_direct(delta, content_bufnr)
                     # Skip ResponseReasoningSummaryTextDeltaEvent - that's internal thinking
                     
                 elif event_type == 'RawChatCompletionsStreamEvent':
@@ -402,20 +396,10 @@ class AgentPlugin(object):
                     if data_type == 'ChatCompletionsTextDeltaEvent':
                         delta = data.delta
                         if delta:
-                            stream_buffer.append(delta)
-                            
-                            if len(stream_buffer) >= 3:
-                                text_to_send = ''.join(stream_buffer)
-                                stream_buffer = []
-                                self._queue_text(text_to_send)
+                            self._append_stream_lua_direct(delta, content_bufnr)
                 
                 if result_stream.is_complete:
                     break
-            
-            # Flush any remaining text
-            if stream_buffer:
-                text_to_send = ''.join(stream_buffer)
-                self._queue_text(text_to_send)
             
             # Get the final output and add it to conversation history
             # After the stream completes, RunResultStreaming has final_output attribute
@@ -638,29 +622,84 @@ class AgentPlugin(object):
             except Exception:
                 return []
 
-    def _queue_text(self, text):
-        """Queue text to be written to buffer, ensuring order."""
-        self._text_queue.append(text)
-        # Only trigger processing if not already processing
-        if not self._is_processing_queue:
-            self._is_processing_queue = True
-            self.nvim.async_call(self._process_next_from_queue)
     
-    def _process_next_from_queue(self):
-        """Process the next item from queue."""
-        if not self._text_queue:
-            self._is_processing_queue = False
-            return
+    def _append_stream_lua_direct(self, text, bufnr):
+        """Append text using Lua animation for smooth typing effect.
         
-        # Get next text from queue
-        text = self._text_queue.pop(0)
-        self._append_stream(text)
+        Args:
+            text: Text to append
+            bufnr: Buffer number (must be passed in, can't access from async context)
+        """
+        # Escape text for Lua string
+        escaped_text = text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace("'", "\\'") 
         
-        # Schedule processing of next item
-        if self._text_queue:
-            self.nvim.async_call(self._process_next_from_queue)
-        else:
-            self._is_processing_queue = False
+        # Use a timer to animate character-by-character
+        lua_code = f'''
+        local bufnr = {bufnr}
+        local text = "{escaped_text}"
+        
+        -- Initialize animation queue if it doesn't exist
+        if not _G.agent_stream_queue then
+            _G.agent_stream_queue = {{}}
+            _G.agent_stream_timer = nil
+        end
+        
+        -- Add text to queue
+        table.insert(_G.agent_stream_queue, {{bufnr = bufnr, text = text}})
+        
+        -- Start timer if not already running
+        if not _G.agent_stream_timer then
+            _G.agent_stream_timer = vim.loop.new_timer()
+            _G.agent_stream_timer:start(0, 15, vim.schedule_wrap(function()
+                if #_G.agent_stream_queue == 0 then
+                    _G.agent_stream_timer:stop()
+                    _G.agent_stream_timer = nil
+                    return
+                end
+                
+                local item = _G.agent_stream_queue[1]
+                if not vim.api.nvim_buf_is_valid(item.bufnr) then
+                    table.remove(_G.agent_stream_queue, 1)
+                    return
+                end
+                
+                -- Take 3 characters at a time for smooth but not too slow animation
+                local chars_to_write = 3
+                local chunk = item.text:sub(1, chars_to_write)
+                item.text = item.text:sub(chars_to_write + 1)
+                
+                if chunk ~= "" then
+                    local line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                    local last_line_idx = line_count - 1
+                    local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
+                    local last_column = #(last_line[1] or "")
+                    
+                    local lines = vim.split(chunk, "\\n", {{plain = true}})
+                    vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
+                    
+                    -- Autoscroll
+                    for _, win in ipairs(vim.api.nvim_list_wins()) do
+                        if vim.api.nvim_win_get_buf(win) == item.bufnr then
+                            local new_line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                            pcall(vim.api.nvim_win_set_cursor, win, {{new_line_count, 0}})
+                        end
+                    end
+                end
+                
+                -- Remove item if all text written
+                if item.text == "" then
+                    table.remove(_G.agent_stream_queue, 1)
+                end
+            end))
+        end
+        '''
+        
+        try:
+            self.nvim.exec_lua(lua_code)
+        except Exception as e:
+            self.logger.error(f"Error in _append_stream_lua: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
     
     def _append_stream(self, text):
         """Append text to the content buffer using nvim_buf_set_text.
@@ -701,6 +740,7 @@ class AgentPlugin(object):
             self.logger.error(f"Error in _append_stream: {e}")
             import traceback
             self.logger.error(traceback.format_exc())
+    
 
     def _remove_last_line(self):
         """Remove the last line from the content buffer."""
