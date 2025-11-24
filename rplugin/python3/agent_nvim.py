@@ -245,26 +245,32 @@ class AgentPlugin(object):
         try:
             # Import from current Python environment
             try:
-                from agents import Agent, Runner, function_tool
-                import openai
+                from agents import Agent, Runner, function_tool, set_default_openai_client, set_default_openai_api, set_tracing_disabled
+                from openai import AsyncOpenAI
             except ImportError as e:
                 # Debug: show sys.path and error
                 debug_msg = f"ImportError: {e}\nPython: {sys.executable}\nsys.path: {sys.path}"
                 self.nvim.async_call(self._append_content, ["Error: agents not installed. Run :AgentInstall.", debug_msg])
                 return
 
-            # Configure OpenAI with custom base URL and API key if provided
-            client_kwargs = {}
+            # Configure custom OpenAI client if base URL or API key provided
             base_url = os.environ.get('AGENT_BASE_URL')
-            if base_url:
-                client_kwargs['base_url'] = base_url
-            
             api_key = os.environ.get('AGENT_API_KEY') or os.environ.get('OPENAI_API_KEY')
-            if api_key:
-                client_kwargs['api_key'] = api_key
             
-            # Create client if we have custom configuration
-            client = openai.OpenAI(**client_kwargs) if client_kwargs else openai.OpenAI()
+            if base_url or api_key:
+                client_kwargs = {}
+                if base_url:
+                    client_kwargs['base_url'] = base_url
+                if api_key:
+                    client_kwargs['api_key'] = api_key
+                
+                # Create custom client and set it as default
+                custom_client = AsyncOpenAI(**client_kwargs)
+                set_default_openai_client(custom_client, use_for_tracing=False)
+                # Use chat completions API for non-OpenAI providers
+                set_default_openai_api("chat_completions")
+                # Disable tracing for custom providers
+                set_tracing_disabled(True)
             
             # Get model from environment or use default
             model = os.environ.get('AGENT_MODEL')
