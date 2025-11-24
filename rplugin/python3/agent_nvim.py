@@ -165,8 +165,7 @@ class AgentPlugin(object):
                 "/_/   \\_\\____|_____|_| \\_| |_|(_)|_| \\_|  \\_/  |___|_|  |_|",
                 "```",
                 "",
-                "Type your request in the prompt below.",
-                ""
+                "> Type your request in the prompt below.",
             ]
             self.nvim.api.buf_set_lines(content_buf, 0, -1, False, welcome)
             
@@ -352,7 +351,15 @@ class AgentPlugin(object):
             
             # Display agent header with model name
             display_model = model if model else "gpt-4o"
-            self.nvim.async_call(self._append_content, ["", f"## Agent ({display_model})", ""])
+            
+            # Reset the agent response started flag for intelligent spacing
+            if hasattr(self, '_agent_response_started'):
+                delattr(self, '_agent_response_started')
+            
+            # Add agent header with proper spacing
+            # Add two blank lines after the header for consistent spacing
+            header_lines = ["", f"## Agent ({display_model})", "", ""]
+            self.nvim.async_call(self._append_content, header_lines)
 
             # Build input from conversation history
             # The history already includes the current prompt (added in _handle_user_prompt)
@@ -630,8 +637,26 @@ class AgentPlugin(object):
             text: Text to append
             bufnr: Buffer number (must be passed in, can't access from async context)
         """
+        # Handle initial spacing for agent responses
+        # Ensure we start on the blank line that was added after the header
+        if not hasattr(self, '_agent_response_started'):
+            self._agent_response_started = True
+            
+            # Ensure the text starts with a non-empty character to maintain spacing
+            # This works for both chat_completions and responses APIs
+            processed_text = text
+            if text and not text[0].isspace():
+                # If text doesn't start with whitespace, we're already positioned correctly
+                # The blank line after the header provides the spacing
+                pass
+            elif text.startswith('\n'):
+                # If text starts with newlines, remove the extra blank line
+                # since the model is providing its own spacing
+                self.nvim.async_call(self._remove_last_line)
+            # If text starts with other whitespace (space, tab), we're good
+        
         # Escape text for Lua string
-        escaped_text = text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace("'", "\\'") 
+        escaped_text = text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace("'", "\\'")
         
         # Use a timer to animate character-by-character
         lua_code = f'''
@@ -649,8 +674,7 @@ class AgentPlugin(object):
         
         -- Start timer if not already running
         if not _G.agent_stream_timer then
-            _G.agent_stream_timer = vim.loop.new_timer()
-            _G.agent_stream_timer:start(0, 15, vim.schedule_wrap(function()
+            local function timer_callback()
                 if #_G.agent_stream_queue == 0 then
                     _G.agent_stream_timer:stop()
                     _G.agent_stream_timer = nil
@@ -663,8 +687,15 @@ class AgentPlugin(object):
                     return
                 end
                 
-                -- Take 3 characters at a time for smooth but not too slow animation
+                -- Vary characters written: mostly 3, sometimes 2 or 4 for irregularity
+                local rand = math.random()
                 local chars_to_write = 3
+                if rand < 0.15 then
+                    chars_to_write = 2  -- 15% slower
+                elseif rand > 0.85 then
+                    chars_to_write = 4  -- 15% faster
+                end
+                
                 local chunk = item.text:sub(1, chars_to_write)
                 item.text = item.text:sub(chars_to_write + 1)
                 
@@ -690,7 +721,12 @@ class AgentPlugin(object):
                 if item.text == "" then
                     table.remove(_G.agent_stream_queue, 1)
                 end
-            end))
+            end
+            
+            _G.agent_stream_timer = vim.loop.new_timer()
+            -- Start with random delay and keep repeating with slight variation
+            local base_interval = 15
+            _G.agent_stream_timer:start(math.random(10, 20), base_interval, vim.schedule_wrap(timer_callback))
         end
         '''
         
@@ -748,6 +784,8 @@ class AgentPlugin(object):
             line_count = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
             if line_count > 0:
                 self.nvim.api.buf_set_lines(self.content_buf, -2, -1, False, [])
+    
+
 
     def _enable_render_markdown(self):
         """Enable render-markdown for the content buffer."""
@@ -769,8 +807,8 @@ class AgentPlugin(object):
             processed = []
             for item in lines:
                 if isinstance(item, str) and '\n' in item:
-                    # Split on newlines, keep non‑empty parts
-                    processed.extend([ln for ln in item.split('\n') if ln != ''])
+                    # Split on newlines, keep empty parts (blank lines)
+                    processed.extend([ln for ln in item.split('\n')])
                 else:
                     processed.append(item)
             # Write the processed list to the buffer

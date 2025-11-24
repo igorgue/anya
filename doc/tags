@@ -1,4 +1,5 @@
 AgentApply	agent.txt	/*AgentApply*
+AgentCancel	agent.txt	/*AgentCancel*
 AgentInstall	agent.txt	/*AgentInstall*
 AgentOpen	agent.txt	/*AgentOpen*
 AgentTestImport	agent.txt	/*AgentTestImport*
