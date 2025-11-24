@@ -635,19 +635,19 @@ class AgentPlugin(object):
                     break
 
                 event_type = type(event).__name__
-                
+
                 # Debug: Log all event types to see what we get
                 self.logger.info(f"Event type: {event_type}")
-                
+
                 if event_type == "RawResponsesStreamEvent":
                     data = event.data
                     data_type = type(data).__name__
-                    
+
                     # Debug: Log all data types in responses
                     self.logger.info(f"Responses data type: {data_type}")
-                    if hasattr(data, '__dict__'):
+                    if hasattr(data, "__dict__"):
                         self.logger.info(f"Data attributes: {data.__dict__.keys()}")
-                    
+
                     # Only process actual output text, not reasoning/thinking
                     if data_type == "ResponseTextDeltaEvent":
                         delta = data.delta
@@ -655,14 +655,18 @@ class AgentPlugin(object):
                             # Just send the delta directly - let vim.schedule handle it
                             self._append_stream_lua_direct(delta, content_bufnr)
                     # Skip ResponseReasoningSummaryTextDeltaEvent - that's internal thinking
-                    
+
                     # Check for tool-related events in responses API
                     elif "Tool" in data_type or "tool" in data_type.lower():
                         self.logger.info(f"Tool event in responses: {data_type}")
                         self._handle_tool_event(event, content_bufnr)
-                    
+
                     # Look for other potential tool-related events
-                    elif data_type in ["ResponseToolCallEvent", "ResponseToolCallDeltaEvent", "ResponseToolCallOutputEvent"]:
+                    elif data_type in [
+                        "ResponseToolCallEvent",
+                        "ResponseToolCallDeltaEvent",
+                        "ResponseToolCallOutputEvent",
+                    ]:
                         self.logger.info(f"Found tool-related event: {data_type}")
                         self._handle_tool_event(event, content_bufnr)
                     else:
@@ -673,14 +677,14 @@ class AgentPlugin(object):
                     # Handle chat completions API events
                     data = event.data
                     data_type = type(data).__name__
-                    
+
                     self.logger.info(f"Chat completions data type: {data_type}")
 
                     if data_type == "ChatCompletionsTextDeltaEvent":
                         delta = data.delta
                         if delta:
                             self._append_stream_lua_direct(delta, content_bufnr)
-                    
+
                     # Handle tool call events in chat completions
                     elif data_type == "ChatCompletionsToolCallDeltaEvent":
                         self.logger.info(f"Tool call delta: {data}")
@@ -693,20 +697,22 @@ class AgentPlugin(object):
                         self._handle_tool_call_output(data, content_bufnr)
                     else:
                         # Log unknown event types for debugging
-                        self.logger.info(f"Unhandled chat completion event: {data_type}")
-                        if hasattr(data, '__dict__'):
+                        self.logger.info(
+                            f"Unhandled chat completion event: {data_type}"
+                        )
+                        if hasattr(data, "__dict__"):
                             self.logger.info(f"Data attributes: {data.__dict__.keys()}")
 
                 # Handle RunItemStreamEvent - this is where tool calls appear during streaming
                 elif event_type == "RunItemStreamEvent":
-                    if hasattr(event, 'item'):
+                    if hasattr(event, "item"):
                         item_type = type(event.item).__name__
                         self.logger.info(f"RunItemStreamEvent with item: {item_type}")
-                        
+
                         # Process tool call items as they stream
                         if "ToolCall" in item_type or "Tool" in item_type:
                             self._handle_tool_item(event.item, content_bufnr)
-                
+
                 # Handle other tool-related events
                 elif "ToolCall" in event_type:
                     self.logger.info(f"ToolCall event: {event_type}")
@@ -1091,32 +1097,39 @@ class AgentPlugin(object):
         try:
             event_str = str(event)
             self.logger.info(f"Tool event: {event_str}")
-            
+
             # Check if this is a tool call event
-            if hasattr(event, 'data'):
+            if hasattr(event, "data"):
                 data = event.data
-                
+
                 # Look for tool call information
-                if hasattr(data, '__dict__'):
+                if hasattr(data, "__dict__"):
                     data_dict = data.__dict__
-                    
+
                     # Check for tool name
-                    tool_name = data_dict.get('name') or data_dict.get('tool_name')
+                    tool_name = data_dict.get("name") or data_dict.get("tool_name")
                     if tool_name:
                         self._display_tool_call(tool_name, data_dict, content_bufnr)
                         return
-                    
+
                     # Check for tool call results
-                    if 'result' in data_dict or 'output' in data_dict:
-                        tool_result = data_dict.get('result') or data_dict.get('output')
+                    if "result" in data_dict or "output" in data_dict:
+                        tool_result = data_dict.get("result") or data_dict.get("output")
                         if tool_result:
                             self._display_tool_result(tool_result, content_bufnr)
                             return
-            
+
             # Fallback: look for tool indicators in event string
-            if any(indicator in event_str.lower() for indicator in ['tool_call', 'tool_call_id', 'function_call']):
-                self.nvim.async_call(lambda: self._append_content(["\n🔧 **Tool call detected**", f"Event: {event_str[:200]}..."]))
-                
+            if any(
+                indicator in event_str.lower()
+                for indicator in ["tool_call", "tool_call_id", "function_call"]
+            ):
+                self.nvim.async_call(
+                    lambda: self._append_content(
+                        ["\n🔧 **Tool call detected**", f"Event: {event_str[:200]}..."]
+                    )
+                )
+
         except Exception as e:
             self.logger.error(f"Error handling tool event: {e}")
 
@@ -1124,15 +1137,15 @@ class AgentPlugin(object):
         """Display a formatted tool call."""
         try:
             # Extract tool arguments
-            args = tool_data.get('arguments') or tool_data.get('args') or {}
-            
+            args = tool_data.get("arguments") or tool_data.get("args") or {}
+
             # Format tool call message
             tool_lines = [
                 "",
                 "🔧 **Calling tool**:",
                 f"   `{tool_name}`",
             ]
-            
+
             if args:
                 tool_lines.append("   **Arguments**:")
                 for key, value in args.items():
@@ -1140,11 +1153,11 @@ class AgentPlugin(object):
                     if isinstance(value, str) and len(value) > 100:
                         value = value[:100] + "..."
                     tool_lines.append(f"   - `{key}`: `{value}`")
-            
+
             tool_lines.append("")
-            
+
             self.nvim.async_call(lambda: self._append_content(tool_lines))
-            
+
         except Exception as e:
             self.logger.error(f"Error displaying tool call: {e}")
 
@@ -1156,22 +1169,15 @@ class AgentPlugin(object):
                 result_str = tool_result
             else:
                 result_str = str(tool_result)
-            
+
             # Truncate very long results
             if len(result_str) > 1000:
                 result_str = result_str[:1000] + "..."
-            
-            result_lines = [
-                "",
-                "✅ **Tool result**:",
-                "```",
-                result_str,
-                "```",
-                ""
-            ]
-            
+
+            result_lines = ["", "✅ **Tool result**:", "```", result_str, "```", ""]
+
             self.nvim.async_call(lambda: self._append_content(result_lines))
-            
+
         except Exception as e:
             self.logger.error(f"Error displaying tool result: {e}")
 
@@ -1179,23 +1185,24 @@ class AgentPlugin(object):
         """Handle tool call delta events."""
         try:
             # Check if this is the start of a tool call (has arguments but no output yet)
-            if hasattr(data, 'arguments') and data.arguments:
-                tool_name = getattr(data, 'name', 'unknown_tool')
+            if hasattr(data, "arguments") and data.arguments:
+                tool_name = getattr(data, "name", "unknown_tool")
                 arguments = data.arguments
-                
+
                 # Display the tool call
                 lines = ["", "🔧 **Calling tool**: `" + tool_name + "`"]
-                
+
                 if arguments:
                     lines.append("**Arguments**:")
                     # Arguments might be JSON or plain text
                     try:
                         import json
+
                         if isinstance(arguments, str):
                             parsed_args = json.loads(arguments)
                         else:
                             parsed_args = arguments
-                        
+
                         for key, value in parsed_args.items():
                             if isinstance(value, str) and len(value) > 100:
                                 value = value[:100] + "..."
@@ -1207,10 +1214,10 @@ class AgentPlugin(object):
                         else:
                             args_str = str(arguments)
                         lines.append(f"  - `arguments`: `{args_str}`")
-                
+
                 lines.append("")
                 self.nvim.async_call(lambda: self._append_content(lines))
-                
+
         except Exception as e:
             self.logger.error(f"Error handling tool call delta: {e}")
 
@@ -1225,15 +1232,15 @@ class AgentPlugin(object):
     def _handle_tool_call_output(self, data, content_bufnr):
         """Handle tool call output events."""
         try:
-            if hasattr(data, 'output') and data.output:
+            if hasattr(data, "output") and data.output:
                 output = data.output
-                
+
                 # Format the output
                 if isinstance(output, str):
                     output_str = output
                 else:
                     output_str = str(output)
-                
+
                 # Handle long outputs with folding
                 if len(output_str) > 500:
                     lines = [
@@ -1247,7 +1254,7 @@ class AgentPlugin(object):
                         "",
                         "</details>",
                         "",
-                        ""  # Extra blank line as requested
+                        "",  # Extra blank line as requested
                     ]
                 else:
                     lines = [
@@ -1256,11 +1263,11 @@ class AgentPlugin(object):
                         output_str,
                         "```",
                         "",
-                        ""  # Extra blank line as requested
+                        "",  # Extra blank line as requested
                     ]
-                
+
                 self.nvim.async_call(lambda: self._append_content(lines))
-                
+
         except Exception as e:
             self.logger.error(f"Error handling tool call output: {e}")
 
@@ -1269,16 +1276,18 @@ class AgentPlugin(object):
         try:
             event_str = str(event)
             self.logger.info(f"Tool call event: {event_str}")
-            
+
             # Try to extract tool information from the event
-            if hasattr(event, 'data'):
+            if hasattr(event, "data"):
                 data = event.data
-                tool_name = getattr(data, 'name', None) or getattr(data, 'tool_name', None)
-                
+                tool_name = getattr(data, "name", None) or getattr(
+                    data, "tool_name", None
+                )
+
                 if tool_name:
                     lines = ["", "🔧 **Tool call event**: `" + tool_name + "`"]
                     self.nvim.async_call(lambda: self._append_content(lines))
-                    
+
         except Exception as e:
             self.logger.error(f"Error handling tool call event: {e}")
 
@@ -1287,70 +1296,91 @@ class AgentPlugin(object):
         try:
             item_type = type(item).__name__
             self.logger.info(f"Processing tool item: {item_type}")
-            
+
             # Log all attributes to understand the structure
-            if hasattr(item, '__dict__'):
+            if hasattr(item, "__dict__"):
                 self.logger.info(f"  All attributes: {list(item.__dict__.keys())}")
                 for attr_name, attr_value in item.__dict__.items():
-                    if attr_name in ['tool_call', 'function_call', 'tool_name', 'name', 'output']:
-                        self.logger.info(f"    {attr_name}: {type(attr_value).__name__} = {str(attr_value)[:100]}...")
-            
+                    if attr_name in [
+                        "tool_call",
+                        "function_call",
+                        "tool_name",
+                        "name",
+                        "output",
+                    ]:
+                        self.logger.info(
+                            f"    {attr_name}: {type(attr_value).__name__} = {str(attr_value)[:100]}..."
+                        )
+
             if item_type == "ToolCallItem":
                 # This is a tool call item - check different attribute names
                 tool_name = None
                 arguments = None
 
                 # Prefer extracting from raw_item (what the SDK wraps)
-                raw = getattr(item, 'raw_item', None)
+                raw = getattr(item, "raw_item", None)
                 try:
                     if raw is not None:
                         self.logger.info(f"  raw_item type: {type(raw).__name__}")
                         # OpenAI Agents Python: raw.function.name, raw.function.arguments
-                        func = getattr(raw, 'function', None)
+                        func = getattr(raw, "function", None)
                         if func is None and isinstance(raw, dict):
-                            func = raw.get('function')
+                            func = raw.get("function")
                         if func is not None:
-                            tool_name = getattr(func, 'name', None) if not isinstance(func, dict) else func.get('name')
-                            arguments = getattr(func, 'arguments', None) if not isinstance(func, dict) else func.get('arguments')
+                            tool_name = (
+                                getattr(func, "name", None)
+                                if not isinstance(func, dict)
+                                else func.get("name")
+                            )
+                            arguments = (
+                                getattr(func, "arguments", None)
+                                if not isinstance(func, dict)
+                                else func.get("arguments")
+                            )
                         # Fallbacks: raw has name/arguments directly
                         if not tool_name:
                             if isinstance(raw, dict):
-                                tool_name = raw.get('name')
-                                arguments = arguments or raw.get('arguments')
+                                tool_name = raw.get("name")
+                                arguments = arguments or raw.get("arguments")
                             else:
-                                tool_name = getattr(raw, 'name', None)
-                                arguments = arguments or getattr(raw, 'arguments', None)
+                                tool_name = getattr(raw, "name", None)
+                                arguments = arguments or getattr(raw, "arguments", None)
                 except Exception as e:
                     self.logger.info(f"  Failed to parse raw_item: {e}")
-                
+
                 # If still unknown, try other possible attribute names on the wrapper
                 if not tool_name:
-                    for attr in ['tool_call', 'function_call', 'tool_name', 'name']:
+                    for attr in ["tool_call", "function_call", "tool_name", "name"]:
                         val = getattr(item, attr, None)
                         if val is None:
                             continue
-                        if attr == 'name' and isinstance(val, str):
+                        if attr == "name" and isinstance(val, str):
                             tool_name = val
                             break
-                        if hasattr(val, 'name'):
-                            tool_name = getattr(val, 'name')
-                        if hasattr(val, 'arguments'):
-                            arguments = getattr(val, 'arguments')
+                        if hasattr(val, "name"):
+                            tool_name = getattr(val, "name")
+                        if hasattr(val, "arguments"):
+                            arguments = getattr(val, "arguments")
                         if isinstance(val, dict):
-                            tool_name = tool_name or val.get('name')
-                            arguments = arguments or val.get('arguments')
+                            tool_name = tool_name or val.get("name")
+                            arguments = arguments or val.get("arguments")
                         if tool_name:
                             break
-                
+
                 if tool_name:
                     self.logger.info(f"Displaying tool call for: {tool_name}")
                     lines = ["", "🔧 **Calling tool**: `" + tool_name + "`"]
-                    
+
                     if arguments:
                         lines.append("**Arguments**:")
                         try:
                             import json
-                            args_dict = json.loads(arguments) if isinstance(arguments, str) else arguments
+
+                            args_dict = (
+                                json.loads(arguments)
+                                if isinstance(arguments, str)
+                                else arguments
+                            )
                             for key, value in args_dict.items():
                                 if isinstance(value, str) and len(value) > 100:
                                     value = value[:100] + "..."
@@ -1361,25 +1391,27 @@ class AgentPlugin(object):
                             else:
                                 args_str = str(arguments)
                                 lines.append(f"  - `arguments`: `{args_str}`")
-                    
+
                     lines.append("")
                     # Use Lua queue to maintain order with streaming text
                     tool_text = "\n".join(lines)
                     self._append_stream_lua_direct(tool_text, content_bufnr)
                 else:
-                    self.logger.warning(f"ToolCallItem found but could not extract tool name")
-            elif hasattr(item, 'output') or item_type == "ToolCallOutputItem":
+                    self.logger.warning(
+                        "ToolCallItem found but could not extract tool name"
+                    )
+            elif hasattr(item, "output") or item_type == "ToolCallOutputItem":
                 # This is a tool result item
-                output = getattr(item, 'output', None)
+                output = getattr(item, "output", None)
                 if output is None:
                     # Try other possible output attributes
-                    for attr in ['result', 'content', 'text']:
+                    for attr in ["result", "content", "text"]:
                         if hasattr(item, attr):
                             output = getattr(item, attr)
                             break
-                
+
                 output_str = str(output) if output else "No output"
-                
+
                 if len(output_str) > 500:
                     lines = [
                         "✅ **Tool result**: [" + str(len(output_str)) + " characters]",
@@ -1392,7 +1424,7 @@ class AgentPlugin(object):
                         "",
                         "</details>",
                         "",
-                        ""  # Extra blank line as requested
+                        "",  # Extra blank line as requested
                     ]
                 else:
                     lines = [
@@ -1401,18 +1433,19 @@ class AgentPlugin(object):
                         output_str,
                         "```",
                         "",
-                        ""  # Extra blank line as requested
+                        "",  # Extra blank line as requested
                     ]
-                
+
                 # Use Lua queue to maintain order with streaming text
                 result_text = "\n".join(lines)
                 self._append_stream_lua_direct(result_text, content_bufnr)
             else:
                 # This might be a different type of item
                 self.logger.info(f"Item {item_type} has no expected tool attributes")
-                
+
         except Exception as e:
             self.logger.error(f"Error handling tool item: {e}")
+
     def _append_stream(self, text):
         """Append text to the content buffer using nvim_buf_set_text.
 
