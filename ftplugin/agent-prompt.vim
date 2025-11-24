@@ -8,5 +8,9 @@ setlocal wrap
 nnoremap <buffer> <silent> <CR> :AgentSubmit<CR>
 inoremap <buffer> <silent> <CR> <Esc>:AgentSubmit<CR>
 
+" Map Ctrl+C to cancel
+nnoremap <buffer> <silent> <C-c> :AgentCancel<CR>
+inoremap <buffer> <silent> <C-c> <Esc>:AgentCancel<CR>
+
 " Set completion function
 setlocal completefunc=AgentComplete

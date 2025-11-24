@@ -5,6 +5,7 @@ import subprocess
 import asyncio
 import logging
 import json
+import uuid
 from typing import List, Dict, Any, Optional
 
 # Constants
@@ -42,6 +43,14 @@ class AgentPlugin(object):
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
         self.logger.setLevel(logging.INFO)
+        # Queue for text chunks to stream
+        self._text_queue = []
+        self._is_processing_queue = False
+        # Conversation history
+        self._conversation_history = []
+        # Cancellation flag for stopping agent execution
+        self._cancel_requested = False
+        self._current_request_id = None
 
     def _setup_path(self):
         # Dependencies should already be available in the current Python environment
@@ -115,7 +124,6 @@ class AgentPlugin(object):
             self.nvim.api.buf_set_option(content_buf, 'filetype', 'agent-content')
             self.nvim.api.buf_set_option(content_buf, 'buftype', 'nofile')
             self.nvim.api.buf_set_option(content_buf, 'swapfile', False)
-            self.nvim.api.buf_set_option(content_buf, 'wrap', True)
             # Set buffer variable to identify this as agent content
             self.nvim.api.buf_set_var(content_buf, 'agent_buffer', 'content')
 
@@ -132,7 +140,11 @@ class AgentPlugin(object):
         self.nvim.command('tabnew')
         
         # Set content buffer to current window
-        self.nvim.api.win_set_buf(0, content_buf)
+        content_win = self.nvim.api.get_current_win()
+        self.nvim.api.win_set_buf(content_win, content_buf)
+        # Set wrap for content window
+        self.nvim.api.win_set_option(content_win, 'wrap', True)
+        self.nvim.api.win_set_option(content_win, 'linebreak', True)
         
         # Create split for prompt
         self.nvim.command('botright split')
@@ -181,13 +193,26 @@ class AgentPlugin(object):
         else:
             self._handle_user_prompt(text)
 
+    @pynvim.command('AgentCancel', sync=False)
+    def agent_cancel(self):
+        """Cancels the currently running agent request."""
+        if self._current_request_id and not self._cancel_requested:
+            self._cancel_requested = True
+            self.nvim.async_call(self._append_content, ["\n**[Request cancelled by user]**\n"])
+        elif not self._current_request_id:
+            self.nvim.out_write("No active agent request to cancel.\n")
+
     def _handle_slash_command(self, text):
         cmd = text.split()[0]
         if cmd == "/clear":
             if hasattr(self, 'content_buf') and self.content_buf.valid:
                 self.nvim.async_call(self.nvim.api.buf_set_lines, self.content_buf, 0, -1, False, [])
+            # Clear conversation history
+            self._conversation_history = []
+        elif cmd == "/cancel":
+            self.agent_cancel()
         elif cmd == "/help":
-            self._append_content(["", "### Help", "- `/clear`: Clear chat history", "- `/help`: Show this message", ""])
+            self._append_content(["", "### Help", "- `/clear`: Clear chat history", "- `/cancel`: Cancel current request", "- `/help`: Show this message", ""])
         else:
             self._append_content([f"Unknown command: {cmd}"])
 
@@ -206,8 +231,18 @@ class AgentPlugin(object):
         # Let's show the user text.
         self._append_content(["", f"## {username}", "", text])
         
+        # Add user message to conversation history
+        self._conversation_history.append({"role": "user", "content": resolved_text})
+        
+        # Generate unique request ID for fidget tracking
+        request_id = str(uuid.uuid4())
+        
+        # Reset cancellation flag and set current request ID
+        self._cancel_requested = False
+        self._current_request_id = request_id
+        
         # Run agent in background
-        asyncio.create_task(self._run_agent(resolved_text))
+        asyncio.create_task(self._run_agent(resolved_text, request_id))
 
     def _resolve_mentions(self, text: str) -> str:
         """Replaces @file mentions with file content."""
@@ -241,7 +276,18 @@ class AgentPlugin(object):
                     pass
         return ""
 
-    async def _run_agent(self, prompt):
+    async def _run_agent(self, prompt, request_id=None):
+        request_id = request_id or str(uuid.uuid4())
+        model = os.environ.get('AGENT_MODEL', 'gpt-4o')
+        
+        # Emit fidget start event
+        self._emit_user_event('AgentRequestStarted', {
+            'id': request_id,
+            'model': model
+        })
+        
+        status = 'error'  # Default to error, will be set to success if completion succeeds
+        
         try:
             # Import from current Python environment
             try:
@@ -251,6 +297,7 @@ class AgentPlugin(object):
                 # Debug: show sys.path and error
                 debug_msg = f"ImportError: {e}\nPython: {sys.executable}\nsys.path: {sys.path}"
                 self.nvim.async_call(self._append_content, ["Error: agents not installed. Run :AgentInstall.", debug_msg])
+                self._emit_user_event('AgentRequestFinished', {'id': request_id, 'status': 'error'})
                 return
 
             # Configure custom OpenAI client if base URL or API key provided
@@ -267,13 +314,18 @@ class AgentPlugin(object):
                 # Create custom client and set it as default
                 custom_client = AsyncOpenAI(**client_kwargs)
                 set_default_openai_client(custom_client, use_for_tracing=False)
-                # Use chat completions API for non-OpenAI providers
-                set_default_openai_api("chat_completions")
-                # Disable tracing for custom providers
-                set_tracing_disabled(True)
+                
+                # Allow choosing API type via environment variable
+                # Options: 'responses' (default) or 'chat_completions'
+                api_type = os.environ.get('AGENT_API_TYPE', 'responses')
+                set_default_openai_api(api_type)
+                
+                # Disable tracing for custom providers by default
+                if os.environ.get('AGENT_DISABLE_TRACING', '1') == '1':
+                    set_tracing_disabled(True)
             
-            # Get model from environment or use default
-            model = os.environ.get('AGENT_MODEL')
+            # Model already set at the start of this function
+            # model = os.environ.get('AGENT_MODEL')
 
             # Load instructions
             base_instructions = "You are a helpful AI assistant embedded in Neovim. You can read files, list files, search the repository, and propose patches."
@@ -288,12 +340,11 @@ class AgentPlugin(object):
             search_repo_tool = function_tool(self._tool_search_repo)
             apply_patch_tool = function_tool(self._tool_apply_patch)
 
-            # Initialize Agent with optional model and client
+            # Initialize Agent with optional model
             agent_kwargs = {
                 "name": "Neovim Agent",
                 "instructions": full_instructions,
-                "tools": [read_file_tool, list_files_tool, search_repo_tool, apply_patch_tool],
-                "client": client
+                "tools": [read_file_tool, list_files_tool, search_repo_tool, apply_patch_tool]
             }
             if model:
                 agent_kwargs['model'] = model
@@ -304,42 +355,96 @@ class AgentPlugin(object):
             display_model = model if model else "gpt-4o"
             self.nvim.async_call(self._append_content, ["", f"## Agent ({display_model})", "", ""])
 
-            # Run the agent with streaming
-            result_stream = Runner.run_streamed(agent, input=prompt)
+            # Build input from conversation history
+            # The history already includes the current prompt (added in _handle_user_prompt)
+            # Convert to input list format expected by the SDK
+            input_messages = self._conversation_history.copy()
+
+            # Run the agent with streaming and conversation history
+            # Pass the message list as 'input' parameter
+            result_stream = Runner.run_streamed(agent, input=input_messages)
             
-            # Accumulate streaming text and update periodically to avoid race conditions
-            accumulated_text = ""
-            update_counter = 0
+            # Accumulate all text and send it via queue
+            stream_buffer = []
             
             async for event in result_stream.stream_events():
+                # Check for cancellation
+                if self._cancel_requested:
+                    self.logger.info(f"Agent request {request_id} cancelled by user")
+                    status = 'cancelled'
+                    break
+                
                 event_type = type(event).__name__
                 
-                # Accumulate text deltas
+                # Handle different event types for different APIs
                 if event_type == 'RawResponsesStreamEvent':
                     data = event.data
                     data_type = type(data).__name__
                     
+                    # Only process actual output text, not reasoning/thinking
                     if data_type == 'ResponseTextDeltaEvent':
-                        accumulated_text += data.delta
-                        update_counter += 1
-                        
-                        # Update every 5 deltas to reduce race conditions while still showing progress
-                        if update_counter >= 5:
-                            self.nvim.async_call(self._append_stream, accumulated_text)
-                            accumulated_text = ""
-                            update_counter = 0
+                        delta = data.delta
+                        if delta:  # Only accumulate non-empty deltas
+                            stream_buffer.append(delta)
+                            
+                            # Send every few deltas to get streaming effect
+                            if len(stream_buffer) >= 3:
+                                text_to_send = ''.join(stream_buffer)
+                                stream_buffer = []
+                                self._queue_text(text_to_send)
+                    # Skip ResponseReasoningSummaryTextDeltaEvent - that's internal thinking
+                    
+                elif event_type == 'RawChatCompletionsStreamEvent':
+                    # Handle chat completions API events
+                    data = event.data
+                    data_type = type(data).__name__
+                    
+                    if data_type == 'ChatCompletionsTextDeltaEvent':
+                        delta = data.delta
+                        if delta:
+                            stream_buffer.append(delta)
+                            
+                            if len(stream_buffer) >= 3:
+                                text_to_send = ''.join(stream_buffer)
+                                stream_buffer = []
+                                self._queue_text(text_to_send)
                 
                 if result_stream.is_complete:
                     break
             
-            # Flush any remaining text after loop completes
-            if accumulated_text:
-                self.nvim.async_call(self._append_stream, accumulated_text)
+            # Flush any remaining text
+            if stream_buffer:
+                text_to_send = ''.join(stream_buffer)
+                self._queue_text(text_to_send)
+            
+            # Get the final output and add it to conversation history
+            # After the stream completes, RunResultStreaming has final_output attribute
+            if hasattr(result_stream, 'final_output') and result_stream.final_output:
+                self._conversation_history.append({
+                    "role": "assistant",
+                    "content": str(result_stream.final_output)
+                })
+            
+            # Agent completed successfully (unless cancelled)
+            if not self._cancel_requested:
+                status = 'success'
 
         except Exception as e:
             import traceback
             self.logger.error(f"Agent run failed: {e}\n{traceback.format_exc()}")
             self.nvim.async_call(self._append_content, [f"\nError: {str(e)}"])
+            status = 'error'
+        finally:
+            # Clear current request ID
+            if self._current_request_id == request_id:
+                self._current_request_id = None
+                self._cancel_requested = False
+            
+            # Emit fidget finish event
+            self._emit_user_event('AgentRequestFinished', {
+                'id': request_id,
+                'status': status
+            })
 
     # --- Tools ---
 
@@ -533,8 +638,32 @@ class AgentPlugin(object):
             except Exception:
                 return []
 
+    def _queue_text(self, text):
+        """Queue text to be written to buffer, ensuring order."""
+        self._text_queue.append(text)
+        # Only trigger processing if not already processing
+        if not self._is_processing_queue:
+            self._is_processing_queue = True
+            self.nvim.async_call(self._process_next_from_queue)
+    
+    def _process_next_from_queue(self):
+        """Process the next item from queue."""
+        if not self._text_queue:
+            self._is_processing_queue = False
+            return
+        
+        # Get next text from queue
+        text = self._text_queue.pop(0)
+        self._append_stream(text)
+        
+        # Schedule processing of next item
+        if self._text_queue:
+            self.nvim.async_call(self._process_next_from_queue)
+        else:
+            self._is_processing_queue = False
+    
     def _append_stream(self, text):
-        """Append text (possibly with newlines) to the content buffer.
+        """Append text to the content buffer using nvim_buf_set_text.
         
         This method is called through nvim.async_call, so all nvim API calls here are safe.
         """
@@ -542,47 +671,36 @@ class AgentPlugin(object):
             return
             
         try:
-            # Get current buffer content
-            all_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+            # Get the last line and column
+            line_count = self.nvim.api.buf_line_count(self.content_buf)
+            last_line_idx = line_count - 1  # 0-indexed
             
-            if not all_lines:
-                all_lines = ['']
+            # Get the last line content to find the column
+            last_line_content = self.nvim.api.buf_get_lines(self.content_buf, last_line_idx, last_line_idx + 1, False)
+            if not last_line_content:
+                last_column = 0
+            else:
+                last_column = len(last_line_content[0])
             
-            # Check if we should autoscroll (user is at the end of buffer)
-            should_scroll = False
+            # Split text into lines
+            lines = text.split('\n')
+            
+            # Use buf_set_text to insert at the current position
+            # This API inserts text at (line, col) without replacing the whole buffer
+            self.nvim.api.buf_set_text(self.content_buf, last_line_idx, last_column, last_line_idx, last_column, lines)
+            
+            # Autoscroll to bottom
             for win in self.nvim.windows:
                 if win.buffer == self.content_buf:
-                    cursor = win.cursor
-                    # If cursor is on last line or close to it, autoscroll
-                    if cursor[0] >= len(all_lines) - 2:
-                        should_scroll = True
-                        break
-            
-            # Append text to the last line
-            last_line = all_lines[-1]
-            combined = last_line + text
-            
-            # Split on newlines
-            if '\n' in combined:
-                parts = combined.split('\n')
-                # Replace last line with all parts
-                new_lines = all_lines[:-1] + parts
-            else:
-                # Just update the last line
-                new_lines = all_lines[:-1] + [combined]
-            
-            # Write back the entire buffer
-            self.nvim.api.buf_set_lines(self.content_buf, 0, -1, False, new_lines)
-            
-            # Autoscroll if user was at the end
-            if should_scroll:
-                for win in self.nvim.windows:
-                    if win.buffer == self.content_buf:
-                        # Move cursor to last line
-                        new_line_count = len(new_lines)
+                    try:
+                        new_line_count = self.nvim.api.buf_line_count(self.content_buf)
                         win.cursor = (new_line_count, 0)
+                    except Exception:
+                        pass
         except Exception as e:
             self.logger.error(f"Error in _append_stream: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
 
     def _remove_last_line(self):
         """Remove the last line from the content buffer."""
@@ -637,4 +755,20 @@ class AgentPlugin(object):
             if win.buffer == self.content_buf:
                 line_count = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
                 win.cursor = (line_count, 0)
+    
+    def _emit_user_event(self, event_name, data):
+        """Emit a User autocommand event with data for fidget integration."""
+        try:
+            # Serialize data to JSON
+            data_json = json.dumps(data)
+            # Escape single quotes for Vim command
+            data_json_escaped = data_json.replace("'", "''")
+            # Execute doautocmd with data
+            self.nvim.async_call(
+                lambda: self.nvim.exec_lua(
+                    f"vim.api.nvim_exec_autocmds('User', {{pattern = '{event_name}', data = vim.fn.json_decode('{data_json_escaped}')}})"
+                )
+            )
+        except Exception as e:
+            self.logger.error(f"Error emitting user event {event_name}: {e}")
 

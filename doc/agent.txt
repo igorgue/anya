@@ -63,8 +63,11 @@ Ensure you have your OpenAI API key set in your environment:
 5. If the agent proposes a patch, it will appear in a new `AgentDiff` buffer.
    Review it and run `:AgentApply` to apply the changes.
 
+6. To cancel a running request, press `<C-c>` or use the `/cancel` command.
+
 Slash Commands:
     /clear      Clear the chat history.
+    /cancel     Cancel the current agent request.
     /help       Show help message.
 
 ==============================================================================
@@ -81,6 +84,9 @@ Slash Commands:
 
 :AgentApply                                                      *AgentApply*
     Applies the patch currently shown in the `AgentDiff` buffer.
+
+:AgentCancel                                                    *AgentCancel*
+    Cancels the currently running agent request.
 
 ==============================================================================
 5. Configuration                                                *agent-config*
