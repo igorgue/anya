@@ -12,27 +12,6 @@ PLUGIN_NAME = "agent.nvim"
 VENV_DIR = os.path.expanduser(f"~/.local/share/{PLUGIN_NAME}/venv")
 
 
-# Mock Agent/Runner if import fails (for development/fallback)
-class MockAgent:
-    def __init__(self, name, instructions, tools=None):
-        self.name = name
-        self.instructions = instructions
-        self.tools = tools or []
-
-
-class MockRunner:
-    @staticmethod
-    def run(agent, messages):
-        # Mock response
-        return MockResult(messages)
-
-
-class MockResult:
-    def __init__(self, messages):
-        self.messages = messages
-        self.final_response = "This is a mock response from the agent."
-
-
 @pynvim.plugin
 class AgentPlugin(object):
     def __init__(self, nvim):
@@ -178,8 +157,8 @@ class AgentPlugin(object):
         # Add welcome message if empty
         if len(content_buf) <= 1:
             welcome = [
-                "",
                 "```",
+                "         ▗       ▘    ",
                 " ▀▌▛▌█▌▛▌▜▘  ▛▌▌▌▌▛▛▌ ",
                 " █▌▙▌▙▖▌▌▐▖▗ ▌▌▚▘▌▌▌▌ ",
                 "   ▄▌                 ",
@@ -372,7 +351,7 @@ class AgentPlugin(object):
                             params={
                                 "url": server_config["url"],
                                 "headers": server_config.get("headers", {}),
-                                "timeout": server_config.get("timeout", 10),
+                                "timeout": server_config.get("timeout", 30),
                             },
                             cache_tools_list=server_config.get(
                                 "cache_tools_list", True
@@ -393,6 +372,7 @@ class AgentPlugin(object):
                             params={
                                 "url": server_config["url"],
                                 "headers": server_config.get("headers", {}),
+                                "timeout": server_config.get("timeout", 45),
                             },
                             cache_tools_list=server_config.get(
                                 "cache_tools_list", True
@@ -532,10 +512,55 @@ class AgentPlugin(object):
 
             # Load MCP servers
             mcp_servers = self._load_mcp_servers()
+
+            # Initialize and connect MCP servers if available
             if mcp_servers:
-                full_instructions += (
-                    "\n\nAdditional MCP tools are available for enhanced capabilities."
-                )
+                connected_servers = []
+                try:
+                    # Connect all MCP servers
+                    for server in mcp_servers:
+                        try:
+                            self.logger.info(f"Connecting to MCP server: {server.name}")
+
+                            # Check if server has connect method
+                            if hasattr(server, "connect"):
+                                await server.connect()
+                                self.logger.info(
+                                    f"Successfully connected to MCP server: {server.name}"
+                                )
+                                connected_servers.append(server)
+                            else:
+                                self.logger.warning(
+                                    f"MCP server {server.name} does not have connect method, skipping connection"
+                                )
+                                # Still add to connected_servers if it might auto-connect
+                                connected_servers.append(server)
+
+                        except Exception as server_error:
+                            self.logger.error(
+                                f"Failed to connect MCP server {server.name}: {server_error}"
+                            )
+                            # Continue with other servers even if one fails
+                            continue
+
+                    if connected_servers:
+                        self.logger.info(
+                            f"Successfully connected to {len(connected_servers)} MCP servers"
+                        )
+                        full_instructions += (
+                            f"\n\nAdditional MCP tools are available for enhanced capabilities "
+                            f"(loaded {len(connected_servers)} MCP servers: {[s.name for s in connected_servers]})."
+                        )
+                        # Update mcp_servers to only include connected ones
+                        mcp_servers = connected_servers
+                    else:
+                        self.logger.warning("No MCP servers could be connected")
+                        mcp_servers = []
+
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize MCP servers: {e}")
+                    # Continue without MCP servers if connection fails
+                    mcp_servers = []
 
             # Create tools - wrap instance methods with function_tool
             read_file_tool = function_tool(self._tool_read_file)
@@ -610,12 +635,19 @@ class AgentPlugin(object):
                     break
 
                 event_type = type(event).__name__
-
-                # Handle different event types for different APIs
+                
+                # Debug: Log all event types to see what we get
+                self.logger.info(f"Event type: {event_type}")
+                
                 if event_type == "RawResponsesStreamEvent":
                     data = event.data
                     data_type = type(data).__name__
-
+                    
+                    # Debug: Log all data types in responses
+                    self.logger.info(f"Responses data type: {data_type}")
+                    if hasattr(data, '__dict__'):
+                        self.logger.info(f"Data attributes: {data.__dict__.keys()}")
+                    
                     # Only process actual output text, not reasoning/thinking
                     if data_type == "ResponseTextDeltaEvent":
                         delta = data.delta
@@ -623,16 +655,68 @@ class AgentPlugin(object):
                             # Just send the delta directly - let vim.schedule handle it
                             self._append_stream_lua_direct(delta, content_bufnr)
                     # Skip ResponseReasoningSummaryTextDeltaEvent - that's internal thinking
+                    
+                    # Check for tool-related events in responses API
+                    elif "Tool" in data_type or "tool" in data_type.lower():
+                        self.logger.info(f"Tool event in responses: {data_type}")
+                        self._handle_tool_event(event, content_bufnr)
+                    
+                    # Look for other potential tool-related events
+                    elif data_type in ["ResponseToolCallEvent", "ResponseToolCallDeltaEvent", "ResponseToolCallOutputEvent"]:
+                        self.logger.info(f"Found tool-related event: {data_type}")
+                        self._handle_tool_event(event, content_bufnr)
+                    else:
+                        # Log unknown types for debugging
+                        self.logger.debug(f"Other responses event: {data_type}")
 
                 elif event_type == "RawChatCompletionsStreamEvent":
                     # Handle chat completions API events
                     data = event.data
                     data_type = type(data).__name__
+                    
+                    self.logger.info(f"Chat completions data type: {data_type}")
 
                     if data_type == "ChatCompletionsTextDeltaEvent":
                         delta = data.delta
                         if delta:
                             self._append_stream_lua_direct(delta, content_bufnr)
+                    
+                    # Handle tool call events in chat completions
+                    elif data_type == "ChatCompletionsToolCallDeltaEvent":
+                        self.logger.info(f"Tool call delta: {data}")
+                        self._handle_tool_call_delta(data, content_bufnr)
+                    elif data_type == "ChatCompletionsToolCallEndEvent":
+                        self.logger.info(f"Tool call end: {data}")
+                        self._handle_tool_call_end(data, content_bufnr)
+                    elif data_type == "ChatCompletionsToolCallOutputEvent":
+                        self.logger.info(f"Tool call output: {data}")
+                        self._handle_tool_call_output(data, content_bufnr)
+                    else:
+                        # Log unknown event types for debugging
+                        self.logger.info(f"Unhandled chat completion event: {data_type}")
+                        if hasattr(data, '__dict__'):
+                            self.logger.info(f"Data attributes: {data.__dict__.keys()}")
+
+                # Handle RunItemStreamEvent - this is where tool calls appear during streaming
+                elif event_type == "RunItemStreamEvent":
+                    if hasattr(event, 'item'):
+                        item_type = type(event.item).__name__
+                        self.logger.info(f"RunItemStreamEvent with item: {item_type}")
+                        
+                        # Process tool call items as they stream
+                        if "ToolCall" in item_type or "Tool" in item_type:
+                            self._handle_tool_item(event.item, content_bufnr)
+                
+                # Handle other tool-related events
+                elif "ToolCall" in event_type:
+                    self.logger.info(f"ToolCall event: {event_type}")
+                    self._handle_tool_call_event(event, content_bufnr)
+                elif "Tool" in event_type:
+                    self.logger.info(f"Tool event: {event_type}")
+                    self._handle_tool_event(event, content_bufnr)
+                else:
+                    # Log other event types for debugging
+                    self.logger.debug(f"Other event type: {event_type}")
 
                 if result_stream.is_complete:
                     break
@@ -655,6 +739,32 @@ class AgentPlugin(object):
             self.nvim.async_call(self._append_content, [f"\nError: {str(e)}"])
             status = "error"
         finally:
+            # Cleanup MCP servers if they were connected
+            if "mcp_servers" in locals() and mcp_servers:
+                try:
+                    for server in mcp_servers:
+                        try:
+                            if hasattr(server, "disconnect"):
+                                self.logger.info(
+                                    f"Disconnecting MCP server: {server.name}"
+                                )
+                                await server.disconnect()
+                                self.logger.info(
+                                    f"Successfully disconnected MCP server: {server.name}"
+                                )
+                            else:
+                                self.logger.debug(
+                                    f"MCP server {server.name} does not have disconnect method"
+                                )
+                        except Exception as server_error:
+                            self.logger.error(
+                                f"Failed to disconnect MCP server {server.name}: {server_error}"
+                            )
+                            # Continue with other cleanup even if one fails
+                            continue
+                except Exception as e:
+                    self.logger.error(f"Failed to cleanup MCP servers: {e}")
+
             # Clear current request ID
             if self._current_request_id == request_id:
                 self._current_request_id = None
@@ -968,7 +1078,6 @@ class AgentPlugin(object):
             _G.agent_stream_timer:start(math.random(10, 20), base_interval, vim.schedule_wrap(timer_callback))
         end
         """
-
         try:
             self.nvim.exec_lua(lua_code)
         except Exception as e:
@@ -977,6 +1086,333 @@ class AgentPlugin(object):
 
             self.logger.error(traceback.format_exc())
 
+    def _handle_tool_event(self, event, content_bufnr):
+        """Handle tool-related events and display tool calls."""
+        try:
+            event_str = str(event)
+            self.logger.info(f"Tool event: {event_str}")
+            
+            # Check if this is a tool call event
+            if hasattr(event, 'data'):
+                data = event.data
+                
+                # Look for tool call information
+                if hasattr(data, '__dict__'):
+                    data_dict = data.__dict__
+                    
+                    # Check for tool name
+                    tool_name = data_dict.get('name') or data_dict.get('tool_name')
+                    if tool_name:
+                        self._display_tool_call(tool_name, data_dict, content_bufnr)
+                        return
+                    
+                    # Check for tool call results
+                    if 'result' in data_dict or 'output' in data_dict:
+                        tool_result = data_dict.get('result') or data_dict.get('output')
+                        if tool_result:
+                            self._display_tool_result(tool_result, content_bufnr)
+                            return
+            
+            # Fallback: look for tool indicators in event string
+            if any(indicator in event_str.lower() for indicator in ['tool_call', 'tool_call_id', 'function_call']):
+                self.nvim.async_call(lambda: self._append_content(["\n🔧 **Tool call detected**", f"Event: {event_str[:200]}..."]))
+                
+        except Exception as e:
+            self.logger.error(f"Error handling tool event: {e}")
+
+    def _display_tool_call(self, tool_name, tool_data, content_bufnr):
+        """Display a formatted tool call."""
+        try:
+            # Extract tool arguments
+            args = tool_data.get('arguments') or tool_data.get('args') or {}
+            
+            # Format tool call message
+            tool_lines = [
+                "",
+                "🔧 **Calling tool**:",
+                f"   `{tool_name}`",
+            ]
+            
+            if args:
+                tool_lines.append("   **Arguments**:")
+                for key, value in args.items():
+                    # Truncate long values
+                    if isinstance(value, str) and len(value) > 100:
+                        value = value[:100] + "..."
+                    tool_lines.append(f"   - `{key}`: `{value}`")
+            
+            tool_lines.append("")
+            
+            self.nvim.async_call(lambda: self._append_content(tool_lines))
+            
+        except Exception as e:
+            self.logger.error(f"Error displaying tool call: {e}")
+
+    def _display_tool_result(self, tool_result, content_bufnr):
+        """Display a formatted tool result."""
+        try:
+            # Format result
+            if isinstance(tool_result, str):
+                result_str = tool_result
+            else:
+                result_str = str(tool_result)
+            
+            # Truncate very long results
+            if len(result_str) > 1000:
+                result_str = result_str[:1000] + "..."
+            
+            result_lines = [
+                "",
+                "✅ **Tool result**:",
+                "```",
+                result_str,
+                "```",
+                ""
+            ]
+            
+            self.nvim.async_call(lambda: self._append_content(result_lines))
+            
+        except Exception as e:
+            self.logger.error(f"Error displaying tool result: {e}")
+
+    def _handle_tool_call_delta(self, data, content_bufnr):
+        """Handle tool call delta events."""
+        try:
+            # Check if this is the start of a tool call (has arguments but no output yet)
+            if hasattr(data, 'arguments') and data.arguments:
+                tool_name = getattr(data, 'name', 'unknown_tool')
+                arguments = data.arguments
+                
+                # Display the tool call
+                lines = ["", "🔧 **Calling tool**: `" + tool_name + "`"]
+                
+                if arguments:
+                    lines.append("**Arguments**:")
+                    # Arguments might be JSON or plain text
+                    try:
+                        import json
+                        if isinstance(arguments, str):
+                            parsed_args = json.loads(arguments)
+                        else:
+                            parsed_args = arguments
+                        
+                        for key, value in parsed_args.items():
+                            if isinstance(value, str) and len(value) > 100:
+                                value = value[:100] + "..."
+                            lines.append(f"  - `{key}`: `{value}`")
+                    except:
+                        # Fallback to displaying raw arguments
+                        if len(str(arguments)) > 200:
+                            args_str = str(arguments)[:200] + "..."
+                        else:
+                            args_str = str(arguments)
+                        lines.append(f"  - `arguments`: `{args_str}`")
+                
+                lines.append("")
+                self.nvim.async_call(lambda: self._append_content(lines))
+                
+        except Exception as e:
+            self.logger.error(f"Error handling tool call delta: {e}")
+
+    def _handle_tool_call_end(self, data, content_bufnr):
+        """Handle tool call end events."""
+        try:
+            # Tool call completed, ready for result
+            pass  # Result will be handled by output events
+        except Exception as e:
+            self.logger.error(f"Error handling tool call end: {e}")
+
+    def _handle_tool_call_output(self, data, content_bufnr):
+        """Handle tool call output events."""
+        try:
+            if hasattr(data, 'output') and data.output:
+                output = data.output
+                
+                # Format the output
+                if isinstance(output, str):
+                    output_str = output
+                else:
+                    output_str = str(output)
+                
+                # Handle long outputs with folding
+                if len(output_str) > 500:
+                    lines = [
+                        "✅ **Tool result**: [" + str(len(output_str)) + " characters]",
+                        "<details>",
+                        "<summary>Click to expand</summary>",
+                        "",
+                        "```",
+                        output_str,
+                        "```",
+                        "",
+                        "</details>",
+                        "",
+                        ""  # Extra blank line as requested
+                    ]
+                else:
+                    lines = [
+                        "✅ **Tool result**:",
+                        "```",
+                        output_str,
+                        "```",
+                        "",
+                        ""  # Extra blank line as requested
+                    ]
+                
+                self.nvim.async_call(lambda: self._append_content(lines))
+                
+        except Exception as e:
+            self.logger.error(f"Error handling tool call output: {e}")
+
+    def _handle_tool_call_event(self, event, content_bufnr):
+        """Handle generic tool call events."""
+        try:
+            event_str = str(event)
+            self.logger.info(f"Tool call event: {event_str}")
+            
+            # Try to extract tool information from the event
+            if hasattr(event, 'data'):
+                data = event.data
+                tool_name = getattr(data, 'name', None) or getattr(data, 'tool_name', None)
+                
+                if tool_name:
+                    lines = ["", "🔧 **Tool call event**: `" + tool_name + "`"]
+                    self.nvim.async_call(lambda: self._append_content(lines))
+                    
+        except Exception as e:
+            self.logger.error(f"Error handling tool call event: {e}")
+
+    def _handle_tool_item(self, item, content_bufnr):
+        """Handle tool call items from result_stream.new_items."""
+        try:
+            item_type = type(item).__name__
+            self.logger.info(f"Processing tool item: {item_type}")
+            
+            # Log all attributes to understand the structure
+            if hasattr(item, '__dict__'):
+                self.logger.info(f"  All attributes: {list(item.__dict__.keys())}")
+                for attr_name, attr_value in item.__dict__.items():
+                    if attr_name in ['tool_call', 'function_call', 'tool_name', 'name', 'output']:
+                        self.logger.info(f"    {attr_name}: {type(attr_value).__name__} = {str(attr_value)[:100]}...")
+            
+            if item_type == "ToolCallItem":
+                # This is a tool call item - check different attribute names
+                tool_name = None
+                arguments = None
+
+                # Prefer extracting from raw_item (what the SDK wraps)
+                raw = getattr(item, 'raw_item', None)
+                try:
+                    if raw is not None:
+                        self.logger.info(f"  raw_item type: {type(raw).__name__}")
+                        # OpenAI Agents Python: raw.function.name, raw.function.arguments
+                        func = getattr(raw, 'function', None)
+                        if func is None and isinstance(raw, dict):
+                            func = raw.get('function')
+                        if func is not None:
+                            tool_name = getattr(func, 'name', None) if not isinstance(func, dict) else func.get('name')
+                            arguments = getattr(func, 'arguments', None) if not isinstance(func, dict) else func.get('arguments')
+                        # Fallbacks: raw has name/arguments directly
+                        if not tool_name:
+                            if isinstance(raw, dict):
+                                tool_name = raw.get('name')
+                                arguments = arguments or raw.get('arguments')
+                            else:
+                                tool_name = getattr(raw, 'name', None)
+                                arguments = arguments or getattr(raw, 'arguments', None)
+                except Exception as e:
+                    self.logger.info(f"  Failed to parse raw_item: {e}")
+                
+                # If still unknown, try other possible attribute names on the wrapper
+                if not tool_name:
+                    for attr in ['tool_call', 'function_call', 'tool_name', 'name']:
+                        val = getattr(item, attr, None)
+                        if val is None:
+                            continue
+                        if attr == 'name' and isinstance(val, str):
+                            tool_name = val
+                            break
+                        if hasattr(val, 'name'):
+                            tool_name = getattr(val, 'name')
+                        if hasattr(val, 'arguments'):
+                            arguments = getattr(val, 'arguments')
+                        if isinstance(val, dict):
+                            tool_name = tool_name or val.get('name')
+                            arguments = arguments or val.get('arguments')
+                        if tool_name:
+                            break
+                
+                if tool_name:
+                    self.logger.info(f"Displaying tool call for: {tool_name}")
+                    lines = ["", "🔧 **Calling tool**: `" + tool_name + "`"]
+                    
+                    if arguments:
+                        lines.append("**Arguments**:")
+                        try:
+                            import json
+                            args_dict = json.loads(arguments) if isinstance(arguments, str) else arguments
+                            for key, value in args_dict.items():
+                                if isinstance(value, str) and len(value) > 100:
+                                    value = value[:100] + "..."
+                                lines.append(f"  - `{key}`: `{value}`")
+                        except:
+                            if len(str(arguments)) > 200:
+                                args_str = str(arguments)[:200] + "..."
+                            else:
+                                args_str = str(arguments)
+                                lines.append(f"  - `arguments`: `{args_str}`")
+                    
+                    lines.append("")
+                    # Use Lua queue to maintain order with streaming text
+                    tool_text = "\n".join(lines)
+                    self._append_stream_lua_direct(tool_text, content_bufnr)
+                else:
+                    self.logger.warning(f"ToolCallItem found but could not extract tool name")
+            elif hasattr(item, 'output') or item_type == "ToolCallOutputItem":
+                # This is a tool result item
+                output = getattr(item, 'output', None)
+                if output is None:
+                    # Try other possible output attributes
+                    for attr in ['result', 'content', 'text']:
+                        if hasattr(item, attr):
+                            output = getattr(item, attr)
+                            break
+                
+                output_str = str(output) if output else "No output"
+                
+                if len(output_str) > 500:
+                    lines = [
+                        "✅ **Tool result**: [" + str(len(output_str)) + " characters]",
+                        "<details>",
+                        "<summary>Click to expand</summary>",
+                        "",
+                        "```",
+                        output_str,
+                        "```",
+                        "",
+                        "</details>",
+                        "",
+                        ""  # Extra blank line as requested
+                    ]
+                else:
+                    lines = [
+                        "✅ **Tool result**:",
+                        "```",
+                        output_str,
+                        "```",
+                        "",
+                        ""  # Extra blank line as requested
+                    ]
+                
+                # Use Lua queue to maintain order with streaming text
+                result_text = "\n".join(lines)
+                self._append_stream_lua_direct(result_text, content_bufnr)
+            else:
+                # This might be a different type of item
+                self.logger.info(f"Item {item_type} has no expected tool attributes")
+                
+        except Exception as e:
+            self.logger.error(f"Error handling tool item: {e}")
     def _append_stream(self, text):
         """Append text to the content buffer using nvim_buf_set_text.
 
