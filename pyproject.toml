@@ -1,0 +1,9 @@
+[project]
+name = "agent-nvim"
+version = "0.1.0"
+description = "Neovim Agent Plugin"
+dependencies = [
+    "pynvim",
+    "openai",
+    "openai-agents",
+]

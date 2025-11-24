@@ -1,0 +1,11 @@
+AgentApply	agent.txt	/*AgentApply*
+AgentInstall	agent.txt	/*AgentInstall*
+AgentOpen	agent.txt	/*AgentOpen*
+AgentTestImport	agent.txt	/*AgentTestImport*
+agent-commands	agent.txt	/*agent-commands*
+agent-config	agent.txt	/*agent-config*
+agent-contents	agent.txt	/*agent-contents*
+agent-install	agent.txt	/*agent-install*
+agent-intro	agent.txt	/*agent-intro*
+agent-usage	agent.txt	/*agent-usage*
+agent.txt	agent.txt	/*agent.txt*

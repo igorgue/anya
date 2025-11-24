@@ -1,0 +1,93 @@
+*agent.txt*  Neovim Agent Plugin
+
+Author: Igor
+License: MIT
+
+CONTENTS                                                      *agent-contents*
+
+1. Introduction ............................................. |agent-intro|
+2. Installation ............................................. |agent-install|
+3. Usage .................................................... |agent-usage|
+4. Commands ................................................. |agent-commands|
+5. Configuration ............................................ |agent-config|
+
+==============================================================================
+1. Introduction                                                  *agent-intro*
+
+agent.nvim is an AI assistant plugin for Neovim, powered by the OpenAI Agents
+SDK. It provides a split-window interface where you can chat with an agent
+that has access to your codebase.
+
+Features:
+- Chat interface with streaming responses.
+- Access to file system (read, list, search).
+- Patching capability (propose and apply patches).
+- Context awareness via `@file` mentions.
+- Project-specific instructions via `AGENTS.md`.
+
+==============================================================================
+2. Installation                                                *agent-install*
+
+Using lazy.nvim:
+>lua
+    {
+        "igor/agent.nvim",
+        build = ":UpdateRemotePlugins",
+        cmd = "AgentOpen",
+    }
+<
+
+After installation, run:
+    :AgentInstall
+
+This will create a virtual environment and install the necessary Python
+dependencies (`openai-agents`, `pynvim`, `openai`).
+
+Ensure you have your OpenAI API key set in your environment:
+    export OPENAI_API_KEY="sk-..."
+
+==============================================================================
+3. Usage                                                         *agent-usage*
+
+1. Open the agent interface:
+    :AgentOpen
+
+2. Type your query in the bottom prompt buffer.
+   - Use `@file` to reference files (e.g., `@README.md`).
+   - Press `<C-x><C-u>` (or your completion key) to autocomplete file paths.
+
+3. Press `<Enter>` to submit.
+
+4. The agent will stream its response in the top content buffer.
+
+5. If the agent proposes a patch, it will appear in a new `AgentDiff` buffer.
+   Review it and run `:AgentApply` to apply the changes.
+
+Slash Commands:
+    /clear      Clear the chat history.
+    /help       Show help message.
+
+==============================================================================
+4. Commands                                                   *agent-commands*
+
+:AgentOpen                                                        *AgentOpen*
+    Opens the agent interface (Content and Prompt buffers).
+
+:AgentInstall                                                  *AgentInstall*
+    Installs Python dependencies in a local virtual environment.
+
+:AgentTestImport                                            *AgentTestImport*
+    Verifies that dependencies can be imported.
+
+:AgentApply                                                      *AgentApply*
+    Applies the patch currently shown in the `AgentDiff` buffer.
+
+==============================================================================
+5. Configuration                                                *agent-config*
+
+Project Instructions:
+    Create a file named `AGENTS.md` or `.agent/instructions.md` in your
+    project root. The content of this file will be prepended to the agent's
+    system instructions.
+
+vim:tw=78:ts=8:ft=help:norl:
