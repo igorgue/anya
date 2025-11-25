@@ -113,7 +113,7 @@ class AgentPlugin(object):
         # Get content from prompt buffer
         prompt_buf = self.nvim.current.buffer
         lines = prompt_buf[:]
-        text = "\\n".join(lines).strip()
+        text = "\n".join(lines).strip()
 
         if not text:
             return

@@ -5,7 +5,7 @@ import json
 
 def handle_tool_event(event, content_bufnr, nvim, logger, append_content_fn):
     """Handle tool-related events and display tool calls.
-    
+
     Args:
         event: Tool event from the agent
         content_bufnr: Buffer number for content display
@@ -28,14 +28,23 @@ def handle_tool_event(event, content_bufnr, nvim, logger, append_content_fn):
                 # Check for tool name
                 tool_name = data_dict.get("name") or data_dict.get("tool_name")
                 if tool_name:
-                    display_tool_call(tool_name, data_dict, nvim, logger, append_content_fn, content_bufnr)
+                    display_tool_call(
+                        tool_name,
+                        data_dict,
+                        nvim,
+                        logger,
+                        append_content_fn,
+                        content_bufnr,
+                    )
                     return
 
                 # Check for tool call results
                 if "result" in data_dict or "output" in data_dict:
                     tool_result = data_dict.get("result") or data_dict.get("output")
                     if tool_result:
-                        display_tool_result(tool_result, nvim, logger, append_content_fn, content_bufnr)
+                        display_tool_result(
+                            tool_result, nvim, logger, append_content_fn, content_bufnr
+                        )
                         return
 
         # Fallback: look for tool indicators in event string
@@ -53,9 +62,11 @@ def handle_tool_event(event, content_bufnr, nvim, logger, append_content_fn):
         logger.error(f"Error handling tool event: {e}")
 
 
-def display_tool_call(tool_name, tool_data, nvim, logger, append_content_fn, content_bufnr=None):
+def display_tool_call(
+    tool_name, tool_data, nvim, logger, append_content_fn, content_bufnr=None
+):
     """Store tool call info for later combination with result.
-    
+
     Args:
         tool_name: Name of the tool being called
         tool_data: Dictionary containing tool data
@@ -77,25 +88,27 @@ def display_tool_call(tool_name, tool_data, nvim, logger, append_content_fn, con
                 args = {"arguments": args}
 
         # Store pending tool call to be combined with result
-        if not hasattr(display_tool_call, '_pending'):
+        if not hasattr(display_tool_call, "_pending"):
             display_tool_call._pending = {}
-        
+
         display_tool_call._pending[id(tool_data)] = {
-            'tool_name': tool_name,
-            'args': args,
-            'content_bufnr': content_bufnr,
-            'append_content_fn': append_content_fn,
-            'nvim': nvim,
-            'logger': logger,
+            "tool_name": tool_name,
+            "args": args,
+            "content_bufnr": content_bufnr,
+            "append_content_fn": append_content_fn,
+            "nvim": nvim,
+            "logger": logger,
         }
 
     except Exception as e:
         logger.error(f"Error storing tool call: {e}")
 
 
-def display_tool_result(tool_result, nvim, logger, append_content_fn, content_bufnr=None):
+def display_tool_result(
+    tool_result, nvim, logger, append_content_fn, content_bufnr=None
+):
     """Display tool call and result combined in a code block.
-    
+
     Args:
         tool_result: The result from the tool call
         nvim: Neovim instance
@@ -116,24 +129,23 @@ def display_tool_result(tool_result, nvim, logger, append_content_fn, content_bu
 
         # Get pending tool call if it exists
         tool_info = None
-        if hasattr(display_tool_call, '_pending') and display_tool_call._pending:
+        if hasattr(display_tool_call, "_pending") and display_tool_call._pending:
             # Get the most recent pending tool call
             tool_info = display_tool_call._pending.popitem()[1]
             logger.info(f"Found pending tool call: {tool_info['tool_name']}")
         else:
             logger.info("No pending tool call found")
 
-
         # Build combined output (no leading blank line)
         output_lines = []
-        
+
         if tool_info:
-            tool_name = tool_info['tool_name']
-            args = tool_info['args']
-            output_lines.append(f"  🔧 {tool_name}")
+            tool_name = tool_info["tool_name"]
+            args = tool_info["args"]
+            output_lines.append(f"**  {tool_name}**")
             output_lines.append("````")
             output_lines.append("**Arguments**:")
-            
+
             if args:
                 for key, value in args.items():
                     if isinstance(value, str) and len(value) > 100:
@@ -141,18 +153,32 @@ def display_tool_result(tool_result, nvim, logger, append_content_fn, content_bu
                     output_lines.append(f"  - `{key}`: `{value}`")
             else:
                 output_lines.append("  (no arguments)")
-        
+
         output_lines.append("**Result**:")
         output_lines.append("```")
         output_lines.append(result_str)
         output_lines.append("```")
         output_lines.append("````")
-        
-        # Calculate fold boundaries
-        num_lines = len(output_lines)
-        
-        # Just append without trying to fold (folding timing is complex)
-        nvim.async_call(lambda: append_content_fn(output_lines))
+        output_lines.append("")
+
+        fold_summary = f"**  {tool_name}**"
+
+        # Just append without folding
+        def callback():
+            append_content_fn(output_lines)
+
+            nvim.exec_lua(
+                f"""
+                local bufnr = {content_bufnr}
+                local fold_summary = "{fold_summary}"
+                local start_line = vim.api.buf_line_count(bufnr) - {len(output_lines)}
+                local end_line = {start_line} + {len(output_lines)} - 1
+
+                require('agent_nvim.folds').create_fold(bufnr, start_line, end_line, fold_summary)
+                """
+            )
+
+        nvim.async_call(callback)
 
     except Exception as e:
         logger.error(f"Error displaying tool result: {e}")
@@ -160,7 +186,7 @@ def display_tool_result(tool_result, nvim, logger, append_content_fn, content_bu
 
 def handle_tool_call_delta(data, content_bufnr, nvim, logger, append_content_fn):
     """Handle tool call delta events.
-    
+
     Args:
         data: Tool call delta data
         content_bufnr: Buffer number for content display
@@ -207,7 +233,7 @@ def handle_tool_call_delta(data, content_bufnr, nvim, logger, append_content_fn)
 
 def handle_tool_call_end(data, content_bufnr, logger):
     """Handle tool call end events.
-    
+
     Args:
         data: Tool call end data
         content_bufnr: Buffer number for content display
@@ -222,7 +248,7 @@ def handle_tool_call_end(data, content_bufnr, logger):
 
 def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn):
     """Handle tool call output events.
-    
+
     Args:
         data: Tool call output data
         content_bufnr: Buffer number for content display
@@ -243,14 +269,9 @@ def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn
             # Truncate long outputs
             if len(output_str) > 1000:
                 output_str = output_str[:1000] + "..."
-                
-            lines = [
-                "**Result**:",
-                output_str,
-                "```",
-                ""
-            ]
-            
+
+            lines = ["**Result**:", output_str, "```", ""]
+
             # Calculate fold boundaries based on lines being appended
             num_lines = len(lines)
 
@@ -258,19 +279,22 @@ def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn
                 # Get line count before appending (this is 1-based count)
                 # buf_line_count returns total lines; next insert is at 0-based index equal to that count
                 start_line = nvim.api.buf_line_count(content_bufnr)
-                
+
                 # Append the content
                 append_content_fn(lines)
-                
+
                 # Calculate end_line: we appended num_lines, so end is at start + num_lines - 1
                 end_line = start_line + num_lines - 1
-                
+
                 # Create fold if we have multiple lines (need start < end, not <=)
                 if end_line > start_line:
                     summary = "Tool result"
                     nvim.exec_lua(
                         "require('agent_nvim.folds').create_fold(...)",
-                        content_bufnr, start_line, end_line, summary
+                        content_bufnr,
+                        start_line,
+                        end_line,
+                        summary,
                     )
 
             nvim.async_call(append_and_fold)
@@ -281,7 +305,7 @@ def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn
 
 def handle_tool_call_event(event, content_bufnr, nvim, logger, append_content_fn):
     """Handle generic tool call events.
-    
+
     Args:
         event: Tool call event
         content_bufnr: Buffer number for content display
@@ -296,9 +320,7 @@ def handle_tool_call_event(event, content_bufnr, nvim, logger, append_content_fn
         # Try to extract tool information from the event
         if hasattr(event, "data"):
             data = event.data
-            tool_name = getattr(data, "name", None) or getattr(
-                data, "tool_name", None
-            )
+            tool_name = getattr(data, "name", None) or getattr(data, "tool_name", None)
 
             if tool_name:
                 lines = ["", "🔧 **Tool call event**: `" + tool_name + "`"]
@@ -395,11 +417,11 @@ def handle_tool_item(item, content_bufnr, nvim, logger, append_content_fn):
             if tool_name:
                 logger.info(f"Displaying tool call for: {tool_name}")
                 tool_data = {"arguments": arguments} if arguments else {}
-                display_tool_call(tool_name, tool_data, nvim, logger, append_content_fn, content_bufnr)
-            else:
-                logger.warning(
-                    "ToolCallItem found but could not extract tool name"
+                display_tool_call(
+                    tool_name, tool_data, nvim, logger, append_content_fn, content_bufnr
                 )
+            else:
+                logger.warning("ToolCallItem found but could not extract tool name")
         elif hasattr(item, "output") or item_type == "ToolCallOutputItem":
             # This is a tool result item
             output = getattr(item, "output", None)
@@ -411,7 +433,9 @@ def handle_tool_item(item, content_bufnr, nvim, logger, append_content_fn):
                         break
 
             output_str = str(output) if output else "No output"
-            display_tool_result(output_str, nvim, logger, append_content_fn, content_bufnr)
+            display_tool_result(
+                output_str, nvim, logger, append_content_fn, content_bufnr
+            )
         else:
             # This might be a different type of item
             logger.info(f"Item {item_type} has no expected tool attributes")
