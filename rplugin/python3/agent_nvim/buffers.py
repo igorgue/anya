@@ -20,6 +20,8 @@ class BufferManager:
         self.content_buf = None
         self.prompt_buf = None
         self._agent_response_started = False
+        self._pending_async_calls = 0
+        self._stream_queue_blocked = False
     
     def create_layout(self):
         """Create the agent UI layout with content and prompt buffers."""
@@ -244,8 +246,23 @@ class BufferManager:
                     processed.extend([ln for ln in item.split("\n")])
                 else:
                     processed.append(item)
+            
+            # Increment pending async calls to block streaming
+            self._pending_async_calls += 1
+            self._stream_queue_blocked = True
+            
+            def wrapped_append():
+                """Append and decrement counter when done."""
+                try:
+                    self._append_and_scroll(processed, fold=fold)
+                finally:
+                    self._pending_async_calls -= 1
+                    # Only unblock if no more pending calls
+                    if self._pending_async_calls <= 0:
+                        self._stream_queue_blocked = False
+            
             # Write the processed list to the buffer
-            self.nvim.async_call(lambda: self._append_and_scroll(processed, fold=fold))
+            self.nvim.async_call(wrapped_append)
             # Enable render-markdown after content is added
             self.nvim.async_call(self.enable_render_markdown)
     
@@ -304,6 +321,15 @@ class BufferManager:
             text: Text to append
             bufnr: Buffer number (must be passed in, can't access from async context)
         """
+        import time
+        
+        # Wait for any pending async calls to complete before streaming starts
+        # This ensures tool calls are displayed before response text
+        wait_count = 0
+        while self._stream_queue_blocked and wait_count < 50:
+            time.sleep(0.01)  # Wait 10ms between checks, max 500ms total
+            wait_count += 1
+        
         # Handle initial spacing for agent responses
         # Check if this is the first chunk and if we need to remove the extra blank line
         should_remove_last_line = False
