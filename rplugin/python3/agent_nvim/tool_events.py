@@ -3,6 +3,7 @@
 import json
 
 
+
 def handle_tool_event(event, content_bufnr, nvim, logger, append_content_fn):
     """Handle tool-related events and display tool calls.
 
@@ -161,7 +162,7 @@ def display_tool_result(
         output_lines.append("````")
         output_lines.append("")
 
-        fold_summary = f"**  {tool_name}**"
+        fold_summary = f"**  {tool_name}**"
 
         # Append content and fold it
         nvim.async_call(lambda: append_content_fn(output_lines, fold=True))

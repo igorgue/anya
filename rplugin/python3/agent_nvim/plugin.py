@@ -56,29 +56,34 @@ class AgentPlugin(object):
                 from agents import function_tool
                 
                 # Create closures that capture self and cached_cwd
-                def tool_read_file_wrapper(path: str) -> str:
+                # Function names are used as tool names by the SDK
+                def read_file(path: str) -> str:
+                    """Read file content."""
                     cwd = getattr(self, "_cached_cwd", None)
                     return tools.read_file(path, cwd)
                 
-                def tool_list_files_wrapper(path: str = ".") -> str:
+                def list_files(path: str = ".") -> str:
+                    """List files in directory."""
                     cwd = getattr(self, "_cached_cwd", None)
                     return tools.list_files(path, cwd)
                 
-                def tool_search_repo_wrapper(query: str) -> str:
+                def search_repo(query: str) -> str:
+                    """Search repository."""
                     cwd = getattr(self, "_cached_cwd", None)
                     return tools.search_repo(query, cwd)
                 
-                def tool_apply_patch_wrapper(patch_str: str) -> str:
+                def apply_patch(patch_str: str) -> str:
+                    """Apply patch proposal."""
                     return tools.apply_patch_proposal(
                         patch_str,
                         lambda p: self.nvim.async_call(self.buffer_manager.create_diff_buffer, p)
                     )
                 
                 self._tool_wrappers = {
-                    'read_file': function_tool(tool_read_file_wrapper),
-                    'list_files': function_tool(tool_list_files_wrapper),
-                    'search_repo': function_tool(tool_search_repo_wrapper),
-                    'apply_patch': function_tool(tool_apply_patch_wrapper),
+                    'read_file': function_tool(read_file),
+                    'list_files': function_tool(list_files),
+                    'search_repo': function_tool(search_repo),
+                    'apply_patch': function_tool(apply_patch),
                 }
             except ImportError:
                 self.logger.warning("Could not import function_tool from agents")
