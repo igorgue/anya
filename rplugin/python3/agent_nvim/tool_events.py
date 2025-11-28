@@ -163,8 +163,8 @@ def display_tool_result(
 
         fold_summary = f"**  {tool_name}**"
 
-        # Append content
-        nvim.async_call(lambda: append_content_fn(output_lines))
+        # Append content and fold it
+        nvim.async_call(lambda: append_content_fn(output_lines, fold=True))
 
     except Exception as e:
         logger.error(f"Error displaying tool result: {e}")

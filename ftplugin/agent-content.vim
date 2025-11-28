@@ -3,4 +3,8 @@ setlocal wrap
 setlocal linebreak
 setlocal nolist
 
+" Enable manual folding for tool calls
+setlocal foldmethod=manual
+setlocal foldlevel=99
+
 
