@@ -157,8 +157,12 @@ class MCPManager:
                         self.logger.error(f"Unknown MCP server type: {server_type}")
 
                 except Exception as e:
+                    import traceback
                     self.logger.error(
                         f"Failed to create MCP server {server_config.get('name', 'unknown')}: {e}"
+                    )
+                    self.logger.error(
+                        f"Traceback: {traceback.format_exc()}"
                     )
                     continue
 
@@ -211,8 +215,12 @@ class MCPManager:
                         connected_servers.append(server)
 
                 except Exception as server_error:
+                    import traceback
                     self.logger.error(
                         f"Failed to connect MCP server {server.name}: {server_error}"
+                    )
+                    self.logger.error(
+                        f"Traceback for {server.name}: {traceback.format_exc()}"
                     )
                     # Continue with other servers even if one fails
                     continue

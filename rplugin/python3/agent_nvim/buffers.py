@@ -305,22 +305,16 @@ class BufferManager:
             bufnr: Buffer number (must be passed in, can't access from async context)
         """
         # Handle initial spacing for agent responses
-        # Ensure we start on the blank line that was added after the header
+        # Check if this is the first chunk and if we need to remove the extra blank line
+        should_remove_last_line = False
         if not self._agent_response_started:
             self._agent_response_started = True
-
             # Ensure the text starts with a non-empty character to maintain spacing
             # This works for both chat_completions and responses APIs
-            processed_text = text
-            if text and not text[0].isspace():
-                # If text doesn't start with whitespace, we're already positioned correctly
-                # The blank line after the header provides the spacing
-                pass
-            elif text.startswith("\n"):
+            if text and text.startswith("\n"):
                 # If text starts with newlines, remove the extra blank line
                 # since the model is providing its own spacing
-                self.nvim.async_call(self.remove_last_line)
-            # If text starts with other whitespace (space, tab), we're good
+                should_remove_last_line = True
 
         # Escape text for Lua string
         escaped_text = (
@@ -331,9 +325,11 @@ class BufferManager:
         )
 
         # Use a timer to animate character-by-character
+        # The should_remove_last_line flag is handled atomically on first write
         lua_code = f"""
         local bufnr = {bufnr}
         local text = "{escaped_text}"
+        local should_remove_last_line = {str(should_remove_last_line).lower()}
 
         -- Initialize animation queue if it doesn't exist
         if not _G.agent_stream_queue then
@@ -342,7 +338,7 @@ class BufferManager:
         end
 
         -- Add text to queue
-        table.insert(_G.agent_stream_queue, {{bufnr = bufnr, text = text}})
+        table.insert(_G.agent_stream_queue, {{bufnr = bufnr, text = text, remove_last_line = should_remove_last_line}})
 
         -- Start timer if not already running
         if not _G.agent_stream_timer then
@@ -357,6 +353,17 @@ class BufferManager:
                 if not vim.api.nvim_buf_is_valid(item.bufnr) then
                     table.remove(_G.agent_stream_queue, 1)
                     return
+                end
+
+                -- Handle blank line removal on first write atomically
+                if item.remove_last_line then
+                    local line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                    local last_line_idx = line_count - 1
+                    local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
+                    if (last_line[1] or "") == "" then
+                        vim.api.nvim_buf_set_lines(item.bufnr, last_line_idx, last_line_idx + 1, false, {{}})
+                    end
+                    item.remove_last_line = false
                 end
 
                 -- Vary characters written: mostly 3, sometimes 2 or 4 for irregularity
@@ -408,14 +415,7 @@ class BufferManager:
             import traceback
             self.logger.error(traceback.format_exc())
     
-    def remove_last_line(self):
-        """Remove the last line from the content buffer."""
-        if hasattr(self, "content_buf") and self.content_buf and self.content_buf.valid:
-            line_count = len(
-                self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
-            )
-            if line_count > 0:
-                self.nvim.api.buf_set_lines(self.content_buf, -2, -1, False, [])
+
     
     def append_cancel_message(self):
         """Append cancellation message with smart spacing."""
