@@ -15,7 +15,8 @@ local function update_placeholder()
   if line_count == 1 and first_line == '' then
     vim.api.nvim_buf_set_extmark(bufnr, placeholder_ns, 0, 0, {
       virt_text = {{_G.agent_prompt_placeholder, 'Comment'}},
-      virt_text_pos = 'inline'
+      virt_text_pos = 'inline',
+      virt_text_win_col = vim.fn.winwidth(0) - string.len(_G.agent_prompt_placeholder)
     })
   end
 end

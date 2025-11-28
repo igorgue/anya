@@ -3,6 +3,7 @@
 import os
 import sys
 from . import tool_events
+from .token_tracker import format_placeholder_text
 
 
 async def run_agent(
@@ -283,6 +284,30 @@ async def run_agent(
             conversation_history.append(
                 {"role": "assistant", "content": str(result_stream.final_output)}
             )
+
+        # Track and display token usage
+        try:
+            if hasattr(result_stream, "context_wrapper") and result_stream.context_wrapper:
+                usage = result_stream.context_wrapper.usage
+                if usage and hasattr(usage, "total_tokens"):
+                    total_tokens = usage.total_tokens
+                    placeholder_text = format_placeholder_text(
+                        total_tokens=total_tokens,
+                        input_tokens=getattr(usage, "input_tokens", None),
+                        output_tokens=getattr(usage, "output_tokens", None),
+                        model=model,
+                    )
+                    logger.info(f"Token usage: {placeholder_text}")
+                    
+                    # Update placeholder text via Lua
+                    nvim.async_call(
+                        lambda: nvim.exec_lua(
+                            f'_G.AgentSetPlaceholder("{placeholder_text}")',
+                            None,
+                        )
+                    )
+        except Exception as e:
+            logger.debug(f"Error tracking token usage: {e}")
 
         # Agent completed successfully (unless cancelled)
         if not cancel_flag_getter():
