@@ -3,7 +3,7 @@ local bufnr = vim.api.nvim_get_current_buf()
 local placeholder_ns = vim.api.nvim_create_namespace('agent_prompt_placeholder')
 
 -- Global placeholder text
-_G.agent_prompt_placeholder = '...'
+_G.agent_prompt_placeholder = ''
 
 -- Function to update placeholder visibility
 local function update_placeholder()
