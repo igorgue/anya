@@ -143,7 +143,22 @@ def display_tool_result(
         if tool_info:
             tool_name = tool_info["tool_name"]
             args = tool_info["args"]
-            output_lines.append(f"**  {tool_name}**")
+            
+            # Extract first parameter for title
+            first_param = None
+            if args:
+                first_param = next(iter(args.values()), None)
+            
+            # Format title with first parameter
+            if first_param:
+                param_str = str(first_param)
+                if len(param_str) > 80:
+                    param_str = param_str[:77] + "..."
+                tool_title = f"**  {tool_name}** — `{param_str}`"
+            else:
+                tool_title = f"**  {tool_name}**"
+            
+            output_lines.append(tool_title)
             output_lines.append("````")
             output_lines.append("**Arguments**:")
 
