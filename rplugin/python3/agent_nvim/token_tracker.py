@@ -115,10 +115,13 @@ def format_placeholder_text(
     input_tokens: int | None = None,
     output_tokens: int | None = None,
     model: str | None = None,
-) -> str:
-    """Format token usage for placeholder display.
+) -> tuple[str, str]:
+    """Format token usage for placeholder display with highlight group.
     
-    Concise format suitable for inline display.
+    Concise format suitable for inline display. Highlight based on usage:
+    - 0-40%: OkMsg (green/success)
+    - 41-95%: WarningMsg (yellow/warning)
+    - 96-100%: ErrorMsg (red/error)
     
     Args:
         total_tokens: Total tokens used
@@ -127,9 +130,19 @@ def format_placeholder_text(
         model: Model name (optional)
         
     Returns:
+        Tuple of (formatted_string, highlight_group)
         Formatted string like "267/128K (0.2%)" or "267 tokens"
+        Highlight group: "OkMsg" (0-40%), "WarningMsg" (41-95%), or "ErrorMsg" (96-100%)
     """
     percentage, context_window = calculate_usage_percentage(total_tokens, model)
+
+    # Determine highlight group based on usage percentage
+    if percentage > 95:
+        highlight = "ErrorMsg"
+    elif percentage > 40:
+        highlight = "WarningMsg"
+    else:
+        highlight = "OkMsg"
 
     if context_window > 0:
         if context_window >= 1000000:
@@ -138,6 +151,8 @@ def format_placeholder_text(
             ctx_str = f"{context_window / 1000:.0f}K"
         else:
             ctx_str = str(context_window)
-        return f"{total_tokens}/{ctx_str} ({percentage:.1f}%)"
+        text = f"{total_tokens}/{ctx_str} ({percentage:.1f}%)"
     else:
-        return f"{total_tokens} tokens"
+        text = f"{total_tokens} tokens"
+
+    return text, highlight

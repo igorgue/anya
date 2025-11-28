@@ -291,18 +291,18 @@ async def run_agent(
                 usage = result_stream.context_wrapper.usage
                 if usage and hasattr(usage, "total_tokens"):
                     total_tokens = usage.total_tokens
-                    placeholder_text = format_placeholder_text(
+                    placeholder_text, highlight_group = format_placeholder_text(
                         total_tokens=total_tokens,
                         input_tokens=getattr(usage, "input_tokens", None),
                         output_tokens=getattr(usage, "output_tokens", None),
                         model=model,
                     )
-                    logger.info(f"Token usage: {placeholder_text}")
+                    logger.info(f"Token usage: {placeholder_text} (highlight: {highlight_group})")
                     
-                    # Update placeholder text via Lua
+                    # Update placeholder text via Lua with highlight group
                     nvim.async_call(
                         lambda: nvim.exec_lua(
-                            f'_G.AgentSetPlaceholder("{placeholder_text}")',
+                            f'_G.AgentSetPlaceholder("{placeholder_text}", "{highlight_group}")',
                             None,
                         )
                     )
