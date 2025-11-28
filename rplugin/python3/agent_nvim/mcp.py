@@ -3,6 +3,9 @@
 import os
 import json
 
+# Global MCP tool call timeout in seconds (configurable)
+MCP_TOOL_TIMEOUT = 45
+
 
 class MCPManager:
     """Manages MCP server configuration and lifecycle."""
@@ -95,7 +98,7 @@ class MCPManager:
                             params={
                                 "url": server_config["url"],
                                 "headers": server_config.get("headers", {}),
-                                "timeout": server_config.get("timeout", 30),
+                                "timeout": server_config.get("timeout", MCP_TOOL_TIMEOUT),
                             },
                             cache_tools_list=server_config.get(
                                 "cache_tools_list", True
@@ -116,7 +119,7 @@ class MCPManager:
                             params={
                                 "url": server_config["url"],
                                 "headers": server_config.get("headers", {}),
-                                "timeout": server_config.get("timeout", 45),
+                                "timeout": server_config.get("timeout", MCP_TOOL_TIMEOUT),
                             },
                             cache_tools_list=server_config.get(
                                 "cache_tools_list", True
