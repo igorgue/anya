@@ -89,11 +89,7 @@ class BufferManager:
         # Enable render-markdown for the content buffer
         self.enable_render_markdown()
         
-        # Initialize folding for content buffer
-        try:
-            self.nvim.exec_lua("require('agent_nvim.folds').setup(...)", content_buf)
-        except Exception as e:
-            self.logger.error(f"Failed to initialize folds: {e}")
+
     
     def create_diff_buffer(self, patch_str):
         """Create or update the diff buffer with patch content.

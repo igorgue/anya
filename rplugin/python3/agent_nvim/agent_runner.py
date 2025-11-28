@@ -2,13 +2,10 @@
 
 import os
 import sys
-import uuid
-import asyncio
 from . import tool_events
 
 
 async def run_agent(
-    prompt,
     request_id,
     nvim,
     buffer_manager,
@@ -24,7 +21,6 @@ async def run_agent(
     """Run the agent with streaming output.
     
     Args:
-        prompt: User prompt text (not used directly - in conversation_history)
         request_id: Unique request identifier
         nvim: Neovim instance
         buffer_manager: BufferManager instance
@@ -300,8 +296,8 @@ async def run_agent(
         status = "error"
     finally:
         # Cleanup MCP servers if they were connected
-        if "mcp_servers" in locals() and mcp_servers:
-            await mcp_manager.disconnect_servers(mcp_servers)
+        # if "mcp_servers" in locals() and mcp_servers:
+        #     await mcp_manager.disconnect_servers(mcp_servers)
 
         # Clear current request ID
         if current_request_id_ref['value'] == request_id:

@@ -202,9 +202,9 @@ class AgentPlugin(object):
         self._current_request_id = request_id
 
         # Run agent in background
-        asyncio.create_task(self._run_agent_wrapper(resolved_text, request_id))
+        asyncio.create_task(self._run_agent_wrapper(request_id))
     
-    async def _run_agent_wrapper(self, prompt, request_id):
+    async def _run_agent_wrapper(self, request_id):
         """Wrapper to call run_agent with all necessary parameters."""
         # Get tool wrappers
         tool_wrappers = self._get_tool_wrappers()
@@ -213,7 +213,6 @@ class AgentPlugin(object):
         current_request_id_ref = {'value': self._current_request_id}
         
         await run_agent(
-            prompt=prompt,
             request_id=request_id,
             nvim=self.nvim,
             buffer_manager=self.buffer_manager,

@@ -163,22 +163,8 @@ def display_tool_result(
 
         fold_summary = f"**  {tool_name}**"
 
-        # Just append without folding
-        def callback():
-            append_content_fn(output_lines)
-
-            nvim.exec_lua(
-                f"""
-                local bufnr = {content_bufnr}
-                local fold_summary = "{fold_summary}"
-                local start_line = vim.api.buf_line_count(bufnr) - {len(output_lines)}
-                local end_line = {start_line} + {len(output_lines)} - 1
-
-                require('agent_nvim.folds').create_fold(bufnr, start_line, end_line, fold_summary)
-                """
-            )
-
-        nvim.async_call(callback)
+        # Append content
+        nvim.async_call(lambda: append_content_fn(output_lines))
 
     except Exception as e:
         logger.error(f"Error displaying tool result: {e}")
@@ -272,32 +258,8 @@ def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn
 
             lines = ["**Result**:", output_str, "```", ""]
 
-            # Calculate fold boundaries based on lines being appended
-            num_lines = len(lines)
-
-            def append_and_fold():
-                # Get line count before appending (this is 1-based count)
-                # buf_line_count returns total lines; next insert is at 0-based index equal to that count
-                start_line = nvim.api.buf_line_count(content_bufnr)
-
-                # Append the content
-                append_content_fn(lines)
-
-                # Calculate end_line: we appended num_lines, so end is at start + num_lines - 1
-                end_line = start_line + num_lines - 1
-
-                # Create fold if we have multiple lines (need start < end, not <=)
-                if end_line > start_line:
-                    summary = "Tool result"
-                    nvim.exec_lua(
-                        "require('agent_nvim.folds').create_fold(...)",
-                        content_bufnr,
-                        start_line,
-                        end_line,
-                        summary,
-                    )
-
-            nvim.async_call(append_and_fold)
+            # Append content
+            nvim.async_call(lambda: append_content_fn(lines))
 
     except Exception as e:
         logger.error(f"Error handling tool call output: {e}")

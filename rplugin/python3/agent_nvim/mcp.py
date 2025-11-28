@@ -15,6 +15,7 @@ class MCPManager:
         """
         self.logger = logger
         self._mcp_hosted_tools = []
+        self._active_servers = []
     
     def load_servers(self, config_path=None):
         """Load MCP servers from configuration file.
@@ -35,6 +36,10 @@ class MCPManager:
         except ImportError:
             self.logger.info("MCP classes not available in agents SDK")
             return [], []
+
+        # Return active servers if already loaded
+        if self._active_servers:
+            return self._active_servers, self._mcp_hosted_tools
 
         # Path to MCP servers configuration
         if config_path is None:
@@ -183,6 +188,12 @@ class MCPManager:
             # Connect all MCP servers
             for server in mcp_servers:
                 try:
+                    # Check if already connected (has session)
+                    if hasattr(server, "session") and server.session:
+                        self.logger.debug(f"MCP server {server.name} already connected")
+                        connected_servers.append(server)
+                        continue
+
                     self.logger.info(f"Connecting to MCP server: {server.name}")
 
                     # Check if server has connect method
@@ -210,6 +221,8 @@ class MCPManager:
                 self.logger.info(
                     f"Successfully connected to {len(connected_servers)} MCP servers"
                 )
+                # Update active servers list
+                self._active_servers = connected_servers
             else:
                 self.logger.warning("No MCP servers could be connected")
 
@@ -219,14 +232,15 @@ class MCPManager:
             self.logger.error(f"Failed to initialize MCP servers: {e}")
             return []
     
-    async def disconnect_servers(self, mcp_servers):
-        """Disconnect from MCP servers.
+    async def shutdown(self):
+        """Shutdown all active MCP servers."""
+        if not self._active_servers:
+            return
+
+        self.logger.info(f"Shutting down {len(self._active_servers)} MCP servers")
         
-        Args:
-            mcp_servers: List of MCP server instances to disconnect
-        """
         try:
-            for server in mcp_servers:
+            for server in self._active_servers:
                 try:
                     if hasattr(server, "disconnect"):
                         self.logger.info(
@@ -236,16 +250,28 @@ class MCPManager:
                         self.logger.info(
                             f"Successfully disconnected MCP server: {server.name}"
                         )
+                    elif hasattr(server, "cleanup"):
+                        self.logger.info(
+                            f"Cleaning up MCP server: {server.name}"
+                        )
+                        await server.cleanup()
+                        self.logger.info(
+                            f"Successfully cleaned up MCP server: {server.name}"
+                        )
                     else:
                         self.logger.debug(
-                            f"MCP server {server.name} does not have disconnect method"
+                            f"MCP server {server.name} does not have disconnect or cleanup method"
                         )
                 except Exception as server_error:
                     self.logger.error(
-                        f"Failed to disconnect MCP server {server.name}: {server_error}"
+                        f"Failed to disconnect/cleanup MCP server {server.name}: {server_error}"
                     )
                     # Continue with other cleanup even if one fails
                     continue
+            
+            # Clear active servers list
+            self._active_servers = []
+            
         except Exception as e:
             self.logger.error(f"Failed to cleanup MCP servers: {e}")
     
