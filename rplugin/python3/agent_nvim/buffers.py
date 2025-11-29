@@ -660,7 +660,7 @@ class BufferManager:
             -- Queue the cancel message at the end
             table.insert(_G.agent_stream_queue, {{
                 bufnr = {bufnr},
-                text = "\\n\\n**[Request cancelled by user]**",
+                text = "\\n\\n> **[Request cancelled by user]**",
                 remove_last_line = false
             }})
             """
@@ -678,9 +678,9 @@ class BufferManager:
                             break
                 
                 if response_started:
-                    self.append_content(["", "**[Request cancelled by user]**"])
+                    self.append_content(["", "> **[Request cancelled by user]**"])
                 else:
-                    self.append_content(["**[Request cancelled by user]**"])
+                    self.append_content(["> **[Request cancelled by user]**"])
     
     def enable_render_markdown(self):
         """Enable render-markdown for the content buffer."""

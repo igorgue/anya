@@ -372,13 +372,21 @@ class AgentPlugin(object):
     
     @pynvim.command("AgentCancel", sync=False)
     def agent_cancel(self):
-        """Cancel the currently running agent request."""
-        if self._current_request_id and not self._cancel_requested:
+        """Cancel the currently running agent request or compaction."""
+        if self._cancel_requested:
+            # Already cancelled
+            return
+            
+        if self._current_request_id:
             self._cancel_requested = True
             # Only add spacing if there's already content in the response
             self.nvim.async_call(self.buffer_manager.append_cancel_message)
-        elif not self._current_request_id:
-            self.nvim.out_write("No active agent request to cancel.\\n")
+        elif hasattr(self, '_compact_cancelled') and not self._compact_cancelled:
+            # Compaction is running (flag is False), signal it to stop (set to True)
+            self._compact_cancelled = True
+            self.nvim.out_write("Cancelling compaction...\\n")
+        else:
+            self.nvim.out_write("No active agent request or compaction to cancel.\\n")
     
     @pynvim.command("AgentApply", sync=False)
     def agent_apply(self):
@@ -588,6 +596,9 @@ class AgentPlugin(object):
                 ""
             ])
             
+            # Initialize compact cancellation flag
+            self._compact_cancelled = False
+            
             # Create fidget progress handle
             try:
                 self.nvim.async_call(
@@ -628,6 +639,9 @@ class AgentPlugin(object):
                         )
                     except Exception as e:
                         self.logger.debug(f"Could not finish fidget progress: {e}")
+                    finally:
+                        # Clear the compact cancelled flag when done
+                        self._compact_cancelled = False
             
             thread = threading.Thread(target=run_compaction_thread, daemon=True)
             thread.start()
@@ -657,9 +671,25 @@ class AgentPlugin(object):
     def _perform_compaction(self, conversation_history, instructions, target_tokens):
         """Perform the actual compaction."""
         try:
+            # Check for cancellation before starting
+            if self._compact_cancelled:
+                self.nvim.async_call(self.buffer_manager.append_content, [
+                    "> **Compaction cancelled**",
+                    ""
+                ])
+                return
+            
             # Show progress
             self._update_fidget_progress("Analyzing context...")
             self.nvim.async_call(self.buffer_manager.append_content, ["> **Analyzing conversation context...**"])
+            
+            # Check for cancellation
+            if self._compact_cancelled:
+                self.nvim.async_call(self.buffer_manager.append_content, [
+                    "> **Compaction cancelled**",
+                    ""
+                ])
+                return
             
             # Use context analyzer if available
             if self.context_analyzer:
@@ -672,6 +702,14 @@ class AgentPlugin(object):
             # Generate summary
             self._update_fidget_progress("Generating summary...")
             self.nvim.async_call(self.buffer_manager.append_content, ["", "> **Generating compacted summary...**"])
+            
+            # Check for cancellation before expensive operations
+            if self._compact_cancelled:
+                self.nvim.async_call(self.buffer_manager.append_content, [
+                    "> **Compaction cancelled**",
+                    ""
+                ])
+                return
             
             if instructions and self.compact_agent:
                 # Use instruction-aware compaction
@@ -691,6 +729,14 @@ class AgentPlugin(object):
                 # Use simple fallback compaction
                 summary, compacted_history = self._fallback_compaction(conversation_history, instructions, target_tokens)
             
+            # Check for cancellation after summary generation
+            if self._compact_cancelled:
+                self.nvim.async_call(self.buffer_manager.append_content, [
+                    "> **Compaction cancelled**",
+                    ""
+                ])
+                return
+            
             # Get original text for comparison
             original_text = '\n'.join(msg.get('content', '') for msg in conversation_history)
             
@@ -704,6 +750,14 @@ class AgentPlugin(object):
                     approved = True
                     
                 if approved:
+                    # Check for cancellation before applying
+                    if self._compact_cancelled:
+                        self.nvim.async_call(self.buffer_manager.append_content, [
+                            "> **Compaction cancelled**",
+                            ""
+                        ])
+                        return
+                    
                     # User approved compaction
                     if self.preview_modal:
                         decision, edited_summary = self.preview_modal.get_decision()
