@@ -49,11 +49,13 @@ function M:pop_progress_handle(id)
 end
 
 function M:create_progress_handle(event)
+	-- Support both event objects and direct data tables
+	local data = event.data or event
 	return fidget_progress.handle.create({
 		title = "",
-		message = "Thinking...",
+		message = data.message or "Thinking...",
 		lsp_client = {
-			name = M:get_model_name(event.data),
+			name = M:get_model_name(data),
 		},
 	})
 end

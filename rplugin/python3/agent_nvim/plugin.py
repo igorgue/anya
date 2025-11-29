@@ -569,6 +569,20 @@ class AgentPlugin(object):
                 ""
             ])
             
+            # Create fidget progress handle
+            try:
+                self.nvim.async_call(
+                    self.nvim.exec_lua,
+                    """
+                    local fidget = require('agent.fidget')
+                    _G._compact_progress_handle = fidget:create_progress_handle({
+                        data = { model = os.getenv('AGENT_MODEL') or 'gpt-4o' }
+                    })
+                    """
+                )
+            except Exception as e:
+                self.logger.debug(f"Could not create fidget progress: {e}")
+            
             # Run compaction in background thread to avoid blocking event loop
             import threading
             def run_compaction_thread():
@@ -581,6 +595,20 @@ class AgentPlugin(object):
                         self.buffer_manager.append_content,
                         [f"❌ **Compaction error**: {str(e)}", ""]
                     )
+                finally:
+                    # Clean up fidget progress
+                    try:
+                        self.nvim.async_call(
+                            self.nvim.exec_lua,
+                            """
+                            if _G._compact_progress_handle then
+                                _G._compact_progress_handle:finish()
+                                _G._compact_progress_handle = nil
+                            end
+                            """
+                        )
+                    except Exception as e:
+                        self.logger.debug(f"Could not finish fidget progress: {e}")
             
             thread = threading.Thread(target=run_compaction_thread, daemon=True)
             thread.start()
@@ -593,10 +621,25 @@ class AgentPlugin(object):
                 ""
             ])
     
+    def _update_fidget_progress(self, message: str):
+        """Update fidget progress handle with a message."""
+        try:
+            self.nvim.async_call(
+                self.nvim.exec_lua,
+                f"""
+                if _G._compact_progress_handle then
+                    _G._compact_progress_handle.message = '{message}'
+                end
+            """
+            )
+        except Exception as e:
+            self.logger.debug(f"Could not update fidget progress: {e}")
+    
     def _perform_compaction(self, conversation_history, instructions, target_tokens):
         """Perform the actual compaction."""
         try:
             # Show progress
+            self._update_fidget_progress("Analyzing context...")
             self.nvim.async_call(self.buffer_manager.append_content, ["> **Analyzing conversation context...**"])
             
             # Use context analyzer if available
@@ -608,6 +651,7 @@ class AgentPlugin(object):
                 ])
             
             # Generate summary
+            self._update_fidget_progress("Generating summary...")
             self.nvim.async_call(self.buffer_manager.append_content, ["", "> **Generating compacted summary...**"])
             
             if instructions and self.compact_agent:
@@ -633,6 +677,7 @@ class AgentPlugin(object):
             
             # Show preview and apply
             try:
+                self._update_fidget_progress("Showing preview...")
                 if self.preview_modal:
                     approved = self.preview_modal.show_preview(original_text, summary)
                 else:
@@ -647,6 +692,7 @@ class AgentPlugin(object):
                     else:
                         final_summary = summary
                     
+                    self._update_fidget_progress("Applying context...")
                     self.nvim.async_call(self.buffer_manager.append_content, ["> **Applying compacted context...**"])
                     # Clear buffer and redraw with compacted history
                     self.nvim.async_call(self._redraw_buffer_with_history, compacted_history)
