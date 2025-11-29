@@ -279,6 +279,8 @@ class AgentPlugin(object):
             self._conversation_history = []
         elif cmd == "/cancel":
             self.agent_cancel()
+        elif cmd == "/file":
+            self._handle_file_command()
         elif cmd == "/help":
             self.buffer_manager.append_content(
                 [
@@ -286,12 +288,86 @@ class AgentPlugin(object):
                     "## Help",
                     "- `/clear`: Clear chat history",
                     "- `/cancel`: Cancel current request",
+                    "- `/file`: Open file picker and add files to prompt",
                     "- `/help`: Show this message",
                     "",
                 ]
             )
         else:
             self.buffer_manager.append_content([f"Unknown command: {cmd}"])
+    
+    def _handle_file_command(self):
+        """Handle /file command - open file picker and add selected files to prompt."""
+        try:
+            self.nvim.exec_lua("""
+                local function apply_files_to_prompt(files)
+                    if not files or #files == 0 then
+                        return
+                    end
+                    
+                    -- Find agent-prompt buffer by filetype
+                    local prompt_buf = nil
+                    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+                        if vim.api.nvim_buf_is_valid(buf) and 
+                           vim.api.nvim_get_option_value('filetype', {buf = buf}) == 'agent-prompt' then
+                            prompt_buf = buf
+                            break
+                        end
+                    end
+                    
+                    if not prompt_buf then
+                        vim.notify('Could not find prompt buffer', vim.log.levels.ERROR)
+                        return
+                    end
+                    
+                    -- Get current prompt text
+                    local lines = vim.api.nvim_buf_get_lines(prompt_buf, 0, -1, false)
+                    local current_text = table.concat(lines, '\\n'):gsub('^\\n*', ''):gsub('\\n*$', '')
+                    
+                    -- Build file references
+                    local file_refs = {}
+                    for _, file in ipairs(files) do
+                        table.insert(file_refs, '@' .. file)
+                    end
+                    
+                    -- Create new text with files at the beginning
+                    local new_text
+                    if current_text == '' then
+                        new_text = table.concat(file_refs, ' ')
+                    else
+                        new_text = table.concat(file_refs, ' ') .. ' ' .. current_text
+                    end
+                    
+                    -- Split into lines and set buffer
+                    local new_lines = vim.split(new_text, '\\n', {plain = true})
+                    vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, new_lines)
+                    
+                    -- Set cursor to end
+                    local win = vim.fn.bufwinid(prompt_buf)
+                    if win > 0 then
+                        vim.api.nvim_win_set_cursor(win, {#new_lines, 0})
+                    end
+                end
+                
+                -- Open file picker with custom confirm action
+                Snacks.picker.files({
+                    multi = true,
+                    actions = {
+                        confirm = function(picker)
+                            local items = picker:selected({fallback = false})
+                            local files = {}
+                            for _, item in ipairs(items) do
+                                table.insert(files, item.file or item.text)
+                            end
+                            apply_files_to_prompt(files)
+                            picker:close()
+                        end
+                    }
+                })
+            """)
+        except Exception as e:
+            self.logger.error(f"Error in /file command: {e}")
+            self.buffer_manager.append_content([f"Error opening file picker: {str(e)}"])
     
     def _handle_user_prompt(self, text):
         """Handle user prompt submission."""

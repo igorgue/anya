@@ -184,7 +184,29 @@ Dependencies are installed to `~/.local/share/agent.nvim/venv` and injected into
 
 - `/clear` - Clear chat history
 - `/cancel` - Cancel current request
+- `/file` - Open Snacks file picker to select and add multiple files to the prompt as `@` references
 - `/help` - Show help message
+
+### `/file` Command Details
+
+The `/file` slash command provides an interactive file picker to select one or more files and add them to the prompt as `@filename` references:
+
+1. Type `/file` in the prompt buffer and press Enter
+2. Snacks file picker opens showing files from the project root
+3. Use configured multi-select keybinding (default Ctrl+Space) to select multiple files
+4. Press Enter to confirm and close the picker
+5. Selected files are prepended to the prompt as space-separated `@` references
+6. Files are highlighted with `Directory` highlighting for easy identification
+
+**Examples:**
+- `/file` followed by selecting `src/main.py` and `tests/test.py` results in prompt:
+  ```
+  @src/main.py @tests/test.py
+  ```
+- Adding context after files:
+  ```
+  @src/main.py @tests/test.py Here's my implementation
+  ```
 
 ## Tool Details
 
