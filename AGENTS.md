@@ -1,0 +1,209 @@
+# AGENTS.md
+
+This file provides guidance to WARP (warp.dev) when working with code in this repository.
+
+## Project Overview
+
+agent.nvim is a Neovim plugin that integrates OpenAI's Agents SDK, providing an AI assistant with file system access, patching capabilities, and context awareness. It's a Python remote plugin that communicates with Neovim via pynvim.
+
+## Architecture
+
+### Key Components
+
+**Python Remote Plugin** (`rplugin/python3/agent_nvim/plugin.py`)
+- Main plugin logic using `@pynvim.plugin` decorator
+- Manages virtual environment at `~/.local/share/agent.nvim/venv`
+- Handles async operations via asyncio for agent execution
+- Implements tools: file reading, directory listing, repo search, and patch application
+- Includes token tracking and budget management to prevent context overflow
+
+**Vim Layer** (`plugin/agent.vim`)
+- Bootstrap script for `:AgentInstall` command
+- Provides installation without requiring remote plugin to be loaded first
+- Hardcoded path to `scripts/install.py`
+
+**Buffer Management** (`rplugin/python3/agent_nvim/buffers.py`)
+- `AgentContent`: Markdown buffer for chat history and responses
+- `AgentPrompt`: Special filetype buffer for user input with custom completion
+- `AgentDiff`: Diff buffer for reviewing patches before applying
+- Streaming responses with Lua animation for smooth typing effect
+
+**File Type Configuration**
+- `ftplugin/agent-prompt.vim`: Maps Enter to submit, sets completefunc
+- `ftplugin/agent-content.vim`: Configures wrapping and fold settings
+- `syntax/agent-prompt.vim`: Highlights slash commands and `@` mentions
+
+**Folding System** (`lua/agent_nvim/folds.lua`)
+- Manages manual folds for tool calls and results
+- Tool calls and results are automatically folded when displayed
+- Use `za` to toggle folds, `zo` to open, `zc` to close
+- Fold summaries show tool name or result indicator when collapsed
+
+**MCP Support** (`rplugin/python3/agent_nvim/mcp.py`)
+- Manages Model Context Protocol servers
+- Supports stdio, HTTP, SSE, and hosted MCP servers
+- Configured via `~/.config/agent.nvim/mcp/servers.json`
+
+### Data Flow
+
+1. User opens interface with `:AgentOpen` → creates split layout with content/prompt buffers
+2. User types in prompt buffer → mentions (`@filename`) trigger file path completion
+3. Enter key → `AgentSubmit` command resolves mentions and sends to agent
+4. Agent execution → runs in executor thread to avoid blocking Neovim
+5. Agent uses tools → `_tool_read_file`, `_tool_list_files`, `_tool_search_repo`, `_tool_apply_patch`
+6. Responses stream → appended to content buffer via Lua animation
+7. Patches → displayed in `AgentDiff` buffer, applied via `:AgentApply` using `git apply`
+
+### Project Instructions
+
+The plugin looks for `AGENTS.md` or `.agent/instructions.md` in the project root to load custom instructions that are prepended to the agent's system prompt.
+
+## Development Commands
+
+### Installation & Setup
+```bash
+# Install dependencies in isolated venv
+:AgentInstall
+
+# Or run installation script directly
+python3 scripts/install.py
+
+# Update remote plugins after code changes
+:UpdateRemotePlugins
+```
+
+### Testing
+```bash
+# Verify dependencies are importable
+:AgentTestImport
+```
+
+### Running
+```bash
+# Open agent interface
+:AgentOpen
+
+# Submit a prompt (mapped to Enter in prompt buffer)
+:AgentSubmit
+
+# Cancel a running request (mapped to Ctrl+C)
+:AgentCancel
+
+# Apply proposed patches
+:AgentApply
+```
+
+## Dependencies
+
+- Python 3.8+
+- `pynvim` - Neovim Python client
+- `openai` - OpenAI Python SDK
+- `openai-agents` - OpenAI Agents SDK
+
+Dependencies are installed to `~/.local/share/agent.nvim/venv` and injected into sys.path at plugin initialization.
+
+## Environment Variables
+
+- `OPENAI_API_KEY` - Required for agent functionality
+- `AGENT_MODEL` - Model to use (default: gpt-5.1)
+- `AGENT_BASE_URL` - Custom API endpoint (optional)
+- `AGENT_API_KEY` - Alternative API key (optional)
+- `AGENT_API_TYPE` - API type: 'responses' or 'chat_completions' (default: responses)
+- `AGENT_DISABLE_TRACING` - Disable tracing for custom providers (default: 1)
+- `AGENT_MAX_READ_BYTES` - Maximum bytes to read from files (default: 64000)
+- `AGENT_CONTEXT_WINDOW` - Override context window size (optional)
+
+## Special Considerations
+
+### Path Management
+- The plugin dynamically discovers and injects venv site-packages into sys.path
+- File paths in tools are resolved relative to Neovim's current working directory
+- The `plugin/agent.vim` has a hardcoded path that may need updating if file structure changes
+
+### Buffer Lifecycle
+- Buffers are reused across `:AgentOpen` invocations
+- Buffer validity is checked before operations
+- Content buffer starts with a welcome message if empty
+
+### Async Execution
+- Agent runs in executor thread to prevent blocking
+- Uses `nvim.async_call` for all Neovim API calls from async context
+- Logging goes to `~/.local/state/nvim/agent.nvim.log`
+
+### Token Management
+- Tracks token usage across requests to prevent context overflow
+- Implements tool budget system to limit file reading/searching
+- Displays token usage in real-time with color-coded highlighting
+- Forces early response when approaching context limits
+
+### Patch Application
+- Creates temporary file for patch content
+- Uses `git apply --ignore-space-change --ignore-whitespace`
+- Runs `checktime` after applying to reload modified buffers
+
+### Completion
+- Custom `AgentComplete` function for file path completion after `@`
+- Triggered with `<C-x><C-u>` in prompt buffer
+- Searches recursively from cwd, excluding `.git` directories
+- Limited to 50 results
+
+## Codebase Context
+
+### Important Files
+- `rplugin/python3/agent_nvim/` - Modularized plugin Python code
+  - `plugin.py` - Main plugin class
+  - `buffers.py` - Buffer management and UI
+  - `tool_events.py` - Tool call display and formatting with folding
+  - `agent_runner.py` - Agent execution logic with streaming
+  - `tools.py` - Tool implementations with budget tracking
+  - `utils.py` - Utility functions
+  - `token_tracker.py` - Token usage tracking
+  - `tool_budget.py` - Tool budget management
+  - `mcp.py` - MCP server management
+- `plugin/agent.vim` - Bootstrap installation command
+- `ftplugin/agent-prompt.vim` - Prompt buffer configuration
+- `ftplugin/agent-content.vim` - Content buffer configuration with folding
+- `syntax/agent-prompt.vim` - Syntax highlighting for mentions and commands
+- `lua/agent_nvim/folds.lua` - Fold management for tool calls/results
+- `scripts/install.py` - Standalone installation script
+- `doc/agent.txt` - Vim help documentation
+
+### Directories to Note
+- `avante.nvim/` and `codecompanion.nvim/` - Appear to be separate plugin repositories in the workspace (not part of agent.nvim)
+- `docs/` - Additional documentation directory including folding implementation details
+
+## Slash Commands
+
+- `/clear` - Clear chat history
+- `/cancel` - Cancel current request
+- `/help` - Show help message
+
+## Tool Details
+
+### File Reading
+- Limited to 64,000 bytes by default (configurable via `AGENT_MAX_READ_BYTES`)
+- Shows truncation notice for large files
+- Prevents repeated reading of large files to save tokens
+
+### Directory Listing
+- Recursive search excluding `.git` directories
+- Limited to 100 files to prevent excessive output
+
+### Repository Search
+- Uses ripgrep with fallback to grep
+- Limited to 2,000 characters of output
+- Searches from current working directory
+
+### Patch Application
+- Creates diff buffer for review
+- Uses `git apply` with whitespace tolerance
+- Must be manually applied after review
+
+## Known Patterns
+
+- All Neovim API calls from async contexts must use `nvim.async_call`
+- String responses are split on newlines before writing to buffers
+- File mentions are resolved before sending to agent but shown as-is to user
+- Error messages are written to stderr via `nvim.err_write`
+- Tool calls and results are automatically folded to reduce interface clutter
+- Streaming is used for agent responses but instant append is used for tool output
