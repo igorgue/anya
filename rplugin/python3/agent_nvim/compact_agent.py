@@ -29,6 +29,27 @@ class CompactAgent:
         self.model = model
         self.logger = logger
         self.agent = self._create_compact_agent()
+    
+    def _run_async_safely(self, coro):
+        """Run async code safely, handling existing event loops.
+        
+        If an event loop is already running (common in Neovim plugins),
+        run the coroutine in a separate thread with its own event loop.
+        """
+        import asyncio
+        import concurrent.futures
+        
+        try:
+            # Try to get the running loop
+            asyncio.get_running_loop()
+            # If we get here, a loop is already running
+            self.logger.debug("Event loop detected, running async code in separate thread")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(asyncio.run, coro)
+                return future.result()
+        except RuntimeError:
+            # No event loop running, use asyncio.run normally
+            return asyncio.run(coro)
         
     def _create_compact_agent(self):
         """Create specialized summarization agent with custom system prompt."""
@@ -207,13 +228,20 @@ class CompactAgent:
             self.logger.error(f"Error creating validate tool: {e}")
             return None
     
-    def compact_conversation(self, conversation_history: List[Dict], target_tokens: Optional[int] = None) -> str:
-        """Main method to compact conversation using the specialized agent."""
+    def compact_conversation(self, conversation_history: List[Dict], target_tokens: Optional[int] = None) -> tuple:
+        """Main method to compact conversation using the specialized agent.
+        
+        Returns:
+            Tuple of (summary_text, compacted_conversation_history)
+        """
         if not self.agent:
             self.logger.warning("Compact agent not available, using fallback compaction")
             return self._fallback_compaction(conversation_history, target_tokens)
             
         try:
+            import asyncio
+            from agents import Runner
+            
             # Format conversation for agent
             conversation_text = self._format_conversation(conversation_history)
             
@@ -223,20 +251,33 @@ class CompactAgent:
             else:
                 target_prompt = "Compact the conversation while preserving essential context."
             
-            # Run the agent
-            result = self.agent.run(
-                f"{target_prompt}\n\nCONVERSATION:\n{conversation_text}"
-            )
+            # Run the agent using Runner
+            async def run_compact():
+                result = await Runner.run(
+                    self.agent,
+                    f"{target_prompt}\n\nCONVERSATION:\n{conversation_text}\n\nProvide a concise summary that preserves key decisions and context."
+                )
+                return str(result.final_output) if hasattr(result, 'final_output') else str(result)
             
-            return str(result.value) if hasattr(result, 'value') else str(result)
+            # Run async code, handling case where event loop is already running
+            summary_text = self._run_async_safely(run_compact())
+            
+            # Convert summary back to conversation history format
+            compacted_history = self._summary_to_conversation_history(summary_text, conversation_history)
+            
+            return summary_text, compacted_history
             
         except Exception as e:
             self.logger.error(f"Error in compact_conversation: {e}")
             self.logger.info("Falling back to simple compaction method")
             return self._fallback_compaction(conversation_history, target_tokens)
             
-    def _fallback_compaction(self, conversation_history: List[Dict], target_tokens: Optional[int] = None) -> str:
-        """Fallback compaction method when the agent is not available."""
+    def _fallback_compaction(self, conversation_history: List[Dict], target_tokens: Optional[int] = None) -> tuple:
+        """Fallback compaction method when the agent is not available.
+        
+        Returns:
+            Tuple of (summary_text, compacted_conversation_history)
+        """
         try:
             # Format conversation
             conversation_text = self._format_conversation(conversation_history)
@@ -249,7 +290,9 @@ class CompactAgent:
                 
                 # Take first and last parts, keep important content
                 if len(conversation_text) <= target_chars:
-                    return conversation_text
+                    summary = conversation_text
+                    compacted_history = self._summary_to_conversation_history(summary, conversation_history)
+                    return summary, compacted_history
                 
                 # Simple strategy: keep first 30%, middle 20%, last 30%
                 first_part_end = int(len(lines) * 0.3)
@@ -287,7 +330,8 @@ class CompactAgent:
                     del compacted_lines[mid-2:mid+2]  # Remove 4 lines from middle
                     compacted_text = '\n'.join(compacted_lines)
                 
-                return compacted_text
+                compacted_history = self._summary_to_conversation_history(compacted_text, conversation_history)
+                return compacted_text, compacted_history
             else:
                 # Default: reduce to about 60% of original
                 target_lines = max(10, int(len(lines) * 0.6))
@@ -296,17 +340,19 @@ class CompactAgent:
                 first_part = lines[:target_lines//2]
                 last_part = lines[-target_lines//4:]
                 
-                compacted_lines = first_part + ["\n... [content compacted] ...\n"] + last_part
-                
-                return '\n'.join(compacted_lines)
+                compacted_text = '\n'.join(first_part + ["\n... [content compacted] ...\n"] + last_part)
+                compacted_history = self._summary_to_conversation_history(compacted_text, conversation_history)
+                return compacted_text, compacted_history
                 
         except Exception as e:
             self.logger.error(f"Error in fallback compaction: {e}")
             # Ultimate fallback: return a simple summary
-            return f"## Compacted Conversation\n\nThe conversation has been compacted to reduce token usage.\nOriginal conversation had {len(conversation_history)} messages.\n\n*Note: Advanced compaction features require OpenAI agents SDK.*"
+            summary = f"## Compacted Conversation\n\nThe conversation has been compacted to reduce token usage.\nOriginal conversation had {len(conversation_history)} messages.\n\n*Note: Advanced compaction features require OpenAI agents SDK.*"
+            compacted_history = self._summary_to_conversation_history(summary, conversation_history)
+            return summary, compacted_history
     
     def compact_with_instructions(self, conversation_history: List[Dict], 
-                                instructions: str, target_tokens: Optional[int] = None) -> str:
+                                instructions: str, target_tokens: Optional[int] = None) -> tuple:
         """Compact conversation with user-provided natural language instructions.
         
         Args:
@@ -315,7 +361,7 @@ class CompactAgent:
             target_tokens: Optional target token count
             
         Returns:
-            Compacted conversation summary following user instructions
+            Tuple of (summary_text, compacted_conversation_history)
         """
         # Check if instruction-aware agent is available
         instruction_agent = self._create_enhanced_agent(instructions)
@@ -325,6 +371,9 @@ class CompactAgent:
             return self._fallback_compaction_with_instructions(conversation_history, instructions, target_tokens)
         
         try:
+            import asyncio
+            from agents import Runner
+            
             # Format conversation for agent
             conversation_text = self._format_conversation(conversation_history)
             
@@ -332,10 +381,18 @@ class CompactAgent:
             target_text = f" (target: ~{target_tokens} tokens)" if target_tokens else ""
             prompt = f"Compact the following conversation according to the instructions provided{target_text}:\n\n"
             prompt += f"CONVERSATION:\n{conversation_text}\n\n"
+            prompt += f"INSTRUCTIONS:\n{instructions}\n\nProvide a concise summary that follows the user's instructions."
             
-            result = instruction_agent.run(prompt)
+            async def run_with_instructions():
+                result = await Runner.run(instruction_agent, prompt)
+                return str(result.final_output) if hasattr(result, 'final_output') else str(result)
             
-            return str(result.value) if hasattr(result, 'value') else str(result)
+            summary_text = self._run_async_safely(run_with_instructions())
+            
+            # Convert summary back to conversation history format
+            compacted_history = self._summary_to_conversation_history(summary_text, conversation_history)
+            
+            return summary_text, compacted_history
             
         except Exception as e:
             self.logger.error(f"Error in compact_with_instructions: {e}")
@@ -343,8 +400,12 @@ class CompactAgent:
             return self._fallback_compaction_with_instructions(conversation_history, instructions, target_tokens)
             
     def _fallback_compaction_with_instructions(self, conversation_history: List[Dict], 
-                                             instructions: str, target_tokens: Optional[int] = None) -> str:
-        """Fallback compaction with instructions when agent is not available."""
+                                             instructions: str, target_tokens: Optional[int] = None) -> tuple:
+        """Fallback compaction with instructions when agent is not available.
+        
+        Returns:
+            Tuple of (summary_text, compacted_conversation_history)
+        """
         try:
             # Parse instructions for content filtering
             instructions_lower = instructions.lower()
@@ -440,12 +501,16 @@ class CompactAgent:
                 ""
             ])
             
-            return '\n'.join(result_lines)
+            summary = '\n'.join(result_lines)
+            compacted_history = self._summary_to_conversation_history(summary, conversation_history)
+            return summary, compacted_history
             
         except Exception as e:
             self.logger.error(f"Error in fallback compaction with instructions: {e}")
             # Ultimate fallback
-            return f"## Compacted Conversation\n\nFailed to apply specific instructions. Simple compaction applied.\n\nInstructions: {instructions}\n\nOriginal messages: {len(conversation_history)}"
+            summary = f"## Compacted Conversation\n\nFailed to apply specific instructions. Simple compaction applied.\n\nInstructions: {instructions}\n\nOriginal messages: {len(conversation_history)}"
+            compacted_history = self._summary_to_conversation_history(summary, conversation_history)
+            return summary, compacted_history
     
     def _create_enhanced_agent(self, user_instructions: str):
         """Create agent with user-specific instructions for compaction."""
@@ -628,6 +693,29 @@ class CompactAgent:
                 formatted.append(str(msg))
         
         return '\n\n'.join(formatted)
+    
+    def _summary_to_conversation_history(self, summary: str, original_history: List[Dict]) -> List[Dict]:
+        """Convert agent summary back into conversation history format.
+        
+        Creates a compacted conversation by treating the summary as a single assistant message
+        that represents the compacted context, preserving the original conversation structure
+        but with reduced content.
+        """
+        try:
+            # Create a single compacted message from the summary
+            compacted_message = {
+                'role': 'assistant',
+                'content': summary
+            }
+            
+            # Return just the compacted summary as the new conversation
+            # This effectively replaces all previous turns with a single summary turn
+            return [compacted_message]
+            
+        except Exception as e:
+            self.logger.error(f"Error converting summary to conversation history: {e}")
+            # Fallback: return the original history
+            return original_history
     
     def infer_token_target(self, instructions: str, current_tokens: int) -> int:
         """Intelligently infer target token count from natural language instructions.

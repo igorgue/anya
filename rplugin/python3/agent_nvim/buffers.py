@@ -336,9 +336,13 @@ class BufferManager:
                     # If variable doesn't exist, default to enabled
                     autoscroll_enabled = 1
                 
-                # Only scroll if autoscroll is enabled
-                if autoscroll_enabled:
-                    win.cursor = (end_line, 0)
+                # Only scroll if autoscroll is enabled and position is valid
+                if autoscroll_enabled and end_line > 0:
+                    try:
+                        win.cursor = (end_line, 0)
+                    except Exception:
+                        # Cursor position invalid, skip scrolling
+                        pass
         
         # Restore focus to the previously active window
         if current_win and current_win.valid:
@@ -775,22 +779,18 @@ class BufferManager:
             if not self.content_buf or not self.content_buf.valid:
                 return
                 
-            from .utils import get_current_timestamp
+            # Clean up summary: remove "USER: " and "ASSISTANT: " prefixes
+            cleaned_lines = []
+            for line in summary.split('\n'):
+                # Remove USER: or ASSISTANT: prefixes if present
+                if line.startswith('USER: '):
+                    cleaned_lines.append(line[6:])
+                elif line.startswith('ASSISTANT: '):
+                    cleaned_lines.append(line[11:])
+                else:
+                    cleaned_lines.append(line)
             
-            # Create compacted content with metadata
-            timestamp = get_current_timestamp()
-            metadata = f"\n\n--- Context compacted at {timestamp} ---\n"
-            
-            # Replace buffer content with compacted summary
-            new_content = [
-                "## Compacted Conversation",
-                "*This conversation was compacted to reduce token usage. Original context preserved in summary below.*",
-                "",
-                summary,
-                metadata,
-                "## Continue Conversation",
-                ""
-            ]
+            new_content = cleaned_lines
             
             nvim.api.buf_set_lines(
                 self.content_buf, 

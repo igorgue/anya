@@ -74,7 +74,6 @@ class AgentPlugin(object):
                 self.nvim.out_write("⚠️ CompactAgent initialized in fallback mode (limited functionality). Install OpenAI agents SDK for full features.\n")
             else:
                 self.logger.info(f"Compact agent initialized with model: {compact_model}")
-                self.nvim.out_write(f"✅ CompactAgent initialized with model: {compact_model}\n")
                 
         except Exception as e:
             self.logger.error(f"Failed to setup compact agent: {e}")
@@ -96,71 +95,74 @@ class AgentPlugin(object):
         return model
         
     def _get_conversation_context(self) -> List[Dict]:
-        """Extract current conversation context from AgentContent buffer."""
+        """Get current conversation context from stored conversation history."""
         try:
-            if not hasattr(self.buffer_manager, 'content_buf') or not self.buffer_manager.content_buf:
-                return []
-                
-            # Get buffer content
-            lines = self.nvim.api.buf_get_lines(self.buffer_manager.content_buf, 0, -1, False)
-            content = '\n'.join(lines)
-            
-            # Split by message markers and create conversation history
-            conversation_history = []
-            current_message = ""
-            current_role = "user"
-            
-            for line in lines:
-                if line.startswith('## '):
-                    # Save previous message if any
-                    if current_message.strip():
-                        conversation_history.append({
-                            'role': current_role,
-                            'content': current_message.strip()
-                        })
-                    # Start new message
-                    current_role = 'assistant' if 'Assistant' in line else 'user'
-                    current_message = line
-                else:
-                    current_message += '\n' + line if current_message else line
-            
-            # Add final message
-            if current_message.strip():
-                conversation_history.append({
-                    'role': current_role,
-                    'content': current_message.strip()
-                })
-            
-            # Include stored conversation history as well
+            # Return the maintained conversation history directly
+            # This is the source of truth, not the buffer representation
             if self._conversation_history:
-                conversation_history.extend(self._conversation_history)
-                
-            return conversation_history
+                return self._conversation_history
+            else:
+                return []
             
         except Exception as e:
             self.logger.error(f"Error getting conversation context: {e}")
             return []
             
+    def _redraw_buffer_with_history(self, compacted_history: List[Dict]):
+        """Redraw the buffer with a new conversation history.
+        
+        This clears the content buffer and reconstructs it from the compacted history.
+        """
+        try:
+            if not hasattr(self.buffer_manager, 'content_buf') or not self.buffer_manager.content_buf:
+                return
+            
+            # Build markdown lines from conversation history
+            lines = []
+            for msg in compacted_history:
+                role = msg.get('role', 'user')
+                content = msg.get('content', '')
+                
+                # Format as markdown message with role header
+                role_display = role.title() if role != 'system' else 'System'
+                lines.append(f"## {role_display}")
+                lines.append(content)
+                lines.append("")
+            
+            # Set buffer content
+            self.nvim.api.buf_set_lines(
+                self.buffer_manager.content_buf, 
+                0, 
+                -1, 
+                False, 
+                lines
+            )
+            
+            # Update internal conversation history
+            self._conversation_history = []
+            
+            self.logger.info(f"Redrew buffer with {len(compacted_history)} compacted messages")
+        except Exception as e:
+            self.logger.error(f"Error redrawing buffer: {e}")
+    
     def _apply_compacted_context(self, summary: str):
         """Apply compacted context to the conversation buffer."""
         try:
             if not hasattr(self.buffer_manager, 'content_buf') or not self.buffer_manager.content_buf:
                 return
                 
-            # Create compacted content with metadata
-            timestamp = utils.get_current_timestamp()
-            metadata = f"\n\n--- Context compacted at {timestamp} ---\n"
+            # Clean up summary: remove "USER: " and "ASSISTANT: " prefixes
+            cleaned_lines = []
+            for line in summary.split('\n'):
+                # Remove USER: or ASSISTANT: prefixes if present
+                if line.startswith('USER: '):
+                    cleaned_lines.append(line[6:])
+                elif line.startswith('ASSISTANT: '):
+                    cleaned_lines.append(line[11:])
+                else:
+                    cleaned_lines.append(line)
             
-            # Replace buffer content with compacted summary
-            new_content = [
-                "## Compacted Conversation",
-                f"*This conversation was compacted to reduce token usage. Original context preserved in summary below.*",
-                "",
-                summary,
-                metadata,
-                "## Continue Conversation",
-                ""
-            ]
+            new_content = cleaned_lines
             
             self.nvim.api.buf_set_lines(
                 self.buffer_manager.content_buf, 
@@ -178,8 +180,7 @@ class AgentPlugin(object):
             
             # Show success message
             self.buffer_manager.append_content([
-                "",
-                "✅ **Context compacted successfully**",
+                "> **Context compacted successfully**",
                 f"Conversation reduced to essential context.",
                 ""
             ])
@@ -563,13 +564,26 @@ class AgentPlugin(object):
             # Show initial message
             self.buffer_manager.append_content([
                 "",
-                "🔄 **Analyzing conversation for compaction...**",
+                "> **Compacting...**",
                 f"Target tokens: {target_tokens or 'auto-detect'}",
                 ""
             ])
             
-            # Perform compaction synchronously to avoid async issues
-            self._perform_compaction(current_context, instructions, target_tokens)
+            # Run compaction in background thread to avoid blocking event loop
+            import threading
+            def run_compaction_thread():
+                try:
+                    self._perform_compaction(current_context, instructions, target_tokens)
+                except Exception as e:
+                    self.logger.error(f"Error in compaction thread: {e}")
+                    # Use async_call to update UI from thread
+                    self.nvim.async_call(
+                        self.buffer_manager.append_content,
+                        [f"❌ **Compaction error**: {str(e)}", ""]
+                    )
+            
+            thread = threading.Thread(target=run_compaction_thread, daemon=True)
+            thread.start()
             
         except Exception as e:
             self.logger.error(f"Error handling compact command: {e}")
@@ -583,153 +597,87 @@ class AgentPlugin(object):
         """Perform the actual compaction."""
         try:
             # Show progress
-            self.buffer_manager.append_content(["📊 Analyzing conversation context..."])
+            self.nvim.async_call(self.buffer_manager.append_content, ["> **Analyzing conversation context...**"])
             
             # Use context analyzer if available
             if self.context_analyzer:
                 key_elements = self.context_analyzer.extract_key_elements(conversation_history)
-                self.buffer_manager.append_content([
+                self.nvim.async_call(self.buffer_manager.append_content, [
                     f"Found {len(key_elements.get('active_tasks', []))} active tasks",
                     f"Found {len(key_elements.get('file_references', []))} file references"
                 ])
             
             # Generate summary
-            self.buffer_manager.append_content(["🔄 Generating compacted summary..."])
+            self.nvim.async_call(self.buffer_manager.append_content, ["", "> **Generating compacted summary...**"])
             
             if instructions and self.compact_agent:
                 # Use instruction-aware compaction
-                summary = self.compact_agent.compact_with_instructions(
+                summary, compacted_history = self.compact_agent.compact_with_instructions(
                     conversation_history, instructions, target_tokens
                 )
             elif self.compact_agent:
                 # Use standard compaction
-                summary = self.compact_agent.compact_conversation(conversation_history, target_tokens)
+                summary, compacted_history = self.compact_agent.compact_conversation(conversation_history, target_tokens)
             else:
                 # Show informative message about fallback mode
-                self.buffer_manager.append_content([
+                self.nvim.async_call(self.buffer_manager.append_content, [
                     "⚠️ Using fallback compaction mode (limited features)",
                     "*For AI-powered compaction, install OpenAI agents SDK*"
                 ])
                 
                 # Use simple fallback compaction
-                summary = self._fallback_compaction(conversation_history, instructions, target_tokens)
+                summary, compacted_history = self._fallback_compaction(conversation_history, instructions, target_tokens)
             
             # Get original text for comparison
             original_text = '\n'.join(msg.get('content', '') for msg in conversation_history)
             
-            # Show preview
-            self.buffer_manager.append_content(["⏸️ Showing preview for approval..."])
-            
-            def show_preview_sync():
-                """Show preview synchronously in main thread."""
-                try:
-                    if self.preview_modal:
-                        approved = self.preview_modal.show_preview(original_text, summary)
-                    else:
-                        # Auto-apply if no preview modal available
-                        self.buffer_manager.append_content(["✅ Applying compacted context (auto-approved)"])
-                        self._apply_compacted_context(summary)
-                        return
-                        
-                    if approved == "regenerate":
-                        self.buffer_manager.append_content([
-                            "🔄 Regenerating with different settings...",
-                            "(Regeneration feature coming soon)",
-                            ""
-                        ])
-                        return
-                    
-                    if approved:
-                        # User approved compaction
-                        decision, edited_summary = self.preview_modal.get_decision()
-                        final_summary = edited_summary if edited_summary else summary
-                        
-                        self.buffer_manager.append_content(["✅ Applying compacted context..."])
-                        self._apply_compacted_context(final_summary)
-                        
-                        # Show statistics
-                        original_tokens = len(original_text) // 4
-                        summary_tokens = len(final_summary) // 4
-                        reduction = (1 - summary_tokens / original_tokens) * 100 if original_tokens > 0 else 0
-                        
-                        self.buffer_manager.append_content([
-                            f"📊 **Compaction complete**",
-                            f"- Tokens reduced from ~{original_tokens:,} to ~{summary_tokens:,} ({reduction:.1f}% reduction)",
-                            f"- Conversation context preserved",
-                            ""
-                        ])
-                    else:
-                        self.buffer_manager.append_content([
-                            "❌ Compaction cancelled",
-                            ""
-                        ])
-                except Exception as e:
-                    self.logger.error(f"Error in show_preview_sync: {e}")
-                    self.buffer_manager.append_content([
-                        f"❌ Error during preview: {str(e)}",
-                        ""
-                    ])
-                    
-                    if approved == "regenerate":
-                        self.buffer_manager.append_content([
-                            "🔄 Regenerating with different settings...",
-                            "(Regeneration feature coming soon)",
-                            ""
-                        ])
-                        return
-                    
-                    if approved:
-                        # User approved compaction
-                        decision, edited_summary = self.preview_modal.get_decision()
-                        final_summary = edited_summary if edited_summary else summary
-                        
-                        self.buffer_manager.append_content(["✅ Applying compacted context..."])
-                        self._apply_compacted_context(final_summary)
-                        
-                        # Show statistics
-                        original_tokens = len(original_text) // 4
-                        summary_tokens = len(final_summary) // 4
-                        reduction = (1 - summary_tokens / original_tokens) * 100 if original_tokens > 0 else 0
-                        
-                        self.buffer_manager.append_content([
-                            f"📊 **Compaction complete**",
-                            f"- Tokens reduced from ~{original_tokens:,} to ~{summary_tokens:,} ({reduction:.1f}% reduction)",
-                            f"- Conversation context preserved",
-                            ""
-                        ])
-                    else:
-                        self.buffer_manager.append_content([
-                            "❌ Compaction cancelled",
-                            ""
-                        ])
+            # Show preview and apply
+            try:
+                if self.preview_modal:
+                    approved = self.preview_modal.show_preview(original_text, summary)
                 else:
                     # Auto-apply if no preview modal available
-                    self._apply_compacted_context(summary)
-                    self.buffer_manager.append_content(["✅ Compacted context applied (auto-approved)"])
-            
-            # Apply compaction directly to avoid async switching issues
-            try:
-                self._apply_compacted_context(summary)
-                
-                # Show statistics
-                original_tokens = len(original_text) // 4
-                summary_tokens = len(summary) // 4
-                reduction = (1 - summary_tokens / original_tokens) * 100 if original_tokens > 0 else 0
-                
-                self.buffer_manager.append_content([
-                    f"📊 **Compaction complete**",
-                    f"- Tokens reduced from ~{original_tokens:,} to ~{summary_tokens:,} ({reduction:.1f}% reduction)",
-                    f"- Conversation context preserved",
+                    approved = True
+                    
+                if approved:
+                    # User approved compaction
+                    if self.preview_modal:
+                        decision, edited_summary = self.preview_modal.get_decision()
+                        final_summary = edited_summary if edited_summary else summary
+                    else:
+                        final_summary = summary
+                    
+                    self.nvim.async_call(self.buffer_manager.append_content, ["> **Applying compacted context...**"])
+                    # Clear buffer and redraw with compacted history
+                    self.nvim.async_call(self._redraw_buffer_with_history, compacted_history)
+                    
+                    # Show statistics
+                    original_tokens = len(original_text) // 4
+                    summary_tokens = len(final_summary) // 4
+                    reduction = (1 - summary_tokens / original_tokens) * 100 if original_tokens > 0 else 0
+                    
+                    self.nvim.async_call(self.buffer_manager.append_content, [
+                        f"> **Compaction complete**",
+                        f"Tokens reduced from ~{original_tokens:,} to ~{summary_tokens:,} ({reduction:.1f}% reduction)",
+                        f"Conversation context preserved",
+                        ""
+                    ])
+                else:
+                    self.nvim.async_call(self.buffer_manager.append_content, [
+                        "> **Compaction cancelled**",
+                        ""
+                    ])
+            except Exception as e:
+                self.logger.error(f"Error in compaction preview: {e}")
+                self.nvim.async_call(self.buffer_manager.append_content, [
+                    f"> Error during compaction: {str(e)}",
                     ""
                 ])
-            except Exception as apply_error:
-                self.logger.error(f"Error applying compaction: {apply_error}")
-                self.buffer_manager.append_content([f"❌ Error applying compaction: {apply_error}"])
             
         except Exception as e:
             self.logger.error(f"Error performing compaction: {e}")
             self.nvim.async_call(self.buffer_manager.append_content, [
-                f"❌ **Compaction failed**: {str(e)}",
+                f"> **Compaction failed**: {str(e)}",
                 ""
             ])
         
@@ -756,6 +704,7 @@ class AgentPlugin(object):
                 [
                     "",
                     "## Help",
+                    "",
                     "- `/clear`: Clear chat history",
                     "- `/cancel`: Cancel current request",
                     "- `/file`: Open file picker and add files to prompt",

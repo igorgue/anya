@@ -5,17 +5,27 @@ local AVAILABLE_COMMANDS = {
   {
     label = '/clear',
     description = 'Clear chat history',
-    kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Text or 1
+    kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Keyword or 14
   },
   {
     label = '/cancel',
     description = 'Cancel current request',
-    kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Text or 1
+    kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Keyword or 14
+  },
+  {
+    label = '/file',
+    description = 'Open file picker and add files to prompt',
+    kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Keyword or 14
+  },
+  {
+    label = '/compact',
+    description = 'Compact conversation context',
+    kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Keyword or 14
   },
   {
     label = '/help',
     description = 'Show help message',
-    kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Text or 1
+    kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Keyword or 14
   }
 }
 
