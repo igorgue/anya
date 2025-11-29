@@ -272,6 +272,9 @@ class BufferManager:
 
         # Get the new line count (end of appended content)
         end_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
+        
+        # Highlight file references in appended lines
+        self._highlight_file_refs(start_line, end_line)
 
         # Autoscroll to bottom only if autoscroll is enabled
         for win in self.nvim.windows:
@@ -296,24 +299,51 @@ class BufferManager:
             self._create_fold(bufnr, fold_start, fold_end)
     
     def _create_fold(self, bufnr, start_line, end_line):
-        """Create a fold in the buffer.
+         """Create a fold in the buffer.
+         
+         Args:
+             bufnr: Buffer number
+             start_line: Start line (1-indexed)
+             end_line: End line (1-indexed)
+         """
+         try:
+             # Add highlight to the first line (tool output title) using OkMsg
+             # start_line is 1-indexed, nvim_buf_add_highlight uses 0-indexed
+             self.nvim.api.buf_add_highlight(bufnr, -1, "OkMsg", start_line - 1, 0, -1)
+             
+             self.nvim.exec_lua(
+                 "require('agent_nvim.folds').create_fold(...)",
+                 bufnr, start_line, end_line, None
+             )
+         except Exception as e:
+             self.logger.error(f"Error creating fold: {e}")
+    
+    def _highlight_file_refs(self, start_line, end_line):
+        """Highlight file references in the specified range.
         
         Args:
-            bufnr: Buffer number
-            start_line: Start line (1-indexed)
-            end_line: End line (1-indexed)
+            start_line: Start line (0-indexed)
+            end_line: End line (0-indexed, exclusive)
         """
         try:
-            # Add highlight to the first line (tool output title) using OkMsg
-            # start_line is 1-indexed, nvim_buf_add_highlight uses 0-indexed
-            self.nvim.api.buf_add_highlight(bufnr, -1, "OkMsg", start_line - 1, 0, -1)
+            if not self.content_buf or not self.content_buf.valid:
+                return
             
-            self.nvim.exec_lua(
-                "require('agent_nvim.folds').create_fold(...)",
-                bufnr, start_line, end_line, None
-            )
+            import re
+            bufnr = self.content_buf.number
+            lines = self.nvim.api.buf_get_lines(self.content_buf, start_line, end_line, False)
+            
+            # Pattern for file references like @path/to/file
+            pattern = r'@[a-zA-Z0-9_./-]+/[a-zA-Z0-9_./-]*'
+            
+            for idx, line in enumerate(lines):
+                line_num = start_line + idx
+                for match in re.finditer(pattern, line):
+                    start_col = match.start()
+                    end_col = match.end()
+                    self.nvim.api.buf_add_highlight(bufnr, -1, "Directory", line_num, start_col, end_col)
         except Exception as e:
-            self.logger.error(f"Error creating fold: {e}")
+            self.logger.debug(f"Error highlighting file refs: {e}")
     
     def append_stream_lua_direct(self, text, bufnr):
         """Append text using Lua animation for smooth typing effect.

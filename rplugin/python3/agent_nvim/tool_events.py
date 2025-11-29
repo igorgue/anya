@@ -191,7 +191,7 @@ def display_tool_result(
                 tool_title = f"**  {tool_name}**"
             
             output_lines.append(tool_title)
-            output_lines.append("````")
+            output_lines.append("``````")
             output_lines.append("**Arguments**:")
 
             if args:
@@ -206,7 +206,7 @@ def display_tool_result(
         output_lines.append("```")
         output_lines.append(result_str)
         output_lines.append("```")
-        output_lines.append("````")
+        output_lines.append("``````")
         output_lines.append("")
 
         fold_summary = f"**  {tool_name}**"

@@ -36,6 +36,12 @@ class AgentPlugin(object):
         
         # Tool wrappers will be created lazily
         self._tool_wrappers = None
+        
+        # Initialize Lua module
+        try:
+            nvim.exec_lua("require('agent_nvim')")
+        except Exception as e:
+            self.logger.debug(f"Failed to initialize Lua module: {e}")
     
     def _setup_logging(self):
         """Set up logging configuration."""
