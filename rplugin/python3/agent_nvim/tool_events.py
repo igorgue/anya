@@ -77,6 +77,10 @@ def display_tool_call(
         content_bufnr: Buffer number for creating folds
     """
     try:
+        # Pause streaming immediately when a tool call starts
+        # This prevents text from appearing before tool output
+        nvim.async_call(lambda: nvim.exec_lua("_G.agent_stream_paused = true"))
+        
         # Extract tool arguments
         args = tool_data.get("arguments") or tool_data.get("args") or {}
 
@@ -179,8 +183,13 @@ def display_tool_result(
 
         fold_summary = f"**  {tool_name}**"
 
-        # Append content and fold it
-        nvim.async_call(lambda: append_content_fn(output_lines, fold=True))
+        # Append content and fold it, then resume streaming
+        def append_and_resume():
+            append_content_fn(output_lines, fold=True)
+            # Resume streaming after tool output is written
+            nvim.exec_lua("_G.agent_stream_paused = false")
+        
+        nvim.async_call(append_and_resume)
 
     except Exception as e:
         logger.error(f"Error displaying tool result: {e}")
