@@ -171,6 +171,14 @@ Constraints:
         header_lines = ["", f"# Agent ({display_model})", "", ""]
         nvim.async_call(buffer_manager.append_content, header_lines)
 
+        # Track the line number where agent response will start
+        # Used to capture only the LLM response if cancelled
+        agent_response_start_line = None
+        try:
+            agent_response_start_line = len(nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False))
+        except Exception:
+            pass
+
         # Build input from conversation history
         input_messages = conversation_history.copy()
 
@@ -263,6 +271,25 @@ Constraints:
             if cancel_flag_getter():
                 logger.info(f"Agent request {request_id} cancelled by user")
                 status = "cancelled"
+                # Capture partial output before cancelling
+                if hasattr(result_stream, "final_output") and result_stream.final_output:
+                    conversation_history.append(
+                        {"role": "assistant", "content": f"[Cancelled]\n{str(result_stream.final_output)}"}
+                    )
+                elif agent_response_start_line is not None and buffer_manager.content_buf and buffer_manager.content_buf.valid:
+                    # If no final output yet, capture only the LLM response from where it started
+                    try:
+                        all_lines = buffer_manager.nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
+                        # Extract only the lines after the agent header (which is at agent_response_start_line)
+                        response_lines = all_lines[agent_response_start_line:]
+                        response_content = "\n".join(response_lines).strip()
+                        if response_content:
+                            conversation_history.append({
+                                "role": "assistant",
+                                "content": f"[Cancelled]\n{response_content}"
+                            })
+                    except Exception as e:
+                        logger.debug(f"Could not capture cancelled output from buffer: {e}")
                 break
 
             event_type = type(event).__name__
@@ -427,11 +454,17 @@ Constraints:
                 ""
             ]
         )
+        # Add final output to conversation history even though we hit a limit
+        if hasattr(result_stream, "final_output") and result_stream.final_output:
+            conversation_history.append(
+                {"role": "assistant", "content": str(result_stream.final_output)}
+            )
         status = "success"  # Treat as success since we got partial output
     except Exception as e:
         import traceback
         
         error_str = str(e).lower()
+        error_message = str(e)
         
         # Check for context length exceeded errors from the API
         if "context" in error_str and ("length" in error_str or "exceeded" in error_str or "limit" in error_str):
@@ -445,6 +478,11 @@ Constraints:
                     ""
                 ]
             )
+            # Add error to conversation history for continuity
+            conversation_history.append({
+                "role": "assistant",
+                "content": f"[Error: Context limit reached. {error_message}]"
+            })
             status = "error"  # This is an error since we couldn't complete
         elif "maximum" in error_str and "token" in error_str:
             logger.info(f"Token limit exceeded: {e}")
@@ -457,10 +495,20 @@ Constraints:
                     ""
                 ]
             )
+            # Add error to conversation history for continuity
+            conversation_history.append({
+                "role": "assistant",
+                "content": f"[Error: Token limit reached. {error_message}]"
+            })
             status = "error"
         else:
             logger.error(f"Agent run failed: {e}\n{traceback.format_exc()}")
             nvim.async_call(buffer_manager.append_content, [f"\nError: {str(e)}"])
+            # Add error to conversation history for continuity
+            conversation_history.append({
+                "role": "assistant",
+                "content": f"[Error: {error_message}]"
+            })
             status = "error"
     finally:
         # Cleanup MCP servers if they were connected

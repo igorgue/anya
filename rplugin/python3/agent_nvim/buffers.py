@@ -645,25 +645,42 @@ class BufferManager:
 
     
     def append_cancel_message(self):
-        """Append cancellation message with smart spacing."""
+        """Queue cancellation message to be appended after streaming completes."""
         if hasattr(self, "content_buf") and self.content_buf and self.content_buf.valid:
-            lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
-
-            # Check if there's any response content after the agent header
-            response_started = False
-            if len(lines) > 4:
-                # Check the lines after the header structure
-                for i in range(4, len(lines)):
-                    if lines[i].strip():  # Non-empty line
-                        response_started = True
-                        break
-
-            if response_started:
-                # There's already content, so add the cancellation message with spacing
-                self.append_content(["", "**[Request cancelled by user]**"])
-            else:
-                # No content yet, just add the cancellation message
-                self.append_content(["**[Request cancelled by user]**"])
+            bufnr = self.content_buf.number
+            
+            # Add cancel message to the streaming queue so it appears after the response finishes
+            # We need to escape the text for Lua
+            lua_code = f"""
+            -- Initialize stream queue if it doesn't exist
+            if not _G.agent_stream_queue then
+                _G.agent_stream_queue = {{}}
+            end
+            
+            -- Queue the cancel message at the end
+            table.insert(_G.agent_stream_queue, {{
+                bufnr = {bufnr},
+                text = "\\n\\n**[Request cancelled by user]**",
+                remove_last_line = false
+            }})
+            """
+            try:
+                self.nvim.exec_lua(lua_code)
+            except Exception as e:
+                self.logger.error(f"Error queueing cancel message: {e}")
+                # Fallback: append directly if queue is not available
+                lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+                response_started = False
+                if len(lines) > 4:
+                    for i in range(4, len(lines)):
+                        if lines[i].strip():
+                            response_started = True
+                            break
+                
+                if response_started:
+                    self.append_content(["", "**[Request cancelled by user]**"])
+                else:
+                    self.append_content(["**[Request cancelled by user]**"])
     
     def enable_render_markdown(self):
         """Enable render-markdown for the content buffer."""

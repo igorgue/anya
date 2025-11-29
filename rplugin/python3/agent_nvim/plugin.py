@@ -25,6 +25,7 @@ from .agent_runner import run_agent
 from .tool_budget import ToolBudget
 from .compact_agent import CompactAgent, ContextAnalyzer
 from .compact_preview import CompactPreviewModal
+from . import tool_tracker
 
 # Constants
 PLUGIN_NAME = "agent.nvim"
@@ -50,6 +51,7 @@ class AgentPlugin(object):
         self._cancel_requested = False
         self._current_request_id = None
         self._cached_cwd = None
+        self._agent_busy = False
         
         # Tool wrappers will be created lazily
         self._tool_wrappers = None
@@ -227,6 +229,11 @@ class AgentPlugin(object):
                 # Track token usage
                 if tool_budget and isinstance(result, str):
                     tool_budget.consume(result)
+                
+                # Record file read for conversation history preservation
+                truncated = "FILE TRUNCATED" in result if isinstance(result, str) else False
+                tool_tracker.record_file_read(path, result, truncated)
+                
                 return result
             
             def list_files(path: str = ".") -> str:
@@ -237,6 +244,10 @@ class AgentPlugin(object):
                 # Track token usage (light tool, no budget check)
                 if tool_budget and isinstance(result, str):
                     tool_budget.consume(result)
+                
+                # Record file list for conversation history preservation
+                tool_tracker.record_file_list(path, result)
+                
                 return result
             
             def search_repo(query: str) -> str:
@@ -251,6 +262,10 @@ class AgentPlugin(object):
                 # Track token usage
                 if tool_budget and isinstance(result, str):
                     tool_budget.consume(result)
+                
+                # Record search for conversation history preservation
+                tool_tracker.record_search(query, result)
+                
                 return result
             
             def apply_patch(patch_str: str) -> str:
@@ -301,6 +316,10 @@ class AgentPlugin(object):
     @pynvim.command("AgentSubmit", sync=False)
     def agent_submit(self):
         """Submit the current prompt to the agent."""
+        # Don't submit if agent is busy
+        if self._agent_busy:
+            return
+            
         # Get content from prompt buffer
         prompt_buf = self.nvim.current.buffer
         lines = prompt_buf[:]
@@ -853,6 +872,9 @@ class AgentPlugin(object):
     
     def _handle_user_prompt(self, text):
         """Handle user prompt submission."""
+        # Reset tool tracker for new request
+        tool_tracker.reset_tool_reads()
+        
         # Cache cwd before async operations
         self._cached_cwd = self.nvim.call("getcwd")
 
@@ -884,6 +906,7 @@ class AgentPlugin(object):
         # Reset cancellation flag and set current request ID
         self._cancel_requested = False
         self._current_request_id = request_id
+        self._agent_busy = True
 
         # Run agent in background
         asyncio.create_task(self._run_agent_wrapper(request_id))
@@ -922,5 +945,12 @@ class AgentPlugin(object):
         # Log budget usage after request
         self.logger.info(f"Tool budget usage: {tool_budget.get_status()}")
         
+        # Add any tool reads to conversation history for preservation
+        if tool_tracker.add_tool_reads_to_history(self._conversation_history):
+            self.logger.info("Added tool reads to conversation history")
+        
         # Update the actual current_request_id after run_agent completes
         self._current_request_id = current_request_id_ref['value']
+        
+        # Clear the busy flag when agent finishes
+        self._agent_busy = False

@@ -156,6 +156,19 @@ Dependencies are installed to `~/.local/share/agent.nvim/venv` and injected into
 - Implemented via `WinScrolled`/`CursorMoved` autocmds with `b:agent_autoscroll_enabled` flag
 - Both Python append operations and Lua streaming respect the autoscroll state
 
+### Conversation History Preservation
+- **Error/Cancellation Handling**: Failed requests and cancelled responses are preserved in conversation history as error messages, allowing users to continue with context
+  - Captures only the partial LLM response (not buffer headers, welcome message, or user prompts)
+  - Tracks where agent response starts to extract clean output
+  - Preserves error messages with full context for debugging
+- **Tool Context Preservation**: All tool usage (file reads, searches, file listings) is automatically recorded and added to conversation history as system messages
+- **Continuous Context**: Users can use `continue` or add comments to drive the conversation forward without losing prior context
+- **Implementation**: 
+  - `tool_tracker.py` - Records all tool calls and results
+  - `agent_runner.py` - Captures partial LLM output on cancellation or error, tracks response start line
+  - `plugin.py` - Integrates tool tracking into tool wrappers and agent lifecycle
+- **Benefits**: Enables recovery from transient failures, allows iterative refinement, and preserves complex exploration context
+
 ## Codebase Context
 
 ### Important Files
@@ -168,6 +181,7 @@ Dependencies are installed to `~/.local/share/agent.nvim/venv` and injected into
   - `utils.py` - Utility functions
   - `token_tracker.py` - Token usage tracking
   - `tool_budget.py` - Tool budget management
+  - `tool_tracker.py` - Conversation history preservation tracking for tool usage
   - `mcp.py` - MCP server management
 - `plugin/agent.vim` - Bootstrap installation command
 - `ftplugin/agent-prompt.vim` - Prompt buffer configuration
