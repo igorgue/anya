@@ -163,7 +163,7 @@ Constraints:
         buffer_manager.reset_agent_response_flag()
 
         # Add agent header with proper spacing
-        header_lines = ["", f"## Agent ({display_model})", "", ""]
+        header_lines = ["", f"# Agent ({display_model})", "", ""]
         nvim.async_call(buffer_manager.append_content, header_lines)
 
         # Build input from conversation history

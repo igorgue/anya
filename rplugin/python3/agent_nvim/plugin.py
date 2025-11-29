@@ -202,7 +202,7 @@ class AgentPlugin(object):
             self.buffer_manager.append_content(
                 [
                     "",
-                    "### Help",
+                    "# Help",
                     "- `/clear`: Clear chat history",
                     "- `/cancel`: Cancel current request",
                     "- `/help`: Show this message",
@@ -234,7 +234,7 @@ class AgentPlugin(object):
                 pass
 
         # Append user message (show original text to user)
-        self.buffer_manager.append_content(["", f"## {username}", "", text])
+        self.buffer_manager.append_content(["", f"# {username}", "", text])
 
         # Add user message to conversation history
         self._conversation_history.append({"role": "user", "content": resolved_text})

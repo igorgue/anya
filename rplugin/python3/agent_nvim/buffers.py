@@ -273,8 +273,11 @@ class BufferManager:
         # Get the new line count (end of appended content)
         end_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
         
-        # Highlight file references in appended lines
+        # Highlight file references in appended lines (higher priority overrides Special)
         self._highlight_file_refs(start_line, end_line)
+        
+        # Highlight user prompts (lower priority so file refs can override)
+        self._highlight_user_prompt(start_line, end_line)
 
         # Autoscroll to bottom only if autoscroll is enabled
         for win in self.nvim.windows:
@@ -341,9 +344,49 @@ class BufferManager:
                 for match in re.finditer(pattern, line):
                     start_col = match.start()
                     end_col = match.end()
-                    self.nvim.api.buf_add_highlight(bufnr, -1, "Directory", line_num, start_col, end_col)
+                    # Use priority 10 so Directory highlights override Special
+                    self.nvim.api.buf_add_highlight(bufnr, 10, "Directory", line_num, start_col, end_col)
         except Exception as e:
             self.logger.debug(f"Error highlighting file refs: {e}")
+    
+    def _highlight_user_prompt(self, start_line, end_line):
+        """Highlight user prompt text with Special highlight group.
+        
+        Args:
+            start_line: Start line (0-indexed)
+            end_line: End line (0-indexed, exclusive)
+        """
+        try:
+            if not self.content_buf or not self.content_buf.valid:
+                return
+            
+            bufnr = self.content_buf.number
+            lines = self.nvim.api.buf_get_lines(self.content_buf, start_line, end_line, False)
+            
+            # Look for user prompt section: empty line, # Username header, empty line, then prompt text
+            # We mark the prompt text (after the header) with Special highlight
+            in_user_section = False
+            user_section_start = None
+            
+            for idx, line in enumerate(lines):
+                line_num = start_line + idx
+                
+                # Check if this is a user header line (# Username)
+                if line.startswith("# "):
+                    in_user_section = True
+                    user_section_start = line_num
+                    continue
+                
+                # If we're in a user section and we've moved past header setup
+                if in_user_section and user_section_start is not None:
+                    # Mark the prompt text with Special highlight (priority 0, lowest priority so Directory overrides)
+                    if line.strip():  # Only highlight non-empty lines
+                        self.nvim.api.buf_add_highlight(bufnr, 0, "Special", line_num, 0, -1)
+                    # Stop highlighting when we hit another section marker or agent response
+                    if line.startswith("#") or line.startswith("Agent") or line.startswith("**["):
+                        in_user_section = False
+        except Exception as e:
+            self.logger.debug(f"Error highlighting user prompt: {e}")
     
     def append_stream_lua_direct(self, text, bufnr):
         """Append text using Lua animation for smooth typing effect.
