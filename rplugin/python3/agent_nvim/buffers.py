@@ -229,6 +229,35 @@ class BufferManager:
                 return matches
             except Exception:
                 return []
+
+    def get_file_completions_async(self, base, callback_id):
+        """Provide async file path completions for @mentions.
+
+        Args:
+            base: Partial string to complete (after '@')
+            callback_id: ID for the callback to call with results
+        """
+        try:
+            cwd = self.nvim.call("getcwd")
+            matches = []
+
+            # Simple recursive search
+            for root, _, filenames in os.walk(cwd):
+                if ".git" in root:
+                    continue
+                for filename in filenames:
+                    rel_path = os.path.relpath(os.path.join(root, filename), cwd)
+                    if rel_path.startswith(base):
+                        matches.append(rel_path)
+                        if len(matches) > 50:  # Limit results
+                            break
+                if len(matches) > 50:
+                    break
+
+            # Call the Lua callback with results
+            self.nvim.exec_lua("agent_nvim_blink_file_completion_callback(...)", [matches, callback_id])
+        except Exception as e:
+            self.nvim.exec_lua("agent_nvim_blink_file_completion_callback(...)", [[], callback_id])
     
     def append_content(self, lines, fold=False):
         """Append one or more lines to the content buffer.

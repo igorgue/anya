@@ -186,6 +186,12 @@ class AgentPlugin(object):
         findstart, base = args
         return self.buffer_manager.get_completions(findstart, base)
     
+    @pynvim.function("AgentCompleteAsync", sync=False)
+    def agent_complete_async(self, args):
+        """Provide async file path completions for @mentions."""
+        base, callback_id = args
+        self.buffer_manager.get_file_completions_async(base, callback_id)
+
     @pynvim.function("AgentHighlightPrompt", sync=False)
     def agent_highlight_prompt(self, args):
         """Highlight file references in the prompt buffer."""
