@@ -220,6 +220,13 @@ class AgentPlugin(object):
         # Get username from environment and titlecase it
         username = os.environ.get("USER", "User").title()
 
+        # Reset autoscroll to enabled when new prompt is submitted
+        if hasattr(self.buffer_manager, "content_buf") and self.buffer_manager.content_buf and self.buffer_manager.content_buf.valid:
+            try:
+                self.nvim.api.buf_set_var(self.buffer_manager.content_buf, "agent_autoscroll_enabled", 1)
+            except Exception:
+                pass
+
         # Append user message (show original text to user)
         self.buffer_manager.append_content(["", f"## {username}", "", text])
 

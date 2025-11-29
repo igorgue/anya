@@ -273,10 +273,19 @@ class BufferManager:
         # Get the new line count (end of appended content)
         end_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
 
-        # Autoscroll to bottom
+        # Autoscroll to bottom only if autoscroll is enabled
         for win in self.nvim.windows:
             if win.buffer == self.content_buf:
-                win.cursor = (end_line, 0)
+                try:
+                    # Check if autoscroll is enabled for this buffer
+                    autoscroll_enabled = self.nvim.api.buf_get_var(self.content_buf, "agent_autoscroll_enabled")
+                except Exception:
+                    # If variable doesn't exist, default to enabled
+                    autoscroll_enabled = 1
+                
+                # Only scroll if autoscroll is enabled
+                if autoscroll_enabled:
+                    win.cursor = (end_line, 0)
         
         # Create fold if requested
         if fold and len(processed) > 1:
@@ -404,11 +413,25 @@ class BufferManager:
                     local lines = vim.split(chunk, "\\n", {{plain = true}})
                     vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
 
-                    -- Autoscroll
-                    for _, win in ipairs(vim.api.nvim_list_wins()) do
-                        if vim.api.nvim_win_get_buf(win) == item.bufnr then
-                            local new_line_count = vim.api.nvim_buf_line_count(item.bufnr)
-                            pcall(vim.api.nvim_win_set_cursor, win, {{new_line_count, 0}})
+                    -- Autoscroll only if autoscroll is enabled for this buffer
+                    local autoscroll_enabled = 1
+                    local ok, result = pcall(function()
+                        return vim.api.nvim_buf_get_var(item.bufnr, "agent_autoscroll_enabled")
+                    end)
+                    if ok and result == 0 then
+                        autoscroll_enabled = 0
+                    end
+                    
+                    if autoscroll_enabled == 1 then
+                        for _, win in ipairs(vim.api.nvim_list_wins()) do
+                            if vim.api.nvim_win_get_buf(win) == item.bufnr then
+                                local new_line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                                -- Only move cursor if it's already at or near the bottom (prevents forcing cursor back)
+                                local current_cursor = vim.api.nvim_win_get_cursor(win)
+                                if current_cursor[1] >= new_line_count - 1 then
+                                    pcall(vim.api.nvim_win_set_cursor, win, {{new_line_count, 0}})
+                                end
+                            end
                         end
                     end
                 end

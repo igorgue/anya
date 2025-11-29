@@ -30,7 +30,7 @@ agent.nvim is a Neovim plugin that integrates OpenAI's Agents SDK, providing an 
 
 **File Type Configuration**
 - `ftplugin/agent-prompt.vim`: Maps Enter to submit, sets completefunc
-- `ftplugin/agent-content.vim`: Configures wrapping and fold settings
+- `ftplugin/agent-content.vim`: Configures wrapping, fold settings, and smart autoscroll
 - `syntax/agent-prompt.vim`: Highlights slash commands and `@` mentions
 
 **Folding System** (`lua/agent_nvim/folds.lua`)
@@ -146,6 +146,14 @@ Dependencies are installed to `~/.local/share/agent.nvim/venv` and injected into
 - Triggered with `<C-x><C-u>` in prompt buffer
 - Searches recursively from cwd, excluding `.git` directories
 - Limited to 50 results
+
+### Smart Autoscroll
+- Content buffer automatically scrolls to bottom while LLM is responding (when user is at bottom)
+- Scrolling up during response disables autoscroll, allowing user to read earlier content
+- Scrolling back to the bottom during response re-enables autoscroll
+- Submitting a new prompt resets autoscroll to enabled
+- Implemented via `WinScrolled`/`CursorMoved` autocmds with `b:agent_autoscroll_enabled` flag
+- Both Python append operations and Lua streaming respect the autoscroll state
 
 ## Codebase Context
 
