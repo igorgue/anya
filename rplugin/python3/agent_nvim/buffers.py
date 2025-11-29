@@ -574,11 +574,7 @@ class BufferManager:
                         for _, win in ipairs(vim.api.nvim_list_wins()) do
                             if vim.api.nvim_win_get_buf(win) == item.bufnr then
                                 local new_line_count = vim.api.nvim_buf_line_count(item.bufnr)
-                                -- Only move cursor if it's already at or near the bottom (prevents forcing cursor back)
-                                local current_cursor = vim.api.nvim_win_get_cursor(win)
-                                if current_cursor[1] >= new_line_count - 1 then
-                                    pcall(vim.api.nvim_win_set_cursor, win, {{new_line_count, 0}})
-                                end
+                                pcall(vim.api.nvim_win_set_cursor, win, {{new_line_count, 0}})
                             end
                         end
                     end

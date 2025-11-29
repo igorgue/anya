@@ -12,32 +12,34 @@ if !exists('b:agent_autoscroll_enabled')
     let b:agent_autoscroll_enabled = 1
 endif
 
-" Handler for scroll events - detects when user scrolls
-function! AgentContentOnScroll() abort
+" Track the last known line count to detect content growth vs user movement
+if !exists('b:agent_last_line_count')
+    let b:agent_last_line_count = line('$')
+endif
+
+" Handler for cursor movement - only disables autoscroll when user moves away from bottom
+function! AgentContentOnCursorMoved() abort
     let line_count = line('$')
     let cursor_line = line('.')
     
-    " Check if cursor is at the last line (or very close to it)
-    " Allow a small tolerance for wrapped lines
-    if cursor_line >= line_count - 1
-        " User is at the bottom - enable autoscroll
-        let b:agent_autoscroll_enabled = 1
-    else
-        " User scrolled up - disable autoscroll
+    " If line count changed, content was added - don't change autoscroll state
+    if line_count != b:agent_last_line_count
+        let b:agent_last_line_count = line_count
+        return
+    endif
+    
+    " Line count is the same, so this is user cursor movement
+    " Only disable autoscroll if user moved away from the last line
+    if cursor_line < line_count
         let b:agent_autoscroll_enabled = 0
     endif
 endfunction
 
-" Set up event handling for scroll and cursor movement
+" Set up event handling for cursor movement
 augroup AgentContentScroll
     autocmd!
-    " WinScrolled detects scrolling with mouse or scroll wheel
-    if exists('##WinScrolled')
-        autocmd WinScrolled <buffer> call AgentContentOnScroll()
-    endif
     " CursorMoved detects movement with arrow keys, hjkl, page up/down, etc
-    autocmd CursorMoved <buffer> call AgentContentOnScroll()
-    autocmd CursorMovedI <buffer> call AgentContentOnScroll()
+    autocmd CursorMoved <buffer> call AgentContentOnCursorMoved()
+    autocmd CursorMovedI <buffer> call AgentContentOnCursorMoved()
 augroup END
-
 
