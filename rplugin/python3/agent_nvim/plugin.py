@@ -349,9 +349,10 @@ class AgentPlugin(object):
                     local new_lines = vim.split(new_text, '\\n', {plain = true})
                     vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, new_lines)
                     
-                    -- Set cursor to end
+                    -- Set cursor to end and focus the window
                     local win = vim.fn.bufwinid(prompt_buf)
                     if win > 0 then
+                        vim.api.nvim_set_current_win(win)
                         vim.api.nvim_win_set_cursor(win, {#new_lines, 0})
                     end
                     
