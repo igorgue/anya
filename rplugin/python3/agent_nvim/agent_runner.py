@@ -102,7 +102,7 @@ async def run_agent(
         # Load instructions
         from .utils import load_project_instructions
         
-        base_instructions = """You are a helpful AI assistant embedded in Neovim. You can read files, list files, search the repository, and propose patches.
+        base_instructions = """You are a helpful AI assistant embedded in Neovim. You can read files, list files, search the repository, propose patches, and execute Lua code directly inside Neovim.
 
 Constraints:
 - Tool outputs may be truncated for very large files. If you see a NOTE about truncation or '--- FILE TRUNCATED ---', assume you are only seeing part of the file. Do NOT repeatedly read the same large file; instead, focus on relevant sections.
@@ -130,6 +130,11 @@ Constraints:
 
         # Build tools list
         tools = list(tool_wrappers.values())
+        
+        # Log registered tools
+        logger.info(f"Registered tools: {list(tool_wrappers.keys())}")
+        for tool_name, tool in tool_wrappers.items():
+            logger.info(f"  Tool '{tool_name}': {type(tool).__name__}")
 
         # Add MCP hosted tools if available
         if hosted_tools:

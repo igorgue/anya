@@ -10,7 +10,16 @@ nnoremap <buffer> <silent> <C-c> :AgentCancel<CR>
 inoremap <buffer> <silent> <C-c> <Esc>:AgentCancel<CR>
 
 " Load history functionality
-lua dofile(vim.fn.expand('<sfile>:p:h') .. '/agent-prompt-history.lua')
+lua << EOF
+  local history_script = vim.fn.expand('<sfile>:p:h') .. '/agent-prompt-history.lua'
+  local success, err = pcall(function() dofile(history_script) end)
+
+  if not success then
+    vim.notify('Failed to load agent history: ' .. (err or 'unknown error'), vim.log.levels.ERROR)
+  -- else
+  --   vim.notify('Agent history loaded successfully', vim.log.levels.DEBUG)
+  end
+EOF
 
 " Map history navigation (normal mode only)
 nnoremap <buffer> <silent> <C-p> :lua _G.AgentHistoryPrevVim()<CR>

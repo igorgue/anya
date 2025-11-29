@@ -37,7 +37,7 @@ class AgentPlugin(object):
         # Tool wrappers will be created lazily
         self._tool_wrappers = None
         
-        # Initialize Lua module
+        # Initialize Lua module (history will be initialized by ftplugin when buffer opens)
         try:
             nvim.exec_lua("require('agent_nvim')")
         except Exception as e:
@@ -112,11 +112,16 @@ class AgentPlugin(object):
                     lambda p: self.nvim.async_call(self.buffer_manager.create_diff_buffer, p)
                 )
             
+            async def execute_lua(code: str) -> str:
+                """Execute Lua code inside Neovim."""
+                return await tools.execute_lua(code, nvim=self.nvim, logger=self.logger)
+            
             return {
                 'read_file': function_tool(read_file),
                 'list_files': function_tool(list_files),
                 'search_repo': function_tool(search_repo),
                 'apply_patch': function_tool(apply_patch),
+                'execute_lua': function_tool(execute_lua),
             }
         except ImportError:
             self.logger.warning("Could not import function_tool from agents")
@@ -156,11 +161,33 @@ class AgentPlugin(object):
         if not text:
             return
 
-        # Save to history via Lua
+        # Save to history via Lua - use existing instance, don't create new one
         try:
-            self.nvim.exec_lua("if _G.AgentHistorySavePrompt then _G.AgentHistorySavePrompt(...) end", [text])
+            result = self.nvim.exec_lua("""
+                local args = {...}
+                local prompt_text = args[1]
+                if not prompt_text or type(prompt_text) ~= "string" or prompt_text == "" then
+                    return false
+                end
+                
+                -- Use existing global history instance
+                if not _G.agent_prompt_history then
+                    -- Initialize if missing (shouldn't happen if ftplugin loaded)
+                    local history = require('agent_nvim.history')
+                    _G.agent_prompt_history = history.new()
+                end
+                
+                -- Record directly to the history instance
+                local success = _G.agent_prompt_history:record(prompt_text)
+                _G.agent_prompt_history:reset()
+                return success
+            """, text)
+            
+            if not result:
+                self.logger.warning(f"Failed to save prompt to history")
+                
         except Exception as e:
-            self.logger.debug(f"Failed to save prompt to history: {e}")
+            self.logger.error(f"Failed to save prompt to history: {e}")
 
         # Clear prompt buffer
         self.nvim.api.buf_set_lines(prompt_buf, 0, -1, False, [""])
@@ -185,6 +212,43 @@ class AgentPlugin(object):
     def agent_apply(self):
         """Apply the patch in the AgentDiff buffer."""
         self.buffer_manager.apply_patch()
+    
+    @pynvim.command("AgentHistoryTest", sync=True)
+    def agent_history_test(self):
+        """Test and diagnose the history system."""
+        result = self.nvim.exec_lua("""
+            if not _G.agent_prompt_history then
+                return {status = "ERROR", message = "History instance not found"}
+            end
+            
+            -- Test saving
+            local test_msg = "History test at " .. os.date()
+            local save_result = _G.AgentHistorySavePrompt(test_msg)
+            
+            -- Get diagnostic info
+            local diagnostic = _G.agent_prompt_history:diagnostic()
+            
+            return {
+                status = save_result and "OK" or "SAVE_FAILED",
+                test_message = test_msg,
+                save_result = save_result,
+                diagnostic = diagnostic
+            }
+        """, [])
+        
+        self.nvim.out_write(f"History Test Results:\n")
+        self.nvim.out_write(f"Status: {result['status']}\n")
+        self.nvim.out_write(f"Test Message: {result['test_message']}\n")
+        self.nvim.out_write(f"Save Result: {result['save_result']}\n")
+        self.nvim.out_write(f"History File: {result['diagnostic']['path']}\n")
+        self.nvim.out_write(f"Entry Count: {result['diagnostic']['entry_count']}\n")
+        
+        if result['diagnostic']['issues'] and len(result['diagnostic']['issues']) > 0:
+            self.nvim.out_write(f"Issues:\n")
+            for issue in result['diagnostic']['issues']:
+                self.nvim.out_write(f"  - {issue}\n")
+        else:
+            self.nvim.out_write(f"No issues found\n")
     
     @pynvim.function("AgentComplete", sync=True)
     def agent_complete(self, args):
