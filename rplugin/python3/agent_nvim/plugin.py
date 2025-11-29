@@ -161,6 +161,11 @@ class AgentPlugin(object):
         if not text:
             return
 
+        # Check for /file command - handle specially (don't submit, modify prompt)
+        if "/file" in text:
+            self._handle_file_command_inline(text, prompt_buf)
+            return
+
         # Save to history via Lua - use existing instance, don't create new one
         try:
             result = self.nvim.exec_lua("""
@@ -296,49 +301,47 @@ class AgentPlugin(object):
         else:
             self.buffer_manager.append_content([f"Unknown command: {cmd}"])
     
-    def _handle_file_command(self):
-        """Handle /file command - open file picker and add selected files to prompt."""
+    def _handle_file_command_inline(self, text, prompt_buf):
+        """Handle /file command inline - replace /file with selected files in prompt."""
         try:
+            # Remove /file from the text to get the rest of the prompt
+            remaining_text = text.replace("/file", "").strip()
+            
             self.nvim.exec_lua("""
+                local args = {...}
+                local remaining_prompt = args[1]
+                
+                -- Store remaining prompt in global for callback
+                _G._agent_remaining_prompt = remaining_prompt
+                _G._agent_prompt_buf = vim.fn.bufnr('agent-prompt')
+                
                 local function apply_files_to_prompt(files)
                     if not files or #files == 0 then
                         return
                     end
                     
-                    -- Find agent-prompt buffer by filetype
-                    local prompt_buf = nil
-                    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-                        if vim.api.nvim_buf_is_valid(buf) and 
-                           vim.api.nvim_get_option_value('filetype', {buf = buf}) == 'agent-prompt' then
-                            prompt_buf = buf
-                            break
-                        end
-                    end
-                    
-                    if not prompt_buf then
-                        vim.notify('Could not find prompt buffer', vim.log.levels.ERROR)
+                    local prompt_buf = _G._agent_prompt_buf
+                    if not vim.api.nvim_buf_is_valid(prompt_buf) then
+                        vim.notify('Prompt buffer is not valid', vim.log.levels.ERROR)
                         return
                     end
-                    
-                    -- Get current prompt text
-                    local lines = vim.api.nvim_buf_get_lines(prompt_buf, 0, -1, false)
-                    local current_text = table.concat(lines, '\\n'):gsub('^\\n*', ''):gsub('\\n*$', '')
                     
                     -- Build file references
                     local file_refs = {}
                     for _, file in ipairs(files) do
                         table.insert(file_refs, '@' .. file)
                     end
+                    local file_text = table.concat(file_refs, ' ')
                     
-                    -- Create new text with files at the beginning
+                    -- Create new text: files first, then remaining prompt
                     local new_text
-                    if current_text == '' then
-                        new_text = table.concat(file_refs, ' ')
+                    if remaining_prompt == '' or remaining_prompt == nil then
+                        new_text = file_text
                     else
-                        new_text = table.concat(file_refs, ' ') .. ' ' .. current_text
+                        new_text = file_text .. '\\n\\n' .. remaining_prompt
                     end
                     
-                    -- Split into lines and set buffer
+                    -- Set buffer content
                     local new_lines = vim.split(new_text, '\\n', {plain = true})
                     vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, new_lines)
                     
@@ -347,27 +350,36 @@ class AgentPlugin(object):
                     if win > 0 then
                         vim.api.nvim_win_set_cursor(win, {#new_lines, 0})
                     end
+                    
+                    -- Clean up globals
+                    _G._agent_remaining_prompt = nil
+                    _G._agent_prompt_buf = nil
                 end
                 
-                -- Open file picker with custom confirm action
-                Snacks.picker.files({
-                    multi = true,
+                -- Open file picker
+                local picker_instance = nil
+                picker_instance = Snacks.picker.files({
                     actions = {
-                        confirm = function(picker)
+                        confirm = function(picker, item)
                             local items = picker:selected({fallback = false})
                             local files = {}
-                            for _, item in ipairs(items) do
-                                table.insert(files, item.file or item.text)
+                            for _, selected_item in ipairs(items) do
+                                local file_path = selected_item.file or selected_item.text
+                                if file_path then
+                                    table.insert(files, file_path)
+                                end
                             end
-                            apply_files_to_prompt(files)
                             picker:close()
+                            vim.schedule(function()
+                                apply_files_to_prompt(files)
+                            end)
                         end
                     }
                 })
-            """)
+            """, remaining_text)
         except Exception as e:
             self.logger.error(f"Error in /file command: {e}")
-            self.buffer_manager.append_content([f"Error opening file picker: {str(e)}"])
+            self.nvim.out_write(f"Error opening file picker: {str(e)}\n")
     
     def _handle_user_prompt(self, text):
         """Handle user prompt submission."""
