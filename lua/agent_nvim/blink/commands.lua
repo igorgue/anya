@@ -24,50 +24,36 @@ function commands.new(opts)
     -- Check if this source should be enabled for the current buffer
     enabled = function()
       local ft = vim.bo.filetype
-      print("Debug: agent_commands enabled check, filetype:", ft)
       return ft == 'agent-prompt'
     end,
 
     get_trigger_characters = function()
-      print("Commands Debug: get_trigger_characters called, returning {'/'}")
-      return { '/' } -- Try with / first
+      return { '/' }
     end,
 
     get_completions = function(self, ctx, callback)
-      print("Commands Debug: get_completions called!")
-
       -- Get full line content using vim API since ctx.line only contains the keyword bounds
       local line = vim.api.nvim_buf_get_lines(ctx.bufnr, ctx.cursor[1] - 1, ctx.cursor[1], false)[1]
-      print("Commands Debug: Full line from vim API:", line)
 
       -- Get cursor position from context
       local cursor_col = ctx.cursor[2] -- cursor is {line, col} in 1-indexed format
-      print("Commands Debug: cursor position:", cursor_col)
 
       -- Find the / symbol and get the base text after it
       local slash_pos = nil
       local base = ''
 
-      print("Commands Debug: Looking for '/' in line:", line, "at cursor position:", cursor_col)
-
       for i = cursor_col, 1, -1 do -- Include cursor position
         local char = line:sub(i, i)
-        print("Commands Debug: i =", i, "char = '" .. char .. "'")
         if char == '/' then
           slash_pos = i
-          print("Commands Debug: Found '/' at position:", slash_pos)
           break
         elseif char == ' ' then
-          print("Commands Debug: Hit space at position:", i, "stopping search")
           break
         end
       end
 
-      print("Commands Debug: slash_pos =", slash_pos)
-
       -- Only provide completions if we found a / symbol at the beginning of line or after space
       if not slash_pos then
-        print("Commands Debug: No / symbol found, returning empty")
         callback({
           items = {},
           is_incomplete_backward = false,
