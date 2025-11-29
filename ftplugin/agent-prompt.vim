@@ -42,3 +42,9 @@ augroup AgentPromptHighlight
     autocmd TextChanged <buffer> silent! call AgentHighlightPrompt()
     autocmd TextChangedI <buffer> silent! call AgentHighlightPrompt()
 augroup END
+
+" Maintain prompt window height when terminal is resized
+augroup AgentPromptResize
+    autocmd!
+    autocmd VimResized <buffer> silent! resize 5
+augroup END

@@ -22,6 +22,7 @@ class BufferManager:
         self._agent_response_started = False
         # Create namespaces for highlights
         self._user_prompt_ns = nvim.api.create_namespace("agent_user_prompt")
+        self._prompt_highlight_ns = nvim.api.create_namespace("agent_prompt_highlight")
     
     def create_layout(self):
         """Create the agent UI layout with content and prompt buffers."""
@@ -673,8 +674,8 @@ class BufferManager:
             bufnr = self.prompt_buf.number
             lines = self.nvim.api.buf_get_lines(self.prompt_buf, 0, -1, False)
             
-            # Clear existing highlights
-            self.nvim.api.buf_clear_namespace(bufnr, -1, 0, -1)
+            # Clear existing highlights (only in highlight namespace, preserving placeholder)
+            self.nvim.api.buf_clear_namespace(bufnr, self._prompt_highlight_ns, 0, -1)
             
             # Pattern for slash commands like /help, /clear, /cancel
             slash_pattern = r'/[a-z]+'
@@ -700,10 +701,10 @@ class BufferManager:
                     start_col = match.start()
                     if not is_inside_file_ref(start_col):
                         end_col = match.end()
-                        self.nvim.api.buf_add_highlight(bufnr, 10, "Special", line_num, start_col, end_col)
+                        self.nvim.api.buf_add_highlight(bufnr, self._prompt_highlight_ns, "Special", line_num, start_col, end_col)
                 
                 # Highlight file references
                 for start_col, end_col in file_ranges:
-                    self.nvim.api.buf_add_highlight(bufnr, 10, "Directory", line_num, start_col, end_col)
+                    self.nvim.api.buf_add_highlight(bufnr, self._prompt_highlight_ns, "Directory", line_num, start_col, end_col)
         except Exception as e:
             self.logger.debug(f"Error highlighting prompt buffer: {e}")
