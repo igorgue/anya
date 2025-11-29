@@ -391,6 +391,13 @@ class BufferManager:
             file_pattern = r'@[a-zA-Z0-9_./-]+'
             slash_pattern = r'/[a-z]+'
             
+            # Helper to check if a position is inside any file reference
+            def is_inside_file_ref(pos, file_ranges):
+                for start, end in file_ranges:
+                    if start <= pos < end:
+                        return True
+                return False
+            
             # Look for user prompt section: empty line, # Username header, empty line, then prompt text
             # We mark the username with CursorLineNr and prompt text with Comment highlight
             in_user_section = False
@@ -398,51 +405,61 @@ class BufferManager:
             skip_next_empty = False
             
             for idx, line in enumerate(lines):
-                line_num = start_line + idx
-                
-                # Check if this is a user header line (# Username, not ##)
-                if line.startswith("# ") and not line.startswith("## "):
-                    in_user_section = True
-                    user_section_start = line_num
-                    skip_next_empty = True  # Skip the empty line after the header
-                    # Highlight the username line with CursorLineNr
-                    self.nvim.api.buf_add_highlight(bufnr, 5, "CursorLineNr", line_num, 0, -1)
-                    continue
-                
-                # If we're in a user section and we've moved past header setup
-                if in_user_section and user_section_start is not None:
-                    # Skip the first empty line after header
-                    if skip_next_empty and not line.strip():
-                        skip_next_empty = False
-                        continue
-                    skip_next_empty = False
-                    
-                    # Stop highlighting when we hit another section marker or agent response
-                    if line.startswith("#") or line.startswith("Agent") or line.startswith("**["):
-                        in_user_section = False
-                        continue
-                    
-                    # Mark the prompt text with Comment highlight (priority 0, lowest priority so Directory overrides)
-                    if line.strip():  # Only highlight non-empty lines
-                        self.nvim.api.buf_add_highlight(bufnr, 0, "Comment", line_num, 0, -1)
-                    
-                    # Highlight slash commands with higher priority
-                    for match in re.finditer(slash_pattern, line):
-                        start_col = match.start()
-                        end_col = match.end()
-                        self.nvim.api.buf_add_highlight(bufnr, 10, "Special", line_num, start_col, end_col)
-                    
-                    # Highlight file references with higher priority
-                    for match in re.finditer(file_pattern, line):
-                        start_col = match.start()
-                        end_col = match.end()
-                        self.nvim.api.buf_add_highlight(bufnr, 10, "Directory", line_num, start_col, end_col)
-                    
-                    # Add virtual text prefix for all lines (including blank lines)
-                    self.nvim.api.buf_set_extmark(bufnr, self._user_prompt_ns, line_num, 0, {
-                        "virt_text": [["┃ ", "Comment"]],
-                        "virt_text_pos": "inline"
-                    })
+                 line_num = start_line + idx
+                 
+                 # Check if this is an Agent header line (# Agent)
+                 if line.startswith("# Agent"):
+                     # Highlight the agent title with CursorLineNr
+                     self.nvim.api.buf_add_highlight(bufnr, 5, "CursorLineNr", line_num, 0, -1)
+                     continue
+                 
+                 # Check if this is a user header line (# Username, not # Agent)
+                 if line.startswith("# ") and not line.startswith("# Agent"):
+                     in_user_section = True
+                     user_section_start = line_num
+                     skip_next_empty = True  # Skip the empty line after the header
+                     # Highlight the username line with CursorLineNr
+                     self.nvim.api.buf_add_highlight(bufnr, 5, "CursorLineNr", line_num, 0, -1)
+                     continue
+                 
+                 # If we're in a user section and we've moved past header setup
+                 if in_user_section and user_section_start is not None:
+                     # Skip the first empty line after header
+                     if skip_next_empty and not line.strip():
+                         skip_next_empty = False
+                         continue
+                     skip_next_empty = False
+                     
+                     # Stop highlighting when we hit another section marker or agent response
+                     if line.startswith("#") or line.startswith("**["):
+                         in_user_section = False
+                         continue
+                     
+                     # Mark the prompt text with Comment highlight (priority 0, lowest priority so Directory overrides)
+                     if line.strip():  # Only highlight non-empty lines
+                         self.nvim.api.buf_add_highlight(bufnr, 0, "Comment", line_num, 0, -1)
+                     
+                     # Find all file reference ranges first (these take priority)
+                     file_ranges = []
+                     for match in re.finditer(file_pattern, line):
+                         file_ranges.append((match.start(), match.end()))
+                     
+                     # Highlight slash commands (but not if inside a file reference)
+                     for match in re.finditer(slash_pattern, line):
+                         start_col = match.start()
+                         if not is_inside_file_ref(start_col, file_ranges):
+                             end_col = match.end()
+                             self.nvim.api.buf_add_highlight(bufnr, 10, "Special", line_num, start_col, end_col)
+                     
+                     # Highlight file references with higher priority
+                     for start_col, end_col in file_ranges:
+                         self.nvim.api.buf_add_highlight(bufnr, 10, "Directory", line_num, start_col, end_col)
+                     
+                     # Add virtual text prefix for all lines (including blank lines)
+                     self.nvim.api.buf_set_extmark(bufnr, self._user_prompt_ns, line_num, 0, {
+                         "virt_text": [["┃ ", "Comment"]],
+                         "virt_text_pos": "inline"
+                     })
         except Exception as e:
             self.logger.debug(f"Error highlighting user prompt: {e}")
     
@@ -641,16 +658,27 @@ class BufferManager:
             file_pattern = r'@[a-zA-Z0-9_./-]+'
             
             for line_num, line in enumerate(lines):
-                # Highlight slash commands
+                # Find all file reference ranges first (these take priority)
+                file_ranges = []
+                for match in re.finditer(file_pattern, line):
+                    file_ranges.append((match.start(), match.end()))
+                
+                # Helper to check if a position is inside any file reference
+                def is_inside_file_ref(pos):
+                    for start, end in file_ranges:
+                        if start <= pos < end:
+                            return True
+                    return False
+                
+                # Highlight slash commands (but not if inside a file reference)
                 for match in re.finditer(slash_pattern, line):
                     start_col = match.start()
-                    end_col = match.end()
-                    self.nvim.api.buf_add_highlight(bufnr, 10, "Special", line_num, start_col, end_col)
+                    if not is_inside_file_ref(start_col):
+                        end_col = match.end()
+                        self.nvim.api.buf_add_highlight(bufnr, 10, "Special", line_num, start_col, end_col)
                 
                 # Highlight file references
-                for match in re.finditer(file_pattern, line):
-                    start_col = match.start()
-                    end_col = match.end()
+                for start_col, end_col in file_ranges:
                     self.nvim.api.buf_add_highlight(bufnr, 10, "Directory", line_num, start_col, end_col)
         except Exception as e:
             self.logger.debug(f"Error highlighting prompt buffer: {e}")
