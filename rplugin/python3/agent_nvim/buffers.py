@@ -4,6 +4,15 @@ import os
 import subprocess
 import tempfile
 
+# Try to import typing, with fallback for older Python versions
+try:
+    from typing import List, Dict, Any
+except ImportError:
+    # Fallback for older Python versions
+    List = list
+    Dict = dict
+    Any = object
+
 
 class BufferManager:
     """Manages Neovim buffers for agent.nvim plugin."""
@@ -708,3 +717,126 @@ class BufferManager:
                     self.nvim.api.buf_add_highlight(bufnr, self._prompt_highlight_ns, "Directory", line_num, start_col, end_col)
         except Exception as e:
             self.logger.debug(f"Error highlighting prompt buffer: {e}")
+    
+    def get_conversation_context(self) -> List[Dict]:
+        """Extract current conversation context from content buffer.
+        
+        Returns:
+            List of message dictionaries with 'role' and 'content' keys
+        """
+        try:
+            if not self.content_buf or not self.content_buf.valid:
+                return []
+                
+            # Get buffer content
+            lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+            content = '\n'.join(lines)
+            
+            # Split by message markers and create conversation history
+            conversation_history = []
+            current_message = ""
+            current_role = "user"
+            
+            for line in lines:
+                if line.startswith('## '):
+                    # Save previous message if any
+                    if current_message.strip():
+                        conversation_history.append({
+                            'role': current_role,
+                            'content': current_message.strip()
+                        })
+                    # Start new message
+                    current_role = 'assistant' if 'Assistant' in line else 'user'
+                    current_message = line
+                else:
+                    current_message += '\n' + line if current_message else line
+            
+            # Add final message
+            if current_message.strip():
+                conversation_history.append({
+                    'role': current_role,
+                    'content': current_message.strip()
+                })
+            
+            return conversation_history
+            
+        except Exception as e:
+            self.logger.error(f"Error getting conversation context: {e}")
+            return []
+    
+    def apply_compacted_context(self, summary: str, nvim):
+        """Replace buffer content with compacted summary.
+        
+        Args:
+            summary: Compacted summary to apply
+            nvim: Neovim instance
+        """
+        try:
+            if not self.content_buf or not self.content_buf.valid:
+                return
+                
+            from .utils import get_current_timestamp
+            
+            # Create compacted content with metadata
+            timestamp = get_current_timestamp()
+            metadata = f"\n\n--- Context compacted at {timestamp} ---\n"
+            
+            # Replace buffer content with compacted summary
+            new_content = [
+                "## Compacted Conversation",
+                "*This conversation was compacted to reduce token usage. Original context preserved in summary below.*",
+                "",
+                summary,
+                metadata,
+                "## Continue Conversation",
+                ""
+            ]
+            
+            nvim.api.buf_set_lines(
+                self.content_buf, 
+                0, 
+                -1, 
+                False, 
+                new_content
+            )
+            
+            self.logger.info("Applied compacted context to conversation")
+            
+        except Exception as e:
+            self.logger.error(f"Error applying compacted context: {e}")
+            nvim.err_write(f"Error applying compacted context: {e}\n")
+    
+    def add_compaction_metadata(self, metadata: Dict, nvim):
+        """Add metadata about compaction to buffer.
+        
+        Args:
+            metadata: Dictionary with compaction metadata
+            nvim: Neovim instance
+        """
+        try:
+            if not self.content_buf or not self.content_buf.valid:
+                return
+                
+            # Create metadata block
+            metadata_lines = [
+                "",
+                "<!-- Compaction Metadata -->",
+                f"<!-- Timestamp: {metadata.get('timestamp', 'Unknown')} -->",
+                f"<!-- Original tokens: {metadata.get('original_tokens', 'Unknown')} -->",
+                f"<!-- Compacted tokens: {metadata.get('compacted_tokens', 'Unknown')} -->",
+                f"<!-- Reduction: {metadata.get('reduction_percent', 'Unknown')}% -->",
+                "<!-- End Compaction Metadata -->",
+                ""
+            ]
+            
+            # Append to buffer
+            nvim.api.buf_set_lines(
+                self.content_buf,
+                -1,
+                -1,
+                False,
+                metadata_lines
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error adding compaction metadata: {e}")

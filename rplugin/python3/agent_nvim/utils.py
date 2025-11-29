@@ -3,6 +3,7 @@
 import os
 import re
 import json
+from datetime import datetime
 
 
 def resolve_mentions(text: str, read_file_fn) -> str:
@@ -47,6 +48,15 @@ def load_project_instructions(cwd: str) -> str:
             except Exception:
                 pass
     return ""
+
+
+def get_current_timestamp() -> str:
+    """Get current timestamp as a formatted string.
+    
+    Returns:
+        Current timestamp in ISO format
+    """
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def emit_user_event(nvim, event_name: str, data: dict):

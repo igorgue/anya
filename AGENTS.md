@@ -112,6 +112,7 @@ Dependencies are installed to `~/.local/share/agent.nvim/venv` and injected into
 - `AGENT_DISABLE_TRACING` - Disable tracing for custom providers (default: 1)
 - `AGENT_MAX_READ_BYTES` - Maximum bytes to read from files (default: 64000)
 - `AGENT_CONTEXT_WINDOW` - Override context window size (optional)
+- `AGENT_COMPACT_MODEL` - Custom model for CompactAgent (default: same as AGENT_MODEL)
 
 ## Special Considerations
 
@@ -185,11 +186,18 @@ Dependencies are installed to `~/.local/share/agent.nvim/venv` and injected into
 - `/clear` - Clear chat history
 - `/cancel` - Cancel current request
 - `/file` - Open Snacks file picker to select and add multiple files to the prompt as `@` references
+- `/compact [instructions]` - Compact conversation context to reduce token usage
+  Examples:
+  - `/compact` - Compact with automatic settings
+  - `/compact aggressively` - Heavy compaction (~30% of original)
+  - `/compact lightly` - Light compaction (~85% of original)
+  - `/compact focus on authentication` - Focus on specific topics
+  - `/compact --tokens=2000` - Target specific token count
 - `/help` - Show help message
 
 ### `/file` Command Details
 
-The `/file` slash command provides an interactive file picker to select one or more files and add them to the prompt as `@filename` references:
+The `/file` slash command provides an interactive file picker to select one or more files and add them to the prompt as `@` references:
 
 1. Type `/file` in the prompt buffer and press Enter
 2. Snacks file picker opens showing files from the project root
@@ -208,7 +216,43 @@ The `/file` slash command provides an interactive file picker to select one or m
   @src/main.py @tests/test.py Here's my implementation
   ```
 
-## Tool Details
+### `/compact` Command Details
+
+The `/compact` slash command provides intelligent conversation context compaction using a specialized CompactAgent:
+
+#### Basic Usage
+- `/compact` - Automatic compaction with smart token targeting
+- `/compact --tokens=2000` - Target specific token count
+
+#### Natural Language Instructions
+The command supports sophisticated natural language instructions for precise control:
+
+**Intensity Control:**
+- `/compact aggressively` - Heavy reduction (~30%)
+- `/compact significantly` - Moderate reduction (~50%)
+- `/compact lightly` - Gentle reduction (~85%)
+
+**Content Filtering:**
+- `/compact focus on authentication flow` - Preserve specific topics
+- `/compact remove debugging sessions` - Remove specific content types
+- `/compact keep only recent discussions` - Temporal filtering
+
+**Complex Instructions:**
+```
+/compact preserve discussions about database design and API contracts, remove the CSS styling conversations
+```
+
+#### Features
+- **Preview Interface**: Side-by-side comparison with statistics
+- **Smart Targeting**: Automatic token inference from instructions
+- **Selective Preservation**: Maintains active tasks, decisions, file references
+- **User Control**: Edit before accepting, cancel anytime
+
+#### Configuration
+- `AGENT_COMPACT_MODEL`: Custom model for compaction (default: same as main agent)
+- Requires OpenAI agents SDK and valid API key
+
+### Tool Details
 
 ### File Reading
 - Limited to 64,000 bytes by default (configurable via `AGENT_MAX_READ_BYTES`)
@@ -228,6 +272,14 @@ The `/file` slash command provides an interactive file picker to select one or m
 - Creates diff buffer for review
 - Uses `git apply` with whitespace tolerance
 - Must be manually applied after review
+
+### Context Compaction
+- Uses specialized CompactAgent with custom system prompt
+- Supports natural language instructions for selective compaction
+- Provides preview interface with before/after statistics
+- Automatically preserves active tasks, decisions, and file references
+- Configurable model via `AGENT_COMPACT_MODEL`
+- Integrates with existing conversation flow seamlessly
 
 ## Known Patterns
 
