@@ -156,6 +156,12 @@ class AgentPlugin(object):
         if not text:
             return
 
+        # Save to history via Lua
+        try:
+            self.nvim.exec_lua("if _G.AgentHistorySavePrompt then _G.AgentHistorySavePrompt(...) end", [text])
+        except Exception as e:
+            self.logger.debug(f"Failed to save prompt to history: {e}")
+
         # Clear prompt buffer
         self.nvim.api.buf_set_lines(prompt_buf, 0, -1, False, [""])
 

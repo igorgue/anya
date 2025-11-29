@@ -28,18 +28,7 @@ function M.setup()
 
       keymap = {
         preset = 'default',
-        ['<CR>'] = {
-          function(cmp)
-            -- If completion menu is visible, accept the selection
-            if cmp.visible() then
-              cmp.select_and_accept()
-              return true
-            end
-            -- Otherwise, submit the prompt
-            vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>:AgentSubmit<CR>', true, true, true), 'n', true)
-            return true
-          end
-        },
+        -- Enter key mappings are handled in ftplugin/agent-prompt.vim with history support
       },
     })
   end
@@ -48,17 +37,8 @@ end
 function M.setup_buffer()
   -- Set up blink.cmp for the current buffer
   if package.loaded['blink.cmp'] then
-    -- Override Enter key behavior for this buffer
-    vim.keymap.set('i', '<CR>', function()
-      local cmp = require('blink.cmp')
-      if cmp.visible() then
-        cmp.select_and_accept()
-      else
-        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>:AgentSubmit<CR>', true, true, true), 'n', true)
-      end
-    end, { buffer = true, desc = 'Accept completion or submit agent prompt' })
-
-    vim.keymap.set('n', '<CR>', ':AgentSubmit<CR>', { buffer = true, desc = 'Submit agent prompt' })
+    -- Enter key mappings are now handled in ftplugin/agent-prompt.vim with history support
+    -- This function now only sets up blink.cmp completion
   end
 end
 
