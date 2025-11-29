@@ -25,6 +25,10 @@ MODEL_CONTEXT_WINDOWS = {
     "gpt-4-turbo": 128000,
     "gpt-4-turbo-preview": 128000,
     "gpt-4": 8000,
+    # GLM family (Zhipu)
+    "glm-4.6": 200000,
+    "glm-4.5": 131000,
+    "glm-4.5-air": 131000,
     # Default fallback
     "default": 128000,
 }
@@ -136,7 +140,7 @@ def format_placeholder_text(
         
     Returns:
         Tuple of (formatted_string, highlight_group)
-        Formatted string like "267/128K (0.2%)" or "267 tokens"
+        Formatted string like "25% of 128K" or "267 tokens"
         Highlight group: "OkMsg" (0-40%), "WarningMsg" (41-95%), or "ErrorMsg" (96-100%)
     """
     percentage, context_window = calculate_usage_percentage(total_tokens, model)
@@ -156,7 +160,7 @@ def format_placeholder_text(
             ctx_str = f"{context_window / 1000:.0f}K"
         else:
             ctx_str = str(context_window)
-        text = f"{total_tokens}/{ctx_str} ({percentage:.1f}%)"
+        text = f"{percentage:.0f}% of {ctx_str}"
     else:
         text = f"{total_tokens} tokens"
 
