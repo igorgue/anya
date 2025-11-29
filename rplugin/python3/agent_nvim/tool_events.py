@@ -91,14 +91,6 @@ def display_tool_call(
                     
                     local lines = vim.split(item.text, "\\n", {plain = true})
                     vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
-                    
-                    -- Autoscroll
-                    for _, win in ipairs(vim.api.nvim_list_wins()) do
-                        if vim.api.nvim_win_get_buf(win) == item.bufnr then
-                            local new_line_count = vim.api.nvim_buf_line_count(item.bufnr)
-                            pcall(vim.api.nvim_win_set_cursor, win, {new_line_count, 0})
-                        end
-                    end
                 end
             end
             -- Clear the queue after flushing

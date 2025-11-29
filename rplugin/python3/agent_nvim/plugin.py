@@ -186,6 +186,11 @@ class AgentPlugin(object):
         findstart, base = args
         return self.buffer_manager.get_completions(findstart, base)
     
+    @pynvim.function("AgentHighlightPrompt", sync=False)
+    def agent_highlight_prompt(self, args):
+        """Highlight file references in the prompt buffer."""
+        self.buffer_manager.highlight_prompt_buffer()
+    
     def _handle_slash_command(self, text):
         """Handle slash commands like /clear, /cancel, /help."""
         cmd = text.split()[0]
@@ -202,7 +207,7 @@ class AgentPlugin(object):
             self.buffer_manager.append_content(
                 [
                     "",
-                    "# Help",
+                    "## Help",
                     "- `/clear`: Clear chat history",
                     "- `/cancel`: Cancel current request",
                     "- `/help`: Show this message",

@@ -20,6 +20,8 @@ class BufferManager:
         self.content_buf = None
         self.prompt_buf = None
         self._agent_response_started = False
+        # Create namespaces for highlights
+        self._user_prompt_ns = nvim.api.create_namespace("agent_user_prompt")
     
     def create_layout(self):
         """Create the agent UI layout with content and prompt buffers."""
@@ -267,6 +269,12 @@ class BufferManager:
         # Get the line count before appending (this is where new content starts)
         start_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
         
+        # Save the current window to restore focus later
+        try:
+            current_win = self.nvim.current.window
+        except Exception:
+            current_win = None
+        
         # Append lines
         self.nvim.api.buf_set_lines(self.content_buf, -1, -1, False, processed)
 
@@ -292,6 +300,13 @@ class BufferManager:
                 # Only scroll if autoscroll is enabled
                 if autoscroll_enabled:
                     win.cursor = (end_line, 0)
+        
+        # Restore focus to the previously active window
+        if current_win and current_win.valid:
+            try:
+                self.nvim.current.window = current_win
+            except Exception:
+                pass
         
         # Create fold if requested
         if fold and len(processed) > 1:
@@ -348,9 +363,17 @@ class BufferManager:
                     self.nvim.api.buf_add_highlight(bufnr, 10, "Directory", line_num, start_col, end_col)
         except Exception as e:
             self.logger.debug(f"Error highlighting file refs: {e}")
+        finally:
+            # Clear the user prompt namespace to prepare for redraw
+            try:
+                self.nvim.api.buf_clear_namespace(self.content_buf.number, self._user_prompt_ns, start_line, end_line)
+            except Exception:
+                pass
     
     def _highlight_user_prompt(self, start_line, end_line):
-        """Highlight user prompt text with Special highlight group.
+        """Highlight user prompt text with Comment highlight group and username with CursorLineNr.
+        
+        Also adds virtual text prefix (┃ ) to each line of the user prompt.
         
         Args:
             start_line: Start line (0-indexed)
@@ -360,31 +383,66 @@ class BufferManager:
             if not self.content_buf or not self.content_buf.valid:
                 return
             
+            import re
             bufnr = self.content_buf.number
             lines = self.nvim.api.buf_get_lines(self.content_buf, start_line, end_line, False)
             
+            # Patterns for special highlighting
+            file_pattern = r'@[a-zA-Z0-9_./-]+'
+            slash_pattern = r'/[a-z]+'
+            
             # Look for user prompt section: empty line, # Username header, empty line, then prompt text
-            # We mark the prompt text (after the header) with Special highlight
+            # We mark the username with CursorLineNr and prompt text with Comment highlight
             in_user_section = False
             user_section_start = None
+            skip_next_empty = False
             
             for idx, line in enumerate(lines):
                 line_num = start_line + idx
                 
-                # Check if this is a user header line (# Username)
-                if line.startswith("# "):
+                # Check if this is a user header line (# Username, not ##)
+                if line.startswith("# ") and not line.startswith("## "):
                     in_user_section = True
                     user_section_start = line_num
+                    skip_next_empty = True  # Skip the empty line after the header
+                    # Highlight the username line with CursorLineNr
+                    self.nvim.api.buf_add_highlight(bufnr, 5, "CursorLineNr", line_num, 0, -1)
                     continue
                 
                 # If we're in a user section and we've moved past header setup
                 if in_user_section and user_section_start is not None:
-                    # Mark the prompt text with Special highlight (priority 0, lowest priority so Directory overrides)
-                    if line.strip():  # Only highlight non-empty lines
-                        self.nvim.api.buf_add_highlight(bufnr, 0, "Special", line_num, 0, -1)
+                    # Skip the first empty line after header
+                    if skip_next_empty and not line.strip():
+                        skip_next_empty = False
+                        continue
+                    skip_next_empty = False
+                    
                     # Stop highlighting when we hit another section marker or agent response
                     if line.startswith("#") or line.startswith("Agent") or line.startswith("**["):
                         in_user_section = False
+                        continue
+                    
+                    # Mark the prompt text with Comment highlight (priority 0, lowest priority so Directory overrides)
+                    if line.strip():  # Only highlight non-empty lines
+                        self.nvim.api.buf_add_highlight(bufnr, 0, "Comment", line_num, 0, -1)
+                    
+                    # Highlight slash commands with higher priority
+                    for match in re.finditer(slash_pattern, line):
+                        start_col = match.start()
+                        end_col = match.end()
+                        self.nvim.api.buf_add_highlight(bufnr, 10, "Special", line_num, start_col, end_col)
+                    
+                    # Highlight file references with higher priority
+                    for match in re.finditer(file_pattern, line):
+                        start_col = match.start()
+                        end_col = match.end()
+                        self.nvim.api.buf_add_highlight(bufnr, 10, "Directory", line_num, start_col, end_col)
+                    
+                    # Add virtual text prefix for all lines (including blank lines)
+                    self.nvim.api.buf_set_extmark(bufnr, self._user_prompt_ns, line_num, 0, {
+                        "virt_text": [["┃ ", "Comment"]],
+                        "virt_text_pos": "inline"
+                    })
         except Exception as e:
             self.logger.debug(f"Error highlighting user prompt: {e}")
     
@@ -562,3 +620,37 @@ class BufferManager:
     def reset_agent_response_flag(self):
         """Reset the agent response started flag."""
         self._agent_response_started = False
+    
+    def highlight_prompt_buffer(self):
+        """Highlight file references and slash commands in the prompt buffer as user types."""
+        try:
+            if not hasattr(self, "prompt_buf") or not self.prompt_buf or not self.prompt_buf.valid:
+                return
+            
+            import re
+            bufnr = self.prompt_buf.number
+            lines = self.nvim.api.buf_get_lines(self.prompt_buf, 0, -1, False)
+            
+            # Clear existing highlights
+            self.nvim.api.buf_clear_namespace(bufnr, -1, 0, -1)
+            
+            # Pattern for slash commands like /help, /clear, /cancel
+            slash_pattern = r'/[a-z]+'
+            
+            # Pattern for file references like @filename or @path/to/file
+            file_pattern = r'@[a-zA-Z0-9_./-]+'
+            
+            for line_num, line in enumerate(lines):
+                # Highlight slash commands
+                for match in re.finditer(slash_pattern, line):
+                    start_col = match.start()
+                    end_col = match.end()
+                    self.nvim.api.buf_add_highlight(bufnr, 10, "Special", line_num, start_col, end_col)
+                
+                # Highlight file references
+                for match in re.finditer(file_pattern, line):
+                    start_col = match.start()
+                    end_col = match.end()
+                    self.nvim.api.buf_add_highlight(bufnr, 10, "Directory", line_num, start_col, end_col)
+        except Exception as e:
+            self.logger.debug(f"Error highlighting prompt buffer: {e}")
