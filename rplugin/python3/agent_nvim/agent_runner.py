@@ -3,7 +3,13 @@
 import os
 import sys
 from . import tool_events
-from .token_tracker import format_placeholder_text
+from .token_tracker import (
+    format_placeholder_text,
+    calculate_max_tokens,
+    update_session_tokens,
+    get_context_window,
+    calculate_usage_percentage,
+)
 
 
 async def run_agent(
@@ -51,6 +57,7 @@ async def run_agent(
                 set_default_openai_api,
                 set_tracing_disabled,
             )
+            from agents.exceptions import MaxTurnsExceeded
             from openai import AsyncOpenAI
         except ImportError as e:
             # Debug: show sys.path and error
@@ -95,7 +102,12 @@ async def run_agent(
         # Load instructions
         from .utils import load_project_instructions
         
-        base_instructions = "You are a helpful AI assistant embedded in Neovim. You can read files, list files, search the repository, and propose patches."
+        base_instructions = """You are a helpful AI assistant embedded in Neovim. You can read files, list files, search the repository, and propose patches.
+
+Constraints:
+- Tool outputs may be truncated for very large files. If you see a NOTE about truncation or '--- FILE TRUNCATED ---', assume you are only seeing part of the file. Do NOT repeatedly read the same large file; instead, focus on relevant sections.
+- You have a limited token budget for reading files per request. If a tool tells you that the file-read budget is reached, you MUST stop using tools and instead summarize your findings and provide the best answer you can from the information available.
+- When exploring a project, prefer breadth-first sampling of key files (README, main entry points, configs, top-level modules) instead of trying to read every file."""
         project_instructions = load_project_instructions(cached_cwd)
         full_instructions = base_instructions
         if project_instructions:
@@ -123,6 +135,10 @@ async def run_agent(
         if hosted_tools:
             tools.extend(hosted_tools)
             logger.info(f"Added {len(hosted_tools)} MCP hosted tools")
+
+        # Calculate max_tokens based on session usage
+        max_tokens = calculate_max_tokens()
+        logger.info(f"Calculated max_tokens: {max_tokens}")
 
         # Initialize Agent with optional model
         agent_kwargs = {
@@ -153,8 +169,82 @@ async def run_agent(
         # Build input from conversation history
         input_messages = conversation_history.copy()
 
+        # Create hooks to manage max turns and context limits
+        from agents import RunHooks
+        
+        max_turns = 25
+        turn_warning_threshold = 10  # Start forcing responses early to ensure we get output
+        context_limit_threshold = 0.70  # 70% context usage triggers limit (be conservative)
+        
+        class LimitHooks(RunHooks):
+            """Hooks to manage behavior as we approach turn and context limits."""
+            
+            def __init__(self):
+                self.context_limit_hit = False
+                self.tools_disabled = False
+                self.context_window = get_context_window(model)
+                self.original_instructions = None
+                self.original_tools = None
+            
+            async def on_agent_start(self, ctx, agent):
+                """Called before the agent is invoked."""
+                # Save original state on first call
+                if self.original_instructions is None:
+                    self.original_instructions = agent.instructions
+                    self.original_tools = list(agent.tools) if agent.tools else []
+                
+                # ctx.usage.requests counts completed requests, so +1 for current turn
+                completed_turns = ctx.usage.requests if hasattr(ctx.usage, 'requests') else 0
+                current_turn = completed_turns + 1
+                remaining_turns = max_turns - completed_turns
+                
+                logger.info(f"Agent turn {current_turn}/{max_turns} (remaining: {remaining_turns})")
+                
+                # If we already disabled tools, keep them disabled with strong instructions
+                if self.tools_disabled:
+                    agent.tools = []
+                    agent.instructions = self.original_instructions + (
+                        "\n\n=== CRITICAL INSTRUCTION ===\n"
+                        "You have reached your exploration limit. Tools are NO LONGER AVAILABLE.\n"
+                        "You MUST NOW provide your complete final answer based on everything you learned.\n"
+                        "Summarize your findings comprehensively. DO NOT mention needing to read more files.\n"
+                        "=== END CRITICAL INSTRUCTION ==="
+                    )
+                    return
+                
+                # Check if we're approaching the turn limit (use current_turn, not completed)
+                if current_turn >= turn_warning_threshold:
+                    self.tools_disabled = True
+                    agent.tools = []
+                    agent.instructions = self.original_instructions + (
+                        f"\n\n=== CRITICAL INSTRUCTION ===\n"
+                        f"You have used {completed_turns} turns exploring. You have {remaining_turns} turns remaining.\n"
+                        f"Tools are now DISABLED. You MUST provide your complete final answer NOW.\n"
+                        f"Synthesize and summarize all information you have gathered.\n"
+                        f"Be comprehensive but do not say you need to read more - work with what you have.\n"
+                        f"=== END CRITICAL INSTRUCTION ==="
+                    )
+                    logger.info(f"Disabled tools at turn {current_turn} to force final response")
+            
+            async def on_llm_end(self, ctx, agent, response):
+                """Called after the LLM call returns - check context usage here."""
+                if self.tools_disabled:
+                    return  # Already handled
+                
+                usage = ctx.usage
+                if usage and hasattr(usage, "total_tokens") and usage.total_tokens:
+                    context_percentage, _ = calculate_usage_percentage(usage.total_tokens, model)
+                    logger.info(f"Context usage after LLM: {context_percentage:.1f}%")
+                    
+                    if context_percentage >= context_limit_threshold * 100:
+                        self.context_limit_hit = True
+                        self.tools_disabled = True
+                        logger.info(f"Context limit hit ({context_percentage:.1f}%) - will disable tools on next turn")
+        
+        hooks = LimitHooks()
+
         # Run the agent with streaming and conversation history
-        result_stream = Runner.run_streamed(agent, input=input_messages)
+        result_stream = Runner.run_streamed(agent, input=input_messages, max_turns=max_turns, hooks=hooks)
 
         # Cache buffer number before async loop
         content_bufnr = (
@@ -291,10 +381,17 @@ async def run_agent(
                 usage = result_stream.context_wrapper.usage
                 if usage and hasattr(usage, "total_tokens"):
                     total_tokens = usage.total_tokens
+                    
+                    # Update session token counter
+                    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                    completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+                    update_session_tokens(prompt_tokens, completion_tokens)
+                    logger.info(f"Updated session tokens: +{prompt_tokens}p +{completion_tokens}c")
+                    
                     placeholder_text, highlight_group = format_placeholder_text(
                         total_tokens=total_tokens,
-                        input_tokens=getattr(usage, "input_tokens", None),
-                        output_tokens=getattr(usage, "output_tokens", None),
+                        input_tokens=prompt_tokens,
+                        output_tokens=completion_tokens,
                         model=model,
                     )
                     logger.info(f"Token usage: {placeholder_text} (highlight: {highlight_group})")
@@ -313,12 +410,53 @@ async def run_agent(
         if not cancel_flag_getter():
             status = "success"
 
+    except MaxTurnsExceeded as e:
+        # Handle max turns gracefully - this isn't really an error
+        logger.info(f"Agent reached max turns limit: {e}")
+        nvim.async_call(
+            buffer_manager.append_content, 
+            [
+                "",
+                "---",
+                "*Reached maximum turns limit. The agent has provided the best answer it could within the turn budget.*",
+                ""
+            ]
+        )
+        status = "success"  # Treat as success since we got partial output
     except Exception as e:
         import traceback
-
-        logger.error(f"Agent run failed: {e}\n{traceback.format_exc()}")
-        nvim.async_call(buffer_manager.append_content, [f"\nError: {str(e)}"])
-        status = "error"
+        
+        error_str = str(e).lower()
+        
+        # Check for context length exceeded errors from the API
+        if "context" in error_str and ("length" in error_str or "exceeded" in error_str or "limit" in error_str):
+            logger.info(f"Context length exceeded: {e}")
+            nvim.async_call(
+                buffer_manager.append_content,
+                [
+                    "",
+                    "---",
+                    "*Context limit reached. The conversation has grown too long. Please use `/clear` to start fresh.*",
+                    ""
+                ]
+            )
+            status = "error"  # This is an error since we couldn't complete
+        elif "maximum" in error_str and "token" in error_str:
+            logger.info(f"Token limit exceeded: {e}")
+            nvim.async_call(
+                buffer_manager.append_content,
+                [
+                    "",
+                    "---",
+                    "*Token limit reached. The conversation has grown too long. Please use `/clear` to start fresh.*",
+                    ""
+                ]
+            )
+            status = "error"
+        else:
+            logger.error(f"Agent run failed: {e}\n{traceback.format_exc()}")
+            nvim.async_call(buffer_manager.append_content, [f"\nError: {str(e)}"])
+            status = "error"
     finally:
         # Cleanup MCP servers if they were connected
         # if "mcp_servers" in locals() and mcp_servers:

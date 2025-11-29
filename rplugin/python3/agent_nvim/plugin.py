@@ -10,6 +10,7 @@ from . import installation, tools, utils
 from .buffers import BufferManager
 from .mcp import MCPManager
 from .agent_runner import run_agent
+from .tool_budget import ToolBudget
 
 # Constants
 PLUGIN_NAME = "agent.nvim"
@@ -49,47 +50,71 @@ class AgentPlugin(object):
         self.logger.addHandler(handler)
         self.logger.setLevel(logging.INFO)
     
-    def _get_tool_wrappers(self):
-        """Get tool wrappers, creating them if needed."""
-        if self._tool_wrappers is None:
-            try:
-                from agents import function_tool
-                
-                # Create closures that capture self and cached_cwd
-                # Function names are used as tool names by the SDK
-                def read_file(path: str) -> str:
-                    """Read file content."""
-                    cwd = getattr(self, "_cached_cwd", None)
-                    return tools.read_file(path, cwd)
-                
-                def list_files(path: str = ".") -> str:
-                    """List files in directory."""
-                    cwd = getattr(self, "_cached_cwd", None)
-                    return tools.list_files(path, cwd)
-                
-                def search_repo(query: str) -> str:
-                    """Search repository."""
-                    cwd = getattr(self, "_cached_cwd", None)
-                    return tools.search_repo(query, cwd)
-                
-                def apply_patch(patch_str: str) -> str:
-                    """Apply patch proposal."""
-                    return tools.apply_patch_proposal(
-                        patch_str,
-                        lambda p: self.nvim.async_call(self.buffer_manager.create_diff_buffer, p)
-                    )
-                
-                self._tool_wrappers = {
-                    'read_file': function_tool(read_file),
-                    'list_files': function_tool(list_files),
-                    'search_repo': function_tool(search_repo),
-                    'apply_patch': function_tool(apply_patch),
-                }
-            except ImportError:
-                self.logger.warning("Could not import function_tool from agents")
-                self._tool_wrappers = {}
+    def _get_tool_wrappers(self, tool_budget: ToolBudget | None = None):
+        """Get tool wrappers, creating them with optional budget tracking.
         
-        return self._tool_wrappers
+        Args:
+            tool_budget: Optional ToolBudget instance for tracking token usage
+        """
+        try:
+            from agents import function_tool
+            
+            # Create closures that capture self, cached_cwd, and tool_budget
+            # Budget tracking is done inline to preserve function signatures for the SDK
+            def read_file(path: str) -> str:
+                """Read file content."""
+                # Check budget before reading (heavy tool)
+                if tool_budget and not tool_budget.can_use_budget(heavy_tool=True):
+                    return tool_budget.get_budget_exceeded_message()
+                
+                cwd = getattr(self, "_cached_cwd", None)
+                result = tools.read_file(path, cwd)
+                
+                # Track token usage
+                if tool_budget and isinstance(result, str):
+                    tool_budget.consume(result)
+                return result
+            
+            def list_files(path: str = ".") -> str:
+                """List files in directory."""
+                cwd = getattr(self, "_cached_cwd", None)
+                result = tools.list_files(path, cwd)
+                
+                # Track token usage (light tool, no budget check)
+                if tool_budget and isinstance(result, str):
+                    tool_budget.consume(result)
+                return result
+            
+            def search_repo(query: str) -> str:
+                """Search repository."""
+                # Check budget before searching (heavy tool)
+                if tool_budget and not tool_budget.can_use_budget(heavy_tool=True):
+                    return tool_budget.get_budget_exceeded_message()
+                
+                cwd = getattr(self, "_cached_cwd", None)
+                result = tools.search_repo(query, cwd)
+                
+                # Track token usage
+                if tool_budget and isinstance(result, str):
+                    tool_budget.consume(result)
+                return result
+            
+            def apply_patch(patch_str: str) -> str:
+                """Apply patch proposal."""
+                return tools.apply_patch_proposal(
+                    patch_str,
+                    lambda p: self.nvim.async_call(self.buffer_manager.create_diff_buffer, p)
+                )
+            
+            return {
+                'read_file': function_tool(read_file),
+                'list_files': function_tool(list_files),
+                'search_repo': function_tool(search_repo),
+                'apply_patch': function_tool(apply_patch),
+            }
+        except ImportError:
+            self.logger.warning("Could not import function_tool from agents")
+            return {}
     
     @pynvim.command("AgentInstall", sync=False)
     def agent_install(self):
@@ -110,6 +135,8 @@ class AgentPlugin(object):
     @pynvim.command("AgentOpen", sync=False)
     def agent_open(self):
         """Open the agent interface."""
+        from .token_tracker import reset_session_tokens
+        reset_session_tokens()
         self.nvim.async_call(self.buffer_manager.create_layout)
     
     @pynvim.command("AgentSubmit", sync=False)
@@ -211,8 +238,17 @@ class AgentPlugin(object):
     
     async def _run_agent_wrapper(self, request_id):
         """Wrapper to call run_agent with all necessary parameters."""
-        # Get tool wrappers
-        tool_wrappers = self._get_tool_wrappers()
+        import os
+        
+        # Get model for budget calculation
+        model = os.environ.get("AGENT_MODEL", "gpt-5.1")
+        
+        # Create tool budget for this request
+        tool_budget = ToolBudget(model=model)
+        self.logger.info(f"Created tool budget: {tool_budget.budget} tokens for model {model}")
+        
+        # Get tool wrappers with budget tracking
+        tool_wrappers = self._get_tool_wrappers(tool_budget=tool_budget)
         
         # Create a reference object for current_request_id
         current_request_id_ref = {'value': self._current_request_id}
@@ -230,6 +266,9 @@ class AgentPlugin(object):
             cached_cwd=self._cached_cwd,
             emit_event_fn=lambda name, data: utils.emit_user_event(self.nvim, name, data)
         )
+        
+        # Log budget usage after request
+        self.logger.info(f"Tool budget usage: {tool_budget.get_status()}")
         
         # Update the actual current_request_id after run_agent completes
         self._current_request_id = current_request_id_ref['value']

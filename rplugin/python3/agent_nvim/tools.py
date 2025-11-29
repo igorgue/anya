@@ -3,20 +3,22 @@
 import os
 import subprocess
 
+# File reading limits (configurable via environment)
+MAX_READ_BYTES = int(os.environ.get("AGENT_MAX_READ_BYTES", 64000))  # ~16k tokens
+
 
 def read_file(path: str, cwd: str = None) -> str:
-    """Reads the content of a file.
+    """Reads the content of a file, with truncation for very large files.
     
     Args:
         path: Path to the file (absolute or relative)
         cwd: Current working directory for relative path resolution
         
     Returns:
-        File content as string, or error message
+        File content as string (truncated if large), or error message
     """
     try:
         if not os.path.isabs(path):
-            # Try to resolve relative to cwd
             if cwd is None:
                 cwd = os.getcwd()
             path = os.path.join(cwd, path)
@@ -24,8 +26,23 @@ def read_file(path: str, cwd: str = None) -> str:
         if not os.path.exists(path):
             return f"Error: File {path} does not exist."
 
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
+        size = os.path.getsize(path)
+        truncated = size > MAX_READ_BYTES
+
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read(MAX_READ_BYTES)
+
+        if truncated:
+            return (
+                f"NOTE: File {path} is large ({size} bytes). "
+                f"Only the first {MAX_READ_BYTES} bytes were read.\n"
+                f"--- FILE START ---\n"
+                f"{content}\n"
+                f"--- FILE TRUNCATED ---\n"
+                f"To inspect other parts, focus on specific sections or "
+                f"relevant regions instead of the whole file."
+            )
+        return content
     except Exception as e:
         return f"Error reading file: {e}"
 

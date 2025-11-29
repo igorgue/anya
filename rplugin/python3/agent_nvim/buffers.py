@@ -295,6 +295,10 @@ class BufferManager:
             end_line: End line (1-indexed)
         """
         try:
+            # Add highlight to the first line (tool output title) using OkMsg
+            # start_line is 1-indexed, nvim_buf_add_highlight uses 0-indexed
+            self.nvim.api.buf_add_highlight(bufnr, -1, "OkMsg", start_line - 1, 0, -1)
+            
             self.nvim.exec_lua(
                 "require('agent_nvim.folds').create_fold(...)",
                 bufnr, start_line, end_line, None
@@ -355,8 +359,10 @@ class BufferManager:
                 end
 
                 if #_G.agent_stream_queue == 0 then
-                    _G.agent_stream_timer:stop()
-                    _G.agent_stream_timer = nil
+                    if _G.agent_stream_timer then
+                        _G.agent_stream_timer:stop()
+                        _G.agent_stream_timer = nil
+                    end
                     return
                 end
 

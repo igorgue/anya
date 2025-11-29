@@ -2,6 +2,11 @@
 
 import os
 
+# Session token tracking
+CONTEXT_WINDOW = 128000  # Default GPT-4o context window
+USAGE_THRESHOLD = 0.95  # Force response at 95% usage
+session_tokens_used = 0  # Track tokens across submits in same session
+
 
 # Model context windows (tokens)
 MODEL_CONTEXT_WINDOWS = {
@@ -156,3 +161,31 @@ def format_placeholder_text(
         text = f"{total_tokens} tokens"
 
     return text, highlight
+
+
+def reset_session_tokens():
+    """Reset session token counter (call on :AgentOpen)."""
+    global session_tokens_used
+    session_tokens_used = 0
+
+
+def update_session_tokens(prompt_tokens: int, completion_tokens: int):
+    """Update session token usage.
+    
+    Args:
+        prompt_tokens: Input tokens used
+        completion_tokens: Output tokens generated
+    """
+    global session_tokens_used
+    session_tokens_used += prompt_tokens + completion_tokens
+
+
+def calculate_max_tokens() -> int:
+    """Calculate max_tokens for next request based on session usage.
+    
+    Returns:
+        Max tokens to use for next request, capped at 95% of remaining context.
+    """
+    remaining = CONTEXT_WINDOW - session_tokens_used
+    max_tokens = int(remaining * USAGE_THRESHOLD)
+    return max(1000, max_tokens)  # Ensure at least 1000 tokens for response

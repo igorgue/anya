@@ -77,9 +77,37 @@ def display_tool_call(
         content_bufnr: Buffer number for creating folds
     """
     try:
-        # Pause streaming immediately when a tool call starts
-        # This prevents text from appearing before tool output
-        nvim.async_call(lambda: nvim.exec_lua("_G.agent_stream_paused = true"))
+        # Flush the stream queue first, then pause
+        # This ensures any pending text appears BEFORE the tool output
+        flush_and_pause_lua = """
+        -- First, flush all pending stream content immediately
+        if _G.agent_stream_queue then
+            for _, item in ipairs(_G.agent_stream_queue) do
+                if vim.api.nvim_buf_is_valid(item.bufnr) and item.text ~= "" then
+                    local line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                    local last_line_idx = line_count - 1
+                    local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
+                    local last_column = #(last_line[1] or "")
+                    
+                    local lines = vim.split(item.text, "\\n", {plain = true})
+                    vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
+                    
+                    -- Autoscroll
+                    for _, win in ipairs(vim.api.nvim_list_wins()) do
+                        if vim.api.nvim_win_get_buf(win) == item.bufnr then
+                            local new_line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                            pcall(vim.api.nvim_win_set_cursor, win, {new_line_count, 0})
+                        end
+                    end
+                end
+            end
+            -- Clear the queue after flushing
+            _G.agent_stream_queue = {}
+        end
+        -- Now pause streaming to prevent new text from appearing before tool output
+        _G.agent_stream_paused = true
+        """
+        nvim.async_call(lambda: nvim.exec_lua(flush_and_pause_lua))
         
         # Extract tool arguments
         args = tool_data.get("arguments") or tool_data.get("args") or {}
