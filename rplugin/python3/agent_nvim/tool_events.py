@@ -568,7 +568,7 @@ def handle_tool_item(
                         "AgentToolCall",
                         {
                             "id": request_id,
-                            "message": f"{tool_name}...",
+                            "message": f"{tool_name}",
                             "tool": tool_name,
                         },
                     )

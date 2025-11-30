@@ -226,6 +226,24 @@ function M.render_diff(bufnr, content)
     
     vim.api.nvim_buf_set_lines(bufnr, start_line, -1, false, block_lines)
     
+    -- Apply diff highlighting to the code block lines manually
+    -- Treesitter injection doesn't always work for dynamically added content
+    local diff_start = start_line + 2  -- After header and ```diff
+    local diff_end = start_line + #block_lines - 2  -- Before closing ```
+    
+    for i = diff_start, diff_end do
+        local line = vim.api.nvim_buf_get_lines(bufnr, i, i + 1, false)[1] or ""
+        if line:match("^%+") and not line:match("^%+%+%+") then
+            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffAdd", i, 0, -1)
+        elseif line:match("^%-") and not line:match("^%-%-%-") then
+            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffDelete", i, 0, -1)
+        elseif line:match("^@@") then
+            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffChange", i, 0, -1)
+        elseif line:match("^diff %-%-git") or line:match("^index ") or line:match("^%-%-%- ") or line:match("^%+%+%+ ") then
+            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffText", i, 0, -1)
+        end
+    end
+    
     local header_row = start_line
     local end_row = start_line + #block_lines - 1
     

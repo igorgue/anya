@@ -45,7 +45,7 @@ async def run_agent(
     # Emit fidget start event
     emit_event_fn(
         "AgentRequestStarted",
-        {"id": request_id, "model": model, "message": "Thinking..."},
+        {"id": request_id, "model": model, "message": "thinking"},
     )
 
     status = "error"  # Default to error, will be set to success if completion succeeds
