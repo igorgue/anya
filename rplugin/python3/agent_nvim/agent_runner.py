@@ -43,7 +43,7 @@ async def run_agent(
     model = os.environ.get("AGENT_MODEL", "gpt-5.1")
 
     # Emit fidget start event
-    emit_event_fn("AgentRequestStarted", {"id": request_id, "model": model, "message": "thinking"})
+    emit_event_fn("AgentRequestStarted", {"id": request_id, "model": model, "message": "Thinking..."})
 
     status = "error"  # Default to error, will be set to success if completion succeeds
 
@@ -104,8 +104,14 @@ async def run_agent(
         
         base_instructions = """You are a helpful AI assistant embedded in Neovim. You can read files, list files, search the repository, propose patches, and execute Lua code directly inside Neovim.
 
+CRITICAL - read_file tool behavior:
+- Files with <= 100 lines: always shown in full
+- Files with > 100 lines: only first 100 lines shown by default with "[FILE TOO LARGE]" message
+- When you see "[FILE TOO LARGE]", use syntax like read_file("file.py@start-end") to read the full file
+- The @start-end syntax ALWAYS works to read the entire file, regardless of size
+- Do NOT make multiple calls to read_file with the same path without changing the range - you'll get the same truncated output
+
 Constraints:
-- Tool outputs may be truncated for very large files. If you see a NOTE about truncation or '--- FILE TRUNCATED ---', assume you are only seeing part of the file. Do NOT repeatedly read the same large file; instead, focus on relevant sections.
 - You have a limited token budget for reading files per request. If a tool tells you that the file-read budget is reached, you MUST stop using tools and instead summarize your findings and provide the best answer you can from the information available.
 - When exploring a project, prefer breadth-first sampling of key files (README, main entry points, configs, top-level modules) instead of trying to read every file."""
         project_instructions = load_project_instructions(cached_cwd)

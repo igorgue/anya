@@ -11,7 +11,7 @@ MAX_READ_BYTES = int(os.environ.get("AGENT_MAX_READ_BYTES", 64000))  # ~16k toke
 
 
 def read_file(path_with_range: str, cwd: str = None) -> str:
-    """Reads file content with optional line range specifications, if not read 100 lines at the time.
+    """Reads file content with optional line range specifications.
     
     Syntax:
         filename.py              - Read first 100 lines (default truncation)
@@ -104,10 +104,12 @@ def read_file(path_with_range: str, cwd: str = None) -> str:
         info_parts = [f"File: {path}\nTotal lines: {total_lines} | File size: {file_size} bytes\nShowing lines {actual_start}-{actual_end}\n"]
         
         if is_truncated:
+            # Extract the relative path for the message (undo any cwd joining)
+            display_path = path_with_range.split("@")[0] if "@" in path_with_range else path_with_range
             info_parts.append(
-                f"[FILE TOO LARGE] This file has {total_lines} lines total. "
-                f"Currently showing lines {actual_start}-{actual_end}.\n"
-                f"To read more: use syntax like @start-end (whole file), @{actual_end + 1}-{min(actual_end + 100, total_lines)}, or @1-{total_lines} to read entire file.\n"
+                f"[FILE TOO LARGE] File has {total_lines} lines total, showing lines {actual_start}-{actual_end}.\n"
+                f"⚠️ READ THE FULL FILE: Call read_file('{display_path}@start-end') to get all {total_lines} lines.\n"
+                f"Or use specific ranges: @{actual_end + 1}-{min(actual_end + 100, total_lines)} (next 100) or @{max(1, total_lines - 100)}-end (last 100)\n"
             )
         
         info_parts.append("--- FILE CONTENT ---\n")
@@ -231,21 +233,16 @@ def search_repo(query: str, cwd: str = None) -> str:
         return f"Error searching repo: {e}"
 
 
-def apply_patch_proposal(patch_str: str, create_diff_buffer_callback) -> str:
-    """Proposes a patch to be applied. Creates a diff block for review.
+def apply_patch_proposal(patch_str: str) -> str:
+    """Proposes a patch to be applied.
     
     Args:
         patch_str: The patch content as a string
-        create_diff_buffer_callback: Callback function to create the diff block
         
     Returns:
-        Message indicating patch was proposed
+        The patch content (to be rendered by the UI)
     """
-    try:
-        create_diff_buffer_callback(patch_str)
-        return "Patch proposed. Please review the diff block above. You can toggle 'Accept'/'Reject' with 1/2. Submit your next message to apply accepted patches."
-    except Exception as e:
-        return f"Error proposing patch: {e}"
+    return patch_str
 
 
 def exec(command: str, cwd: str = None, timeout: int = 30) -> str:

@@ -151,7 +151,7 @@ class BufferManager:
 
         try:
             self.nvim.exec_lua(
-                "require('agent_nvim.diff_view').render_diff(..., ...)",
+                "local args = {...}; require('agent_nvim.diff_view').render_diff(args[1], args[2])",
                 self.content_buf.number,
                 patch_str
             )
@@ -159,6 +159,7 @@ class BufferManager:
             self._scroll_to_bottom()
         except Exception as e:
             self.logger.error(f"Error rendering diff block: {e}")
+            self.nvim.out_write(f"Diff render error: {e}\n")
             # Fallback to simple append
             self.append_content(["```diff", patch_str, "```"])
 
@@ -194,8 +195,13 @@ class BufferManager:
             self.logger.error(f"Error applying pending patches: {e}")
             self.nvim.err_write(f"Error applying patches: {e}\n")
 
-    def _apply_single_patch(self, patch_content):
-        """Apply a single patch content string."""
+    def _apply_single_patch(self, patch_content, reverse=False):
+        """Apply a single patch content string.
+        
+        Args:
+            patch_content: The patch content
+            reverse: If True, apply in reverse (undo/reject)
+        """
         try:
             with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
                 tmp.write(patch_content)
@@ -207,8 +213,12 @@ class BufferManager:
                 "apply",
                 "--ignore-space-change",
                 "--ignore-whitespace",
-                tmp_path,
             ]
+            
+            if reverse:
+                cmd.append("--reverse")
+                
+            cmd.append(tmp_path)
 
             proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
             os.remove(tmp_path)

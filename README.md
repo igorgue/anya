@@ -1,7 +1,5 @@
 # agent.nvim
 
-<!-- Testing something -->
-
 An agentic Neovim plugin powered by the OpenAI Agents SDK.
 
 ## Features
@@ -44,6 +42,7 @@ Set your OpenAI API key in your environment variables:
 
 ```bash
 export OPENAI_API_KEY="sk-..."
+export AGENT_API_KEY=$OPENAI_API_KEY
 ```
 
 ### Optional Configuration

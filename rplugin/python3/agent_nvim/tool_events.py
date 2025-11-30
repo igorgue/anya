@@ -167,6 +167,42 @@ def display_tool_result(
 
         if tool_info:
             tool_name = tool_info["tool_name"]
+            
+            # Special handling for apply_patch
+            # Debug logging to diagnose why interception might fail
+            if tool_name == "apply_patch":
+                logger.info(f"Attempting to intercept apply_patch. append_content_fn type: {type(append_content_fn)}")
+                if hasattr(append_content_fn, "__self__"):
+                    logger.info(f"append_content_fn has __self__: {type(append_content_fn.__self__)}")
+                    if hasattr(append_content_fn.__self__, "render_diff_block"):
+                        logger.info("Found render_diff_block method")
+                        
+                        # Use the buffer manager's render_diff_block method
+                        buffer_manager = append_content_fn.__self__
+                        
+                        # Show a small header
+                        header = f"**  {tool_name}**"
+                        nvim.async_call(lambda: append_content_fn([header]))
+                        
+                        # Render the diff block
+                        nvim.async_call(lambda: buffer_manager.render_diff_block(result_str))
+                        
+                        # Add blank lines after the diff block to prevent LLM response from merging
+                        nvim.async_call(lambda: append_content_fn(["", ""]))
+                        
+                        # Resume streaming
+                        nvim.exec_lua("_G.agent_stream_paused = false")
+                        if emit_event_fn and request_id:
+                            emit_event_fn("AgentToolCall", {
+                                "id": request_id,
+                                "message": "thinking",
+                            })
+                        return
+                    else:
+                        logger.warning("render_diff_block not found on buffer_manager")
+                else:
+                    logger.warning("append_content_fn does not have __self__")
+
             args = tool_info["args"]
             
             # Extract first parameter for title

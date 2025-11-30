@@ -218,7 +218,18 @@ class AgentPlugin(object):
             # Create closures that capture self, cached_cwd, and tool_budget
             # Budget tracking is done inline to preserve function signatures for the SDK
             def read_file(path: str) -> str:
-                """Read file content."""
+                """Read file content with automatic truncation for large files.
+                
+                SYNTAX: Use @ notation for line ranges:
+                - path/file.py: Read first 100 lines (auto-truncated if larger)
+                - path/file.py@start-end: Read entire file
+                - path/file.py@10-50: Read lines 10-50
+                - path/file.py@start-100: Read lines 1-100
+                - path/file.py@100-end: Read from line 100 to end
+                
+                IMPORTANT: When you see "[FILE TOO LARGE]" message with current range info, 
+                IMMEDIATELY use the @start-end syntax to read the full file. Do NOT keep 
+                reading the same truncated file without specifying a range."""
                 # Check budget before reading (heavy tool)
                 if tool_budget and not tool_budget.can_use_budget(heavy_tool=True):
                     return tool_budget.get_budget_exceeded_message()
@@ -290,10 +301,7 @@ class AgentPlugin(object):
             
             def apply_patch(patch_str: str) -> str:
                 """Apply patch proposal."""
-                return tools.apply_patch_proposal(
-                    patch_str,
-                    lambda p: self.nvim.async_call(self.buffer_manager.create_diff_buffer, p)
-                )
+                return tools.apply_patch_proposal(patch_str)
             
             async def exec_lua(code: str) -> str:
                 """Execute Lua code inside Neovim."""
@@ -346,6 +354,9 @@ class AgentPlugin(object):
         # Don't submit if agent is busy
         if self._agent_busy:
             return
+            
+        # Apply any pending patches first
+        self.nvim.async_call(self.buffer_manager.apply_pending_patches)
             
         # Get content from prompt buffer
         prompt_buf = self.nvim.current.buffer
@@ -419,6 +430,23 @@ class AgentPlugin(object):
     def agent_apply(self):
         """Apply the patch in the AgentDiff buffer."""
         self.buffer_manager.apply_patch()
+
+    @pynvim.function("AgentPatchAction", sync=False)
+    def agent_patch_action(self, args):
+        """Handle patch actions from Lua (apply/reject)."""
+        try:
+            action, patch_content = args
+            if action == "apply":
+                self.buffer_manager._apply_single_patch(patch_content)
+                self.nvim.out_write("Patch applied.\n")
+            elif action == "reject":
+                # To reject, we reverse the patch
+                # git apply -R
+                self.buffer_manager._apply_single_patch(patch_content, reverse=True)
+                self.nvim.out_write("Patch reverted.\n")
+        except Exception as e:
+            self.logger.error(f"Error in AgentPatchAction: {e}")
+            self.nvim.err_write(f"Error applying/reverting patch: {e}\n")
     
     @pynvim.command("AgentHistoryTest", sync=True)
     def agent_history_test(self):
