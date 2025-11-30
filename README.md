@@ -13,6 +13,7 @@ An agentic Neovim plugin powered by the OpenAI Agents SDK.
 
 ## Installation
 
+
 ### Prerequisites
 
 - Neovim >= 0.9.0
