@@ -129,7 +129,7 @@ def apply_patch_proposal(patch_str: str, create_diff_buffer_callback) -> str:
         return f"Error proposing patch: {e}"
 
 
-async def execute_lua(code: str, nvim=None, logger=None) -> str:
+async def exec_lua(code: str, nvim=None, logger=None) -> str:
     """Execute Lua code inside Neovim.
     
     Args:
@@ -199,7 +199,7 @@ end
             nvim.command(f'luafile {temp_lua}')
         except Exception as e:
             if logger:
-                logger.error(f"execute_lua error: {e}")
+                logger.error(f"exec_lua error: {e}")
         finally:
             # Set the event from the main thread
             asyncio.get_event_loop().call_soon_threadsafe(lua_done.set)

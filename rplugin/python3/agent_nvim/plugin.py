@@ -275,16 +275,16 @@ class AgentPlugin(object):
                     lambda p: self.nvim.async_call(self.buffer_manager.create_diff_buffer, p)
                 )
             
-            async def execute_lua(code: str) -> str:
+            async def exec_lua(code: str) -> str:
                 """Execute Lua code inside Neovim."""
-                return await tools.execute_lua(code, nvim=self.nvim, logger=self.logger)
+                return await tools.exec_lua(code, nvim=self.nvim, logger=self.logger)
             
             return {
                 'read_file': function_tool(read_file),
                 'list_files': function_tool(list_files),
                 'search_repo': function_tool(search_repo),
                 'apply_patch': function_tool(apply_patch),
-                'execute_lua': function_tool(execute_lua),
+                'exec_lua': function_tool(exec_lua),
             }
         except ImportError:
             self.logger.warning("Could not import function_tool from agents")
