@@ -8,21 +8,22 @@ from datetime import datetime
 
 def resolve_mentions(text: str, read_file_fn) -> str:
     """Replaces @file mentions with file content, supporting line range syntax.
-    
+
     Syntax:
         @filename.py              - Read first 100 lines (default)
         @filename.py@start-end    - Read entire file
         @filename.py@32-234       - Read lines 32-234
         @filename.py@start-100    - Read lines 1-100
         @filename.py@3202-end     - Read from line 3202 to end
-    
+
     Args:
         text: Text containing @file mentions (with optional @start-end ranges)
         read_file_fn: Function to read file content, signature: fn(path_with_range) -> str
-        
+
     Returns:
         Text with @mentions replaced with file contents
     """
+
     def replace_match(match):
         path_spec = match.group(1)
         content = read_file_fn(path_spec)
@@ -38,10 +39,10 @@ def resolve_mentions(text: str, read_file_fn) -> str:
 
 def load_project_instructions(cwd: str) -> str:
     """Loads project-specific instructions from AGENTS.md or .agent/instructions.md.
-    
+
     Args:
         cwd: Current working directory to search in
-        
+
     Returns:
         Project instructions as string, or empty string if not found
     """
@@ -60,7 +61,7 @@ def load_project_instructions(cwd: str) -> str:
 
 def get_current_timestamp() -> str:
     """Get current timestamp as a formatted string.
-    
+
     Returns:
         Current timestamp in ISO format
     """
@@ -69,7 +70,7 @@ def get_current_timestamp() -> str:
 
 def emit_user_event(nvim, event_name: str, data: dict):
     """Emit a User autocommand event with data for fidget integration.
-    
+
     Args:
         nvim: Neovim instance
         event_name: Name of the event to emit
@@ -81,9 +82,7 @@ def emit_user_event(nvim, event_name: str, data: dict):
         # Use Lua bracket notation [[...]] to avoid quote escaping issues
         lua_code = f"""vim.api.nvim_exec_autocmds('User', {{pattern = '{event_name}', data = vim.fn.json_decode([[{data_json}]])}})"""
         # Execute doautocmd with data
-        nvim.async_call(
-            lambda: nvim.exec_lua(lua_code)
-        )
+        nvim.async_call(lambda: nvim.exec_lua(lua_code))
     except Exception as e:
         # Can't use logger here as it's not passed, will be logged at call site if needed
         pass

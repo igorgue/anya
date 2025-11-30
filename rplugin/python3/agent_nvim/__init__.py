@@ -2,4 +2,4 @@
 
 from .plugin import AgentPlugin
 
-__all__ = ['AgentPlugin']
+__all__ = ["AgentPlugin"]

@@ -12,18 +12,18 @@ MAX_READ_BYTES = int(os.environ.get("AGENT_MAX_READ_BYTES", 64000))  # ~16k toke
 
 def read_file(path_with_range: str, cwd: str = None) -> str:
     """Reads file content with optional line range specifications.
-    
+
     Syntax:
         filename.py              - Read first 100 lines (default truncation)
         filename.py @start-end   - Read entire file
         filename.py @32-234      - Read lines 32-234
         filename.py @start-100   - Read lines 1-100
         filename.py @3202-end    - Read from line 3202 to end
-    
+
     Args:
         path_with_range: File path with optional @start-end range specification
         cwd: Current working directory for relative path resolution
-        
+
     Returns:
         File content as string with metadata about size and range, or error message
     """
@@ -33,17 +33,17 @@ def read_file(path_with_range: str, cwd: str = None) -> str:
         start_line = None
         end_line = None
         force_full = False
-        
+
         if "@" in path_with_range:
             path, range_spec = path_with_range.rsplit("@", 1)
             path = path.strip()
             range_spec = range_spec.strip()
-            
+
             if "-" in range_spec:
                 parts = range_spec.split("-", 1)
                 start_part = parts[0].strip()
                 end_part = parts[1].strip()
-                
+
                 # Parse start
                 if start_part == "start":
                     start_line = 1
@@ -51,7 +51,7 @@ def read_file(path_with_range: str, cwd: str = None) -> str:
                     start_line = int(start_part)
                 else:
                     return f"Error: Invalid range specification '{range_spec}'. Use 'start-end', 'start-100', '32-234', or '3202-end'"
-                
+
                 # Parse end
                 if end_part == "end":
                     end_line = None  # Will read to end
@@ -60,7 +60,7 @@ def read_file(path_with_range: str, cwd: str = None) -> str:
                     end_line = int(end_part)
                 else:
                     return f"Error: Invalid range specification '{range_spec}'. Use 'start-end', 'start-100', '32-234', or '3202-end'"
-        
+
         if not os.path.isabs(path):
             if cwd is None:
                 cwd = os.getcwd()
@@ -72,20 +72,20 @@ def read_file(path_with_range: str, cwd: str = None) -> str:
         # Read file and count lines
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             all_lines = f.readlines()
-        
+
         total_lines = len(all_lines)
         file_size = os.path.getsize(path)
-        
+
         # Determine which lines to return
         if start_line is not None or end_line is not None:
             # Explicit range requested
             start_idx = (start_line or 1) - 1  # Convert to 0-based index
-            end_idx = (end_line or total_lines)  # 1-based line number, need to include it
-            
+            end_idx = end_line or total_lines  # 1-based line number, need to include it
+
             # Clamp to valid range
             start_idx = max(0, min(start_idx, total_lines - 1))
             end_idx = min(end_idx, total_lines)
-            
+
             selected_lines = all_lines[start_idx:end_idx]
             actual_start = start_idx + 1
             actual_end = end_idx
@@ -97,25 +97,31 @@ def read_file(path_with_range: str, cwd: str = None) -> str:
             actual_start = 1
             actual_end = min(lines_to_show, total_lines)
             is_truncated = total_lines > lines_to_show
-        
+
         content = "".join(selected_lines)
-        
+
         # Build response with metadata
-        info_parts = [f"File: {path}\nTotal lines: {total_lines} | File size: {file_size} bytes\nShowing lines {actual_start}-{actual_end}\n"]
-        
+        info_parts = [
+            f"File: {path}\nTotal lines: {total_lines} | File size: {file_size} bytes\nShowing lines {actual_start}-{actual_end}\n"
+        ]
+
         if is_truncated:
             # Extract the relative path for the message (undo any cwd joining)
-            display_path = path_with_range.split("@")[0] if "@" in path_with_range else path_with_range
+            display_path = (
+                path_with_range.split("@")[0]
+                if "@" in path_with_range
+                else path_with_range
+            )
             info_parts.append(
                 f"[FILE TOO LARGE] File has {total_lines} lines total, showing lines {actual_start}-{actual_end}.\n"
                 f"⚠️ READ THE FULL FILE: Call read_file('{display_path}@start-end') to get all {total_lines} lines.\n"
                 f"Or use specific ranges: @{actual_end + 1}-{min(actual_end + 100, total_lines)} (next 100) or @{max(1, total_lines - 100)}-end (last 100)\n"
             )
-        
+
         info_parts.append("--- FILE CONTENT ---\n")
         info_parts.append(content)
         info_parts.append("\n--- END FILE ---")
-        
+
         return "".join(info_parts)
     except Exception as e:
         return f"Error reading file: {e}"
@@ -123,61 +129,63 @@ def read_file(path_with_range: str, cwd: str = None) -> str:
 
 def read_many_files(files: list, cwd: str = None) -> str:
     """Reads multiple files in a single call, supporting line ranges.
-    
+
     Each file in the list can include optional @range specification:
         "filename.py"              - Read first 100 lines (default)
         "filename.py@start-end"    - Read entire file
         "filename.py@32-234"       - Read lines 32-234
         "path/to/file.py@1-50"     - Read lines 1-50
-    
+
     Args:
         files: List of file paths with optional @range specifications
         cwd: Current working directory for relative path resolution
-        
+
     Returns:
         Combined content from all files with metadata, or error messages
     """
     if not files:
         return "Error: No files specified."
-    
+
     if not isinstance(files, list):
         return f"Error: Expected list of files, got {type(files).__name__}"
-    
+
     results = []
     file_count = 0
     error_count = 0
-    
+
     for file_spec in files:
         if not isinstance(file_spec, str):
-            results.append(f"[Skipped: Invalid file spec type {type(file_spec).__name__}]")
+            results.append(
+                f"[Skipped: Invalid file spec type {type(file_spec).__name__}]"
+            )
             error_count += 1
             continue
-        
+
         file_spec = file_spec.strip()
         if not file_spec:
             continue
-        
+
         # Use the read_file function for each file
         content = read_file(file_spec, cwd)
-        
+
         # Add separator between files
         results.append(content)
         results.append("\n" + "=" * 70 + "\n")
         file_count += 1
-    
+
     # Build header with summary
     header = f"Reading {file_count} file(s)...\n{'=' * 70}\n\n"
-    
+
     return header + "\n".join(results)
 
 
 def list_files(path: str = ".", cwd: str = None) -> str:
     """Lists files in a directory (recursive, respects gitignore if possible).
-    
+
     Args:
         path: Directory path to list (default current directory)
         cwd: Current working directory for relative path resolution
-        
+
     Returns:
         Newline-separated list of file paths, or error message
     """
@@ -203,18 +211,18 @@ def list_files(path: str = ".", cwd: str = None) -> str:
 
 def search_repo(query: str, cwd: str = None) -> str:
     """Searches the repository for a string using grep/ripgrep.
-    
+
     Args:
         query: Search query string
         cwd: Current working directory to search in
-        
+
     Returns:
         Search results with line numbers, or error message
     """
     try:
         if cwd is None:
             cwd = os.getcwd()
-        
+
         # Try ripgrep first
         cmd = ["rg", "--line-number", "--no-heading", "--smart-case", query, cwd]
         try:
@@ -235,10 +243,10 @@ def search_repo(query: str, cwd: str = None) -> str:
 
 def apply_patch_proposal(patch_str: str) -> str:
     """Proposes a patch to be applied.
-    
+
     Args:
         patch_str: The patch content as a string
-        
+
     Returns:
         The patch content (to be rendered by the UI)
     """
@@ -247,19 +255,19 @@ def apply_patch_proposal(patch_str: str) -> str:
 
 def exec(command: str, cwd: str = None, timeout: int = 30) -> str:
     """Execute a shell command and return stdout and stderr.
-    
+
     Args:
         command: Shell command to execute
         cwd: Current working directory for the command (defaults to current directory)
         timeout: Timeout in seconds (default 30)
-        
+
     Returns:
         Combined output with stdout and stderr, or error message
     """
     try:
         if cwd is None:
             cwd = os.getcwd()
-        
+
         # Use Popen to get full control over stdout/stderr
         process = subprocess.Popen(
             command,
@@ -267,59 +275,59 @@ def exec(command: str, cwd: str = None, timeout: int = 30) -> str:
             cwd=cwd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
-        
+
         try:
             stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             process.kill()
             return f"Error: Command timed out after {timeout} seconds"
-        
+
         # Build output with both stdout and stderr
         output_parts = []
-        
+
         if stdout:
             output_parts.append(f"STDOUT:\n{stdout}")
-        
+
         if stderr:
             if output_parts:
                 output_parts.append("")  # Add blank line separator
             output_parts.append(f"STDERR:\n{stderr}")
-        
+
         if process.returncode != 0:
             if output_parts:
                 output_parts.append("")
             output_parts.append(f"Exit code: {process.returncode}")
-        
+
         return "\n".join(output_parts) if output_parts else "(no output)"
-    
+
     except Exception as e:
         return f"Error executing command: {e}"
 
 
 async def exec_lua(code: str, nvim=None, logger=None) -> str:
     """Execute Lua code inside Neovim.
-    
+
     Args:
         code: Lua code to execute
         nvim: Neovim instance for executing commands
         logger: Logger instance for error logging
-        
+
     Returns:
         Result of Lua execution or error message
     """
     if nvim is None:
         return "Error: Neovim instance not available"
-    
+
     code = code.strip()
-    
+
     # Use a temp file to communicate results since we can't do sync RPC
     # from the async context (greenlet context issue)
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.lua', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".lua", delete=False) as f:
         temp_lua = f.name
-        temp_result = temp_lua + '.result'
-        
+        temp_result = temp_lua + ".result"
+
         # Write wrapper that captures output and writes to file
         wrapper_code = f'''
 local _output = {{}}
@@ -360,21 +368,21 @@ if file then
 end
 '''
         f.write(wrapper_code)
-    
+
     lua_done = asyncio.Event()
-    
+
     def run_lua():
         try:
-            nvim.command(f'luafile {temp_lua}')
+            nvim.command(f"luafile {temp_lua}")
         except Exception as e:
             if logger:
                 logger.error(f"exec_lua error: {e}")
         finally:
             # Set the event from the main thread
             asyncio.get_event_loop().call_soon_threadsafe(lua_done.set)
-    
+
     nvim.async_call(run_lua)
-    
+
     # Wait for completion with async timeout
     try:
         await asyncio.wait_for(lua_done.wait(), timeout=10.0)
@@ -384,31 +392,31 @@ end
         except:
             pass
         return "Error: Lua execution timed out"
-    
+
     # Read result from temp file
     try:
         os.unlink(temp_lua)
-        
+
         if os.path.exists(temp_result):
-            with open(temp_result, 'r') as f:
+            with open(temp_result, "r") as f:
                 result = json.load(f)
             os.unlink(temp_result)
-            
+
             parts = []
-            if result.get('output'):
-                parts.append(result['output'])
-            
-            if result.get('ok'):
-                if 'value' in result:
-                    val = result['value']
+            if result.get("output"):
+                parts.append(result["output"])
+
+            if result.get("ok"):
+                if "value" in result:
+                    val = result["value"]
                     try:
                         parts.append(f"=> {json.dumps(val, indent=2, default=str)}")
                     except (TypeError, ValueError):
                         parts.append(f"=> {repr(val)}")
             else:
                 parts.append(f"Error: {result.get('error', 'unknown error')}")
-            
-            return '\n'.join(parts) if parts else "nil"
+
+            return "\n".join(parts) if parts else "nil"
         else:
             return "Error: No result file created"
     except Exception as e:

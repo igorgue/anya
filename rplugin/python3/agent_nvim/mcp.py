@@ -9,24 +9,24 @@ MCP_TOOL_TIMEOUT = 45
 
 class MCPManager:
     """Manages MCP server configuration and lifecycle."""
-    
+
     def __init__(self, logger):
         """Initialize MCP manager.
-        
+
         Args:
             logger: Logger instance
         """
         self.logger = logger
         self._mcp_hosted_tools = []
         self._active_servers = []
-    
+
     def load_servers(self, config_path=None):
         """Load MCP servers from configuration file.
-        
+
         Args:
             config_path: Path to MCP servers.json config file
                         (defaults to ~/.config/agent.nvim/mcp/servers.json)
-        
+
         Returns:
             Tuple of (mcp_server_instances, hosted_tools)
         """
@@ -98,7 +98,9 @@ class MCPManager:
                             params={
                                 "url": server_config["url"],
                                 "headers": server_config.get("headers", {}),
-                                "timeout": server_config.get("timeout", MCP_TOOL_TIMEOUT),
+                                "timeout": server_config.get(
+                                    "timeout", MCP_TOOL_TIMEOUT
+                                ),
                             },
                             cache_tools_list=server_config.get(
                                 "cache_tools_list", True
@@ -119,7 +121,9 @@ class MCPManager:
                             params={
                                 "url": server_config["url"],
                                 "headers": server_config.get("headers", {}),
-                                "timeout": server_config.get("timeout", MCP_TOOL_TIMEOUT),
+                                "timeout": server_config.get(
+                                    "timeout", MCP_TOOL_TIMEOUT
+                                ),
                             },
                             cache_tools_list=server_config.get(
                                 "cache_tools_list", True
@@ -161,17 +165,16 @@ class MCPManager:
 
                 except Exception as e:
                     import traceback
+
                     self.logger.error(
                         f"Failed to create MCP server {server_config.get('name', 'unknown')}: {e}"
                     )
-                    self.logger.error(
-                        f"Traceback: {traceback.format_exc()}"
-                    )
+                    self.logger.error(f"Traceback: {traceback.format_exc()}")
                     continue
 
             if mcp_server_instances:
                 self.logger.info(f"Loaded {len(mcp_server_instances)} MCP servers")
-            
+
             if hosted_tools:
                 self._mcp_hosted_tools = hosted_tools
 
@@ -180,13 +183,13 @@ class MCPManager:
         except Exception as e:
             self.logger.error(f"Failed to load MCP config: {e}")
             return [], []
-    
+
     async def connect_servers(self, mcp_servers):
         """Connect to MCP servers.
-        
+
         Args:
             mcp_servers: List of MCP server instances to connect
-            
+
         Returns:
             List of successfully connected servers
         """
@@ -219,6 +222,7 @@ class MCPManager:
 
                 except Exception as server_error:
                     import traceback
+
                     self.logger.error(
                         f"Failed to connect MCP server {server.name}: {server_error}"
                     )
@@ -242,29 +246,25 @@ class MCPManager:
         except Exception as e:
             self.logger.error(f"Failed to initialize MCP servers: {e}")
             return []
-    
+
     async def shutdown(self):
         """Shutdown all active MCP servers."""
         if not self._active_servers:
             return
 
         self.logger.info(f"Shutting down {len(self._active_servers)} MCP servers")
-        
+
         try:
             for server in self._active_servers:
                 try:
                     if hasattr(server, "disconnect"):
-                        self.logger.info(
-                            f"Disconnecting MCP server: {server.name}"
-                        )
+                        self.logger.info(f"Disconnecting MCP server: {server.name}")
                         await server.disconnect()
                         self.logger.info(
                             f"Successfully disconnected MCP server: {server.name}"
                         )
                     elif hasattr(server, "cleanup"):
-                        self.logger.info(
-                            f"Cleaning up MCP server: {server.name}"
-                        )
+                        self.logger.info(f"Cleaning up MCP server: {server.name}")
                         await server.cleanup()
                         self.logger.info(
                             f"Successfully cleaned up MCP server: {server.name}"
@@ -279,16 +279,16 @@ class MCPManager:
                     )
                     # Continue with other cleanup even if one fails
                     continue
-            
+
             # Clear active servers list
             self._active_servers = []
-            
+
         except Exception as e:
             self.logger.error(f"Failed to cleanup MCP servers: {e}")
-    
+
     def get_hosted_tools(self):
         """Get list of hosted MCP tools.
-        
+
         Returns:
             List of hosted MCP tool instances
         """

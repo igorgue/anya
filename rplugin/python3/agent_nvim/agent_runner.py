@@ -23,10 +23,10 @@ async def run_agent(
     mcp_manager,
     tool_wrappers,
     cached_cwd,
-    emit_event_fn
+    emit_event_fn,
 ):
     """Run the agent with streaming output.
-    
+
     Args:
         request_id: Unique request identifier
         nvim: Neovim instance
@@ -43,7 +43,10 @@ async def run_agent(
     model = os.environ.get("AGENT_MODEL", "gpt-5.1")
 
     # Emit fidget start event
-    emit_event_fn("AgentRequestStarted", {"id": request_id, "model": model, "message": "Thinking..."})
+    emit_event_fn(
+        "AgentRequestStarted",
+        {"id": request_id, "model": model, "message": "Thinking..."},
+    )
 
     status = "error"  # Default to error, will be set to success if completion succeeds
 
@@ -68,16 +71,12 @@ async def run_agent(
                 buffer_manager.append_content,
                 ["Error: agents not installed. Run :AgentInstall.", debug_msg],
             )
-            emit_event_fn(
-                "AgentRequestFinished", {"id": request_id, "status": "error"}
-            )
+            emit_event_fn("AgentRequestFinished", {"id": request_id, "status": "error"})
             return
 
         # Configure custom OpenAI client if base URL or API key provided
         base_url = os.environ.get("AGENT_BASE_URL")
-        api_key = os.environ.get("AGENT_API_KEY") or os.environ.get(
-            "OPENAI_API_KEY"
-        )
+        api_key = os.environ.get("AGENT_API_KEY") or os.environ.get("OPENAI_API_KEY")
 
         if base_url or api_key:
             client_kwargs = {}
@@ -101,7 +100,7 @@ async def run_agent(
 
         # Load instructions
         from .utils import load_project_instructions
-        
+
         base_instructions = """You are a helpful AI assistant embedded in Neovim. You can read files, list files, search the repository, propose patches, and execute Lua code directly inside Neovim.
 
 CRITICAL - read_file tool behavior:
@@ -117,9 +116,7 @@ Constraints:
         project_instructions = load_project_instructions(cached_cwd)
         full_instructions = base_instructions
         if project_instructions:
-            full_instructions += (
-                "\n\nProject Instructions:\n" + project_instructions
-            )
+            full_instructions += "\n\nProject Instructions:\n" + project_instructions
 
         # Load MCP servers
         mcp_servers, hosted_tools = mcp_manager.load_servers()
@@ -127,7 +124,7 @@ Constraints:
         # Initialize and connect MCP servers if available
         if mcp_servers:
             mcp_servers = await mcp_manager.connect_servers(mcp_servers)
-            
+
             if mcp_servers:
                 full_instructions += (
                     f"\n\nAdditional MCP tools are available for enhanced capabilities "
@@ -136,7 +133,7 @@ Constraints:
 
         # Build tools list
         tools = list(tool_wrappers.values())
-        
+
         # Log registered tools
         logger.info(f"Registered tools: {list(tool_wrappers.keys())}")
         for tool_name, tool in tool_wrappers.items():
@@ -181,7 +178,9 @@ Constraints:
         # Used to capture only the LLM response if cancelled
         agent_response_start_line = None
         try:
-            agent_response_start_line = len(nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False))
+            agent_response_start_line = len(
+                nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
+            )
         except Exception:
             pass
 
@@ -190,35 +189,43 @@ Constraints:
 
         # Create hooks to manage max turns and context limits
         from agents import RunHooks
-        
+
         max_turns = 25
-        turn_warning_threshold = 10  # Start forcing responses early to ensure we get output
-        context_limit_threshold = 0.70  # 70% context usage triggers limit (be conservative)
-        
+        turn_warning_threshold = (
+            10  # Start forcing responses early to ensure we get output
+        )
+        context_limit_threshold = (
+            0.70  # 70% context usage triggers limit (be conservative)
+        )
+
         class LimitHooks(RunHooks):
             """Hooks to manage behavior as we approach turn and context limits."""
-            
+
             def __init__(self):
                 self.context_limit_hit = False
                 self.tools_disabled = False
                 self.context_window = get_context_window(model)
                 self.original_instructions = None
                 self.original_tools = None
-            
+
             async def on_agent_start(self, ctx, agent):
                 """Called before the agent is invoked."""
                 # Save original state on first call
                 if self.original_instructions is None:
                     self.original_instructions = agent.instructions
                     self.original_tools = list(agent.tools) if agent.tools else []
-                
+
                 # ctx.usage.requests counts completed requests, so +1 for current turn
-                completed_turns = ctx.usage.requests if hasattr(ctx.usage, 'requests') else 0
+                completed_turns = (
+                    ctx.usage.requests if hasattr(ctx.usage, "requests") else 0
+                )
                 current_turn = completed_turns + 1
                 remaining_turns = max_turns - completed_turns
-                
-                logger.info(f"Agent turn {current_turn}/{max_turns} (remaining: {remaining_turns})")
-                
+
+                logger.info(
+                    f"Agent turn {current_turn}/{max_turns} (remaining: {remaining_turns})"
+                )
+
                 # If we already disabled tools, keep them disabled with strong instructions
                 if self.tools_disabled:
                     agent.tools = []
@@ -230,7 +237,7 @@ Constraints:
                         "=== END CRITICAL INSTRUCTION ==="
                     )
                     return
-                
+
                 # Check if we're approaching the turn limit (use current_turn, not completed)
                 if current_turn >= turn_warning_threshold:
                     self.tools_disabled = True
@@ -243,27 +250,35 @@ Constraints:
                         f"Be comprehensive but do not say you need to read more - work with what you have.\n"
                         f"=== END CRITICAL INSTRUCTION ==="
                     )
-                    logger.info(f"Disabled tools at turn {current_turn} to force final response")
-            
+                    logger.info(
+                        f"Disabled tools at turn {current_turn} to force final response"
+                    )
+
             async def on_llm_end(self, ctx, agent, response):
                 """Called after the LLM call returns - check context usage here."""
                 if self.tools_disabled:
                     return  # Already handled
-                
+
                 usage = ctx.usage
                 if usage and hasattr(usage, "total_tokens") and usage.total_tokens:
-                    context_percentage, _ = calculate_usage_percentage(usage.total_tokens, model)
+                    context_percentage, _ = calculate_usage_percentage(
+                        usage.total_tokens, model
+                    )
                     logger.info(f"Context usage after LLM: {context_percentage:.1f}%")
-                    
+
                     if context_percentage >= context_limit_threshold * 100:
                         self.context_limit_hit = True
                         self.tools_disabled = True
-                        logger.info(f"Context limit hit ({context_percentage:.1f}%) - will disable tools on next turn")
-        
+                        logger.info(
+                            f"Context limit hit ({context_percentage:.1f}%) - will disable tools on next turn"
+                        )
+
         hooks = LimitHooks()
 
         # Run the agent with streaming and conversation history
-        result_stream = Runner.run_streamed(agent, input=input_messages, max_turns=max_turns, hooks=hooks)
+        result_stream = Runner.run_streamed(
+            agent, input=input_messages, max_turns=max_turns, hooks=hooks
+        )
 
         # Cache buffer number before async loop
         content_bufnr = (
@@ -278,24 +293,40 @@ Constraints:
                 logger.info(f"Agent request {request_id} cancelled by user")
                 status = "cancelled"
                 # Capture partial output before cancelling
-                if hasattr(result_stream, "final_output") and result_stream.final_output:
+                if (
+                    hasattr(result_stream, "final_output")
+                    and result_stream.final_output
+                ):
                     conversation_history.append(
-                        {"role": "assistant", "content": f"[Cancelled]\n{str(result_stream.final_output)}"}
+                        {
+                            "role": "assistant",
+                            "content": f"[Cancelled]\n{str(result_stream.final_output)}",
+                        }
                     )
-                elif agent_response_start_line is not None and buffer_manager.content_buf and buffer_manager.content_buf.valid:
+                elif (
+                    agent_response_start_line is not None
+                    and buffer_manager.content_buf
+                    and buffer_manager.content_buf.valid
+                ):
                     # If no final output yet, capture only the LLM response from where it started
                     try:
-                        all_lines = buffer_manager.nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
+                        all_lines = buffer_manager.nvim.api.buf_get_lines(
+                            buffer_manager.content_buf, 0, -1, False
+                        )
                         # Extract only the lines after the agent header (which is at agent_response_start_line)
                         response_lines = all_lines[agent_response_start_line:]
                         response_content = "\n".join(response_lines).strip()
                         if response_content:
-                            conversation_history.append({
-                                "role": "assistant",
-                                "content": f"[Cancelled]\n{response_content}"
-                            })
+                            conversation_history.append(
+                                {
+                                    "role": "assistant",
+                                    "content": f"[Cancelled]\n{response_content}",
+                                }
+                            )
                     except Exception as e:
-                        logger.debug(f"Could not capture cancelled output from buffer: {e}")
+                        logger.debug(
+                            f"Could not capture cancelled output from buffer: {e}"
+                        )
                 break
 
             event_type = type(event).__name__
@@ -322,8 +353,13 @@ Constraints:
                 elif "Tool" in data_type or "tool" in data_type.lower():
                     logger.info(f"Tool event in responses: {data_type}")
                     tool_events.handle_tool_event(
-                        event, content_bufnr, nvim, logger, buffer_manager.append_content,
-                        emit_event_fn=emit_event_fn, request_id=request_id
+                        event,
+                        content_bufnr,
+                        nvim,
+                        logger,
+                        buffer_manager.append_content,
+                        emit_event_fn=emit_event_fn,
+                        request_id=request_id,
                     )
 
                 # Look for other potential tool-related events
@@ -334,8 +370,13 @@ Constraints:
                 ]:
                     logger.info(f"Found tool-related event: {data_type}")
                     tool_events.handle_tool_event(
-                        event, content_bufnr, nvim, logger, buffer_manager.append_content,
-                        emit_event_fn=emit_event_fn, request_id=request_id
+                        event,
+                        content_bufnr,
+                        nvim,
+                        logger,
+                        buffer_manager.append_content,
+                        emit_event_fn=emit_event_fn,
+                        request_id=request_id,
                     )
                 else:
                     # Log unknown types for debugging
@@ -357,23 +398,37 @@ Constraints:
                 elif data_type == "ChatCompletionsToolCallDeltaEvent":
                     logger.info(f"Tool call delta: {data}")
                     tool_events.handle_tool_call_delta(
-                        data, content_bufnr, nvim, logger, buffer_manager.append_content,
-                        emit_event_fn=emit_event_fn, request_id=request_id
+                        data,
+                        content_bufnr,
+                        nvim,
+                        logger,
+                        buffer_manager.append_content,
+                        emit_event_fn=emit_event_fn,
+                        request_id=request_id,
                     )
                 elif data_type == "ChatCompletionsToolCallEndEvent":
                     logger.info(f"Tool call end: {data}")
-                    tool_events.handle_tool_call_end(data, content_bufnr, logger, emit_event_fn=emit_event_fn, request_id=request_id)
+                    tool_events.handle_tool_call_end(
+                        data,
+                        content_bufnr,
+                        logger,
+                        emit_event_fn=emit_event_fn,
+                        request_id=request_id,
+                    )
                 elif data_type == "ChatCompletionsToolCallOutputEvent":
                     logger.info(f"Tool call output: {data}")
                     tool_events.handle_tool_call_output(
-                        data, content_bufnr, nvim, logger, buffer_manager.append_content,
-                        emit_event_fn=emit_event_fn, request_id=request_id
+                        data,
+                        content_bufnr,
+                        nvim,
+                        logger,
+                        buffer_manager.append_content,
+                        emit_event_fn=emit_event_fn,
+                        request_id=request_id,
                     )
                 else:
                     # Log unknown event types for debugging
-                    logger.info(
-                        f"Unhandled chat completion event: {data_type}"
-                    )
+                    logger.info(f"Unhandled chat completion event: {data_type}")
                     if hasattr(data, "__dict__"):
                         logger.info(f"Data attributes: {data.__dict__.keys()}")
 
@@ -392,21 +447,31 @@ Constraints:
                             logger,
                             buffer_manager.append_content,
                             emit_event_fn=emit_event_fn,
-                            request_id=request_id
+                            request_id=request_id,
                         )
 
             # Handle other tool-related events
             elif "ToolCall" in event_type:
                 logger.info(f"ToolCall event: {event_type}")
                 tool_events.handle_tool_call_event(
-                    event, content_bufnr, nvim, logger, buffer_manager.append_content,
-                    emit_event_fn=emit_event_fn, request_id=request_id
+                    event,
+                    content_bufnr,
+                    nvim,
+                    logger,
+                    buffer_manager.append_content,
+                    emit_event_fn=emit_event_fn,
+                    request_id=request_id,
                 )
             elif "Tool" in event_type:
                 logger.info(f"Tool event: {event_type}")
                 tool_events.handle_tool_event(
-                    event, content_bufnr, nvim, logger, buffer_manager.append_content,
-                    emit_event_fn=emit_event_fn, request_id=request_id
+                    event,
+                    content_bufnr,
+                    nvim,
+                    logger,
+                    buffer_manager.append_content,
+                    emit_event_fn=emit_event_fn,
+                    request_id=request_id,
                 )
             else:
                 # Log other event types for debugging
@@ -423,25 +488,32 @@ Constraints:
 
         # Track and display token usage
         try:
-            if hasattr(result_stream, "context_wrapper") and result_stream.context_wrapper:
+            if (
+                hasattr(result_stream, "context_wrapper")
+                and result_stream.context_wrapper
+            ):
                 usage = result_stream.context_wrapper.usage
                 if usage and hasattr(usage, "total_tokens"):
                     total_tokens = usage.total_tokens
-                    
+
                     # Update session token counter
                     prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
                     completion_tokens = getattr(usage, "completion_tokens", 0) or 0
                     update_session_tokens(prompt_tokens, completion_tokens)
-                    logger.info(f"Updated session tokens: +{prompt_tokens}p +{completion_tokens}c")
-                    
+                    logger.info(
+                        f"Updated session tokens: +{prompt_tokens}p +{completion_tokens}c"
+                    )
+
                     placeholder_text, highlight_group = format_placeholder_text(
                         total_tokens=total_tokens,
                         input_tokens=prompt_tokens,
                         output_tokens=completion_tokens,
                         model=model,
                     )
-                    logger.info(f"Token usage: {placeholder_text} (highlight: {highlight_group})")
-                    
+                    logger.info(
+                        f"Token usage: {placeholder_text} (highlight: {highlight_group})"
+                    )
+
                     # Update placeholder text via Lua with highlight group
                     nvim.async_call(
                         lambda: nvim.exec_lua(
@@ -460,13 +532,13 @@ Constraints:
         # Handle max turns gracefully - this isn't really an error
         logger.info(f"Agent reached max turns limit: {e}")
         nvim.async_call(
-            buffer_manager.append_content, 
+            buffer_manager.append_content,
             [
                 "",
                 "---",
                 "*Reached maximum turns limit. The agent has provided the best answer it could within the turn budget.*",
-                ""
-            ]
+                "",
+            ],
         )
         # Add final output to conversation history even though we hit a limit
         if hasattr(result_stream, "final_output") and result_stream.final_output:
@@ -476,12 +548,14 @@ Constraints:
         status = "success"  # Treat as success since we got partial output
     except Exception as e:
         import traceback
-        
+
         error_str = str(e).lower()
         error_message = str(e)
-        
+
         # Check for context length exceeded errors from the API
-        if "context" in error_str and ("length" in error_str or "exceeded" in error_str or "limit" in error_str):
+        if "context" in error_str and (
+            "length" in error_str or "exceeded" in error_str or "limit" in error_str
+        ):
             logger.info(f"Context length exceeded: {e}")
             nvim.async_call(
                 buffer_manager.append_content,
@@ -489,14 +563,16 @@ Constraints:
                     "",
                     "---",
                     "*Context limit reached. The conversation has grown too long. Please use `/clear` to start fresh.*",
-                    ""
-                ]
+                    "",
+                ],
             )
             # Add error to conversation history for continuity
-            conversation_history.append({
-                "role": "assistant",
-                "content": f"[Error: Context limit reached. {error_message}]"
-            })
+            conversation_history.append(
+                {
+                    "role": "assistant",
+                    "content": f"[Error: Context limit reached. {error_message}]",
+                }
+            )
             status = "error"  # This is an error since we couldn't complete
         elif "maximum" in error_str and "token" in error_str:
             logger.info(f"Token limit exceeded: {e}")
@@ -506,23 +582,24 @@ Constraints:
                     "",
                     "---",
                     "*Token limit reached. The conversation has grown too long. Please use `/clear` to start fresh.*",
-                    ""
-                ]
+                    "",
+                ],
             )
             # Add error to conversation history for continuity
-            conversation_history.append({
-                "role": "assistant",
-                "content": f"[Error: Token limit reached. {error_message}]"
-            })
+            conversation_history.append(
+                {
+                    "role": "assistant",
+                    "content": f"[Error: Token limit reached. {error_message}]",
+                }
+            )
             status = "error"
         else:
             logger.error(f"Agent run failed: {e}\n{traceback.format_exc()}")
             nvim.async_call(buffer_manager.append_content, [f"\nError: {str(e)}"])
             # Add error to conversation history for continuity
-            conversation_history.append({
-                "role": "assistant",
-                "content": f"[Error: {error_message}]"
-            })
+            conversation_history.append(
+                {"role": "assistant", "content": f"[Error: {error_message}]"}
+            )
             status = "error"
     finally:
         # Cleanup MCP servers if they were connected
@@ -530,10 +607,8 @@ Constraints:
         #     await mcp_manager.disconnect_servers(mcp_servers)
 
         # Clear current request ID
-        if current_request_id_ref['value'] == request_id:
-            current_request_id_ref['value'] = None
+        if current_request_id_ref["value"] == request_id:
+            current_request_id_ref["value"] = None
 
         # Emit fidget finish event
-        emit_event_fn(
-            "AgentRequestFinished", {"id": request_id, "status": status}
-        )
+        emit_event_fn("AgentRequestFinished", {"id": request_id, "status": status})

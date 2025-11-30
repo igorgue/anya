@@ -16,10 +16,10 @@ except ImportError:
 
 class BufferManager:
     """Manages Neovim buffers for agent.nvim plugin."""
-    
+
     def __init__(self, nvim, logger):
         """Initialize buffer manager.
-        
+
         Args:
             nvim: Neovim instance
             logger: Logger instance
@@ -32,8 +32,10 @@ class BufferManager:
         # Create namespaces for highlights
         self._user_prompt_ns = nvim.api.create_namespace("agent_user_prompt")
         self._prompt_highlight_ns = nvim.api.create_namespace("agent_prompt_highlight")
-        self._username_highlight_ns = nvim.api.create_namespace("agent_username_highlight")
-    
+        self._username_highlight_ns = nvim.api.create_namespace(
+            "agent_username_highlight"
+        )
+
     def create_layout(self):
         """Create the agent UI layout with content and prompt buffers."""
         # Check if buffers already exist
@@ -101,12 +103,10 @@ class BufferManager:
 
         # Enable render-markdown for the content buffer
         self.enable_render_markdown()
-        
 
-    
     def create_diff_buffer(self, patch_str):
         """Create or update the diff buffer with patch content.
-        
+
         Args:
             patch_str: Patch content as string
         """
@@ -139,21 +139,25 @@ class BufferManager:
             self.nvim.command("vsplit")
             self.nvim.api.win_set_buf(0, diff_buf)
             self.nvim.out_write("Patch proposed in AgentDiff buffer.\n")
-    
+
     def render_diff_block(self, patch_str):
         """Render a diff block in the content buffer using Lua.
-        
+
         Args:
             patch_str: Patch content as string
         """
-        if not hasattr(self, "content_buf") or not self.content_buf or not self.content_buf.valid:
+        if (
+            not hasattr(self, "content_buf")
+            or not self.content_buf
+            or not self.content_buf.valid
+        ):
             return
 
         try:
             self.nvim.exec_lua(
                 "local args = {...}; require('agent_nvim.diff_view').render_diff(args[1], args[2])",
                 self.content_buf.number,
-                patch_str
+                patch_str,
             )
             # Scroll to bottom to show new content
             self._scroll_to_bottom()
@@ -165,39 +169,43 @@ class BufferManager:
 
     def apply_pending_patches(self):
         """Apply all pending patches in the content buffer that are marked as ACCEPT."""
-        if not hasattr(self, "content_buf") or not self.content_buf or not self.content_buf.valid:
+        if (
+            not hasattr(self, "content_buf")
+            or not self.content_buf
+            or not self.content_buf.valid
+        ):
             return
 
         try:
             # Get patches from Lua
             patches = self.nvim.exec_lua(
                 "return require('agent_nvim.diff_view').get_patches(...)",
-                self.content_buf.number
+                self.content_buf.number,
             )
-            
+
             if not patches:
                 return
 
             applied_count = 0
             for patch in patches:
-                state = patch.get('state', 1) # Default to ACCEPT (1)
-                content = patch.get('content', '')
-                
+                state = patch.get("state", 1)  # Default to ACCEPT (1)
+                content = patch.get("content", "")
+
                 # STATE_ALWAYS_ACCEPT = 0, STATE_ACCEPT = 1
                 if state == 0 or state == 1:
                     if self._apply_single_patch(content):
                         applied_count += 1
-            
+
             if applied_count > 0:
                 self.append_content([f"> **Applied {applied_count} patch(es)**", ""])
-                
+
         except Exception as e:
             self.logger.error(f"Error applying pending patches: {e}")
             self.nvim.err_write(f"Error applying patches: {e}\n")
 
     def _apply_single_patch(self, patch_content, reverse=False):
         """Apply a single patch content string.
-        
+
         Args:
             patch_content: The patch content
             reverse: If True, apply in reverse (undo/reject)
@@ -214,10 +222,10 @@ class BufferManager:
                 "--ignore-space-change",
                 "--ignore-whitespace",
             ]
-            
+
             if reverse:
                 cmd.append("--reverse")
-                
+
             cmd.append(tmp_path)
 
             proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
@@ -242,14 +250,14 @@ class BufferManager:
                     win.cursor = (line_count, 0)
                 except Exception:
                     pass
-    
+
     def get_completions(self, findstart, base):
         """Provide file path completions for @mentions.
-        
+
         Args:
             findstart: 1 to find start position, 0 to return matches
             base: Partial string to complete
-            
+
         Returns:
             Start position (when findstart=1) or list of matches (when findstart=0)
         """
@@ -320,13 +328,17 @@ class BufferManager:
                     break
 
             # Call the Lua callback with results
-            self.nvim.exec_lua("agent_nvim_blink_file_completion_callback(...)", [matches, callback_id])
+            self.nvim.exec_lua(
+                "agent_nvim_blink_file_completion_callback(...)", [matches, callback_id]
+            )
         except Exception as e:
-            self.nvim.exec_lua("agent_nvim_blink_file_completion_callback(...)", [[], callback_id])
-    
+            self.nvim.exec_lua(
+                "agent_nvim_blink_file_completion_callback(...)", [[], callback_id]
+            )
+
     def append_content(self, lines, fold=False):
         """Append one or more lines to the content buffer.
-        
+
         Args:
             lines: List of strings to append
             fold: If True, fold the appended content immediately
@@ -340,44 +352,48 @@ class BufferManager:
                     processed.extend([ln for ln in item.split("\n")])
                 else:
                     processed.append(item)
-            
+
             def wrapped_append():
                 """Append and scroll."""
                 self._append_and_scroll(processed, fold=fold)
-            
+
             # Write the processed list to the buffer
             self.nvim.async_call(wrapped_append)
             # Enable render-markdown after content is added
             self.nvim.async_call(self.enable_render_markdown)
-    
+
     def _append_and_scroll(self, processed, fold=False):
         """Helper to append lines and autoscroll content buffer.
-        
+
         Args:
             processed: List of lines to append
             fold: If True, create a fold for the appended lines
         """
-        if not hasattr(self, "content_buf") or not self.content_buf or not self.content_buf.valid:
+        if (
+            not hasattr(self, "content_buf")
+            or not self.content_buf
+            or not self.content_buf.valid
+        ):
             return
 
         # Get the line count before appending (this is where new content starts)
         start_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
-        
+
         # Save the current window to restore focus later
         try:
             current_win = self.nvim.current.window
         except Exception:
             current_win = None
-        
+
         # Append lines
         self.nvim.api.buf_set_lines(self.content_buf, -1, -1, False, processed)
 
         # Get the new line count (end of appended content)
         end_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
-        
+
         # Highlight file references in appended lines (higher priority overrides Special)
         self._highlight_file_refs(start_line, end_line)
-        
+
         # Highlight user prompts (lower priority so file refs can override)
         self._highlight_user_prompt(start_line, end_line)
 
@@ -396,11 +412,13 @@ class BufferManager:
             if win.buffer == self.content_buf:
                 try:
                     # Check if autoscroll is enabled for this buffer
-                    autoscroll_enabled = self.nvim.api.buf_get_var(self.content_buf, "agent_autoscroll_enabled")
+                    autoscroll_enabled = self.nvim.api.buf_get_var(
+                        self.content_buf, "agent_autoscroll_enabled"
+                    )
                 except Exception:
                     # If variable doesn't exist, default to enabled
                     autoscroll_enabled = 1
-                
+
                 # Only scroll if autoscroll is enabled and position is valid
                 if autoscroll_enabled:
                     try:
@@ -416,37 +434,40 @@ class BufferManager:
                     except Exception:
                         # Cursor position invalid, skip scrolling
                         pass
-        
+
         # Restore focus to the previously active window
         if current_win and current_win.valid:
             try:
                 self.nvim.current.window = current_win
             except Exception:
                 pass
-    
+
     def _create_fold(self, bufnr, start_line, end_line):
-         """Create a fold in the buffer.
-         
-         Args:
-             bufnr: Buffer number
-             start_line: Start line (1-indexed)
-             end_line: End line (1-indexed)
-         """
-         try:
-             # Add highlight to the first line (tool output title) using OkMsg
-             # start_line is 1-indexed, nvim_buf_add_highlight uses 0-indexed
-             self.nvim.api.buf_add_highlight(bufnr, -1, "OkMsg", start_line - 1, 0, -1)
-             
-             self.nvim.exec_lua(
-                 "require('agent_nvim.folds').create_fold(...)",
-                 bufnr, start_line, end_line, None
-             )
-         except Exception as e:
-             self.logger.error(f"Error creating fold: {e}")
-    
+        """Create a fold in the buffer.
+
+        Args:
+            bufnr: Buffer number
+            start_line: Start line (1-indexed)
+            end_line: End line (1-indexed)
+        """
+        try:
+            # Add highlight to the first line (tool output title) using OkMsg
+            # start_line is 1-indexed, nvim_buf_add_highlight uses 0-indexed
+            self.nvim.api.buf_add_highlight(bufnr, -1, "OkMsg", start_line - 1, 0, -1)
+
+            self.nvim.exec_lua(
+                "require('agent_nvim.folds').create_fold(...)",
+                bufnr,
+                start_line,
+                end_line,
+                None,
+            )
+        except Exception as e:
+            self.logger.error(f"Error creating fold: {e}")
+
     def _highlight_file_refs(self, start_line, end_line):
         """Highlight file references in the specified range.
-        
+
         Args:
             start_line: Start line (0-indexed)
             end_line: End line (0-indexed, exclusive)
@@ -454,38 +475,47 @@ class BufferManager:
         try:
             # Clear the user prompt namespace at the start to prepare for redraw
             try:
-                self.nvim.api.buf_clear_namespace(self.content_buf.number, self._user_prompt_ns, start_line, end_line)
+                self.nvim.api.buf_clear_namespace(
+                    self.content_buf.number, self._user_prompt_ns, start_line, end_line
+                )
             except Exception:
                 pass
-            
+
             if not self.content_buf or not self.content_buf.valid:
                 return
-            
+
             import re
+
             bufnr = self.content_buf.number
-            lines = self.nvim.api.buf_get_lines(self.content_buf, start_line, end_line, False)
-            
+            lines = self.nvim.api.buf_get_lines(
+                self.content_buf, start_line, end_line, False
+            )
+
             # Pattern for file references like @path/to/file
-            pattern = r'@[a-zA-Z0-9_./-]+/[a-zA-Z0-9_./-]*'
-            
+            pattern = r"@[a-zA-Z0-9_./-]+/[a-zA-Z0-9_./-]*"
+
             # Clear any existing highlights in the range we're about to update
-            self.nvim.api.buf_clear_namespace(bufnr, self._prompt_highlight_ns, start_line, end_line)
-            
+            self.nvim.api.buf_clear_namespace(
+                bufnr, self._prompt_highlight_ns, start_line, end_line
+            )
+
             for idx, line in enumerate(lines):
                 line_num = start_line + idx
                 for match in re.finditer(pattern, line):
                     start_col = match.start()
                     end_col = match.end()
                     # Use priority 10 so Directory highlights override Special
-                    self.nvim.api.buf_add_highlight(bufnr, 10, "Directory", line_num, start_col, end_col)
+                    self.nvim.api.buf_add_highlight(
+                        bufnr, 10, "Directory", line_num, start_col, end_col
+                    )
         except Exception as e:
             self.logger.debug(f"Error highlighting file refs: {e}")
-    
+
     def _highlight_user_prompt(self, start_line, end_line):
         """Highlight user prompt text with Comment highlight group and username with CursorLineNr.
-        
+
         Also adds virtual text prefix (┃ ) to each line of the user prompt.
-        
+
         Args:
             start_line: Start line (0-indexed)
             end_line: End line (0-indexed, exclusive)
@@ -493,37 +523,43 @@ class BufferManager:
         try:
             if not self.content_buf or not self.content_buf.valid:
                 return
-            
+
             import re
+
             bufnr = self.content_buf.number
-            lines = self.nvim.api.buf_get_lines(self.content_buf, start_line, end_line, False)
-            
+            lines = self.nvim.api.buf_get_lines(
+                self.content_buf, start_line, end_line, False
+            )
+
             # Patterns for special highlighting
-            file_pattern = r'@[a-zA-Z0-9_./-]+'
-            slash_pattern = r'/[a-z]+'
-            
+            file_pattern = r"@[a-zA-Z0-9_./-]+"
+            slash_pattern = r"/[a-z]+"
+
             # Helper to check if a position is inside any file reference
             def is_inside_file_ref(pos, file_ranges):
                 for start, end in file_ranges:
                     if start <= pos < end:
                         return True
                 return False
-            
+
             # Look for user prompt section
             in_user_section = False
             user_section_start = None
             skip_next_empty = False
-            
+
             for idx, line in enumerate(lines):
                 line_num = start_line + idx
-                
+
                 # Check if this is an Agent header line (# Agent)
                 if line.startswith("# Agent"):
                     # Use extmark with line_hl_group to highlight full line including EOL
-                    self.nvim.api.buf_set_extmark(bufnr, self._user_prompt_ns, line_num, 0, {
-                        "line_hl_group": "CursorLineNr",
-                        "priority": 5
-                    })
+                    self.nvim.api.buf_set_extmark(
+                        bufnr,
+                        self._user_prompt_ns,
+                        line_num,
+                        0,
+                        {"line_hl_group": "CursorLineNr", "priority": 5},
+                    )
                     continue
 
                 # Check if this is a user header line (# Username, not # Agent)
@@ -532,12 +568,15 @@ class BufferManager:
                     user_section_start = line_num
                     skip_next_empty = True  # Skip the empty line after the header
                     # Use extmark with line_hl_group to highlight full line including EOL
-                    self.nvim.api.buf_set_extmark(bufnr, self._user_prompt_ns, line_num, 0, {
-                        "line_hl_group": "CursorLineNr",
-                        "priority": 5
-                    })
+                    self.nvim.api.buf_set_extmark(
+                        bufnr,
+                        self._user_prompt_ns,
+                        line_num,
+                        0,
+                        {"line_hl_group": "CursorLineNr", "priority": 5},
+                    )
                     continue
-                
+
                 # If we're in a user section and we've moved past header setup
                 if in_user_section and user_section_start is not None:
                     # Skip the first empty line after header
@@ -545,44 +584,55 @@ class BufferManager:
                         skip_next_empty = False
                         continue
                     skip_next_empty = False
-                    
+
                     # Stop highlighting when we hit another section marker or agent response
                     if line.startswith("#") or line.startswith("**["):
                         in_user_section = False
                         continue
-                    
+
                     # Mark the prompt text with Comment highlight
                     if line.strip():
-                        self.nvim.api.buf_add_highlight(bufnr, 0, "Comment", line_num, 0, -1)
-                    
+                        self.nvim.api.buf_add_highlight(
+                            bufnr, 0, "Comment", line_num, 0, -1
+                        )
+
                     # Find all file reference ranges first (these take priority)
                     file_ranges = []
                     for match in re.finditer(file_pattern, line):
                         file_ranges.append((match.start(), match.end()))
-                    
+
                     # Highlight slash commands (but not if inside a file reference)
                     for match in re.finditer(slash_pattern, line):
                         start_col = match.start()
                         # Only highlight if preceded by start of line or space, and not inside file ref
-                        if (start_col == 0 or line[start_col - 1] == ' ') and not is_inside_file_ref(start_col, file_ranges):
+                        if (
+                            start_col == 0 or line[start_col - 1] == " "
+                        ) and not is_inside_file_ref(start_col, file_ranges):
                             end_col = match.end()
-                            self.nvim.api.buf_add_highlight(bufnr, 10, "Special", line_num, start_col, end_col)
-                    
+                            self.nvim.api.buf_add_highlight(
+                                bufnr, 10, "Special", line_num, start_col, end_col
+                            )
+
                     # Highlight file references with higher priority
                     for start_col, end_col in file_ranges:
-                        self.nvim.api.buf_add_highlight(bufnr, 10, "Directory", line_num, start_col, end_col)
-                    
+                        self.nvim.api.buf_add_highlight(
+                            bufnr, 10, "Directory", line_num, start_col, end_col
+                        )
+
                     # Add virtual text prefix for all lines (including blank lines)
-                    self.nvim.api.buf_set_extmark(bufnr, self._user_prompt_ns, line_num, 0, {
-                        "virt_text": [["┃ ", "Comment"]],
-                        "virt_text_pos": "inline"
-                    })
+                    self.nvim.api.buf_set_extmark(
+                        bufnr,
+                        self._user_prompt_ns,
+                        line_num,
+                        0,
+                        {"virt_text": [["┃ ", "Comment"]], "virt_text_pos": "inline"},
+                    )
         except Exception as e:
             self.logger.debug(f"Error highlighting user prompt: {e}")
-    
+
     def append_stream_lua_direct(self, text, bufnr):
         """Append text using Lua animation for smooth typing effect.
-        
+
         Args:
             text: Text to append
             bufnr: Buffer number (must be passed in, can't access from async context)
@@ -720,15 +770,14 @@ class BufferManager:
         except Exception as e:
             self.logger.error(f"Error in _append_stream_lua: {e}")
             import traceback
-            self.logger.error(traceback.format_exc())
-    
 
-    
+            self.logger.error(traceback.format_exc())
+
     def append_cancel_message(self):
         """Queue cancellation message to be appended after streaming completes."""
         if hasattr(self, "content_buf") and self.content_buf and self.content_buf.valid:
             bufnr = self.content_buf.number
-            
+
             # Add cancel message to the streaming queue so it appears after the response finishes
             # We need to escape the text for Lua
             lua_code = f"""
@@ -756,12 +805,12 @@ class BufferManager:
                         if lines[i].strip():
                             response_started = True
                             break
-                
+
                 if response_started:
                     self.append_content(["", "> **[Request cancelled by user]**"])
                 else:
                     self.append_content(["> **[Request cancelled by user]**"])
-    
+
     def enable_render_markdown(self):
         """Enable render-markdown for the content buffer."""
         try:
@@ -769,106 +818,125 @@ class BufferManager:
             self.nvim.command("silent! RenderMarkdown enable")
         except Exception:
             pass
-    
+
     def reset_agent_response_flag(self):
         """Reset the agent response started flag."""
         self._agent_response_started = False
-    
+
     def highlight_prompt_buffer(self):
         """Highlight file references and slash commands in the prompt buffer as user types."""
         try:
-            if not hasattr(self, "prompt_buf") or not self.prompt_buf or not self.prompt_buf.valid:
+            if (
+                not hasattr(self, "prompt_buf")
+                or not self.prompt_buf
+                or not self.prompt_buf.valid
+            ):
                 return
-            
+
             import re
+
             bufnr = self.prompt_buf.number
             lines = self.nvim.api.buf_get_lines(self.prompt_buf, 0, -1, False)
-            
+
             # Clear existing highlights (only in highlight namespace, preserving placeholder)
             self.nvim.api.buf_clear_namespace(bufnr, self._prompt_highlight_ns, 0, -1)
-            
+
             # Pattern for slash commands like /help, /clear, /cancel
-            slash_pattern = r'/[a-z]+'
-            
+            slash_pattern = r"/[a-z]+"
+
             # Pattern for file references like @filename or @path/to/file
-            file_pattern = r'@[a-zA-Z0-9_./-]+'
-            
+            file_pattern = r"@[a-zA-Z0-9_./-]+"
+
             for line_num, line in enumerate(lines):
                 # Find all file reference ranges first (these take priority)
                 file_ranges = []
                 for match in re.finditer(file_pattern, line):
                     file_ranges.append((match.start(), match.end()))
-                
+
                 # Helper to check if a position is inside any file reference
                 def is_inside_file_ref(pos):
                     for start, end in file_ranges:
                         if start <= pos < end:
                             return True
                     return False
-                
+
                 # Highlight slash commands (but not if inside a file reference)
                 for match in re.finditer(slash_pattern, line):
                     start_col = match.start()
                     # Only highlight if preceded by start of line or space, and not inside file ref
-                    if (start_col == 0 or line[start_col - 1] == ' ') and not is_inside_file_ref(start_col):
+                    if (
+                        start_col == 0 or line[start_col - 1] == " "
+                    ) and not is_inside_file_ref(start_col):
                         end_col = match.end()
-                        self.nvim.api.buf_add_highlight(bufnr, self._prompt_highlight_ns, "Special", line_num, start_col, end_col)
-                
+                        self.nvim.api.buf_add_highlight(
+                            bufnr,
+                            self._prompt_highlight_ns,
+                            "Special",
+                            line_num,
+                            start_col,
+                            end_col,
+                        )
+
                 # Highlight file references
                 for start_col, end_col in file_ranges:
-                    self.nvim.api.buf_add_highlight(bufnr, self._prompt_highlight_ns, "Directory", line_num, start_col, end_col)
+                    self.nvim.api.buf_add_highlight(
+                        bufnr,
+                        self._prompt_highlight_ns,
+                        "Directory",
+                        line_num,
+                        start_col,
+                        end_col,
+                    )
         except Exception as e:
             self.logger.debug(f"Error highlighting prompt buffer: {e}")
-    
+
     def get_conversation_context(self) -> List[Dict]:
         """Extract current conversation context from content buffer.
-        
+
         Returns:
             List of message dictionaries with 'role' and 'content' keys
         """
         try:
             if not self.content_buf or not self.content_buf.valid:
                 return []
-                
+
             # Get buffer content
             lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
-            content = '\n'.join(lines)
-            
+            content = "\n".join(lines)
+
             # Split by message markers and create conversation history
             conversation_history = []
             current_message = ""
             current_role = "user"
-            
+
             for line in lines:
-                if line.startswith('## '):
+                if line.startswith("## "):
                     # Save previous message if any
                     if current_message.strip():
-                        conversation_history.append({
-                            'role': current_role,
-                            'content': current_message.strip()
-                        })
+                        conversation_history.append(
+                            {"role": current_role, "content": current_message.strip()}
+                        )
                     # Start new message
-                    current_role = 'assistant' if 'Assistant' in line else 'user'
+                    current_role = "assistant" if "Assistant" in line else "user"
                     current_message = line
                 else:
-                    current_message += '\n' + line if current_message else line
-            
+                    current_message += "\n" + line if current_message else line
+
             # Add final message
             if current_message.strip():
-                conversation_history.append({
-                    'role': current_role,
-                    'content': current_message.strip()
-                })
-            
+                conversation_history.append(
+                    {"role": current_role, "content": current_message.strip()}
+                )
+
             return conversation_history
-            
+
         except Exception as e:
             self.logger.error(f"Error getting conversation context: {e}")
             return []
-    
+
     def apply_compacted_context(self, summary: str, nvim):
         """Replace buffer content with compacted summary.
-        
+
         Args:
             summary: Compacted summary to apply
             nvim: Neovim instance
@@ -876,37 +944,31 @@ class BufferManager:
         try:
             if not self.content_buf or not self.content_buf.valid:
                 return
-                
+
             # Clean up summary: remove "USER: " and "ASSISTANT: " prefixes
             cleaned_lines = []
-            for line in summary.split('\n'):
+            for line in summary.split("\n"):
                 # Remove USER: or ASSISTANT: prefixes if present
-                if line.startswith('USER: '):
+                if line.startswith("USER: "):
                     cleaned_lines.append(line[6:])
-                elif line.startswith('ASSISTANT: '):
+                elif line.startswith("ASSISTANT: "):
                     cleaned_lines.append(line[11:])
                 else:
                     cleaned_lines.append(line)
-            
+
             new_content = cleaned_lines
-            
-            nvim.api.buf_set_lines(
-                self.content_buf, 
-                0, 
-                -1, 
-                False, 
-                new_content
-            )
-            
+
+            nvim.api.buf_set_lines(self.content_buf, 0, -1, False, new_content)
+
             self.logger.info("Applied compacted context to conversation")
-            
+
         except Exception as e:
             self.logger.error(f"Error applying compacted context: {e}")
             nvim.err_write(f"Error applying compacted context: {e}\n")
-    
+
     def add_compaction_metadata(self, metadata: Dict, nvim):
         """Add metadata about compaction to buffer.
-        
+
         Args:
             metadata: Dictionary with compaction metadata
             nvim: Neovim instance
@@ -914,7 +976,7 @@ class BufferManager:
         try:
             if not self.content_buf or not self.content_buf.valid:
                 return
-                
+
             # Create metadata block
             metadata_lines = [
                 "",
@@ -924,17 +986,11 @@ class BufferManager:
                 f"<!-- Compacted tokens: {metadata.get('compacted_tokens', 'Unknown')} -->",
                 f"<!-- Reduction: {metadata.get('reduction_percent', 'Unknown')}% -->",
                 "<!-- End Compaction Metadata -->",
-                ""
+                "",
             ]
-            
+
             # Append to buffer
-            nvim.api.buf_set_lines(
-                self.content_buf,
-                -1,
-                -1,
-                False,
-                metadata_lines
-            )
-            
+            nvim.api.buf_set_lines(self.content_buf, -1, -1, False, metadata_lines)
+
         except Exception as e:
             self.logger.error(f"Error adding compaction metadata: {e}")

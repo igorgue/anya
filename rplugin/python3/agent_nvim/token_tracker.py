@@ -36,10 +36,10 @@ MODEL_CONTEXT_WINDOWS = {
 
 def get_context_window(model: str | None) -> int:
     """Get context window size for a model.
-    
+
     Args:
         model: Model name (e.g., "gpt-4o" or "gpt-5.1")
-        
+
     Returns:
         Context window size in tokens. Uses AGENT_CONTEXT_WINDOW env var if set,
         or looks up model in registry, or defaults to 128K.
@@ -72,11 +72,11 @@ def calculate_usage_percentage(
     total_tokens: int, model: str | None
 ) -> tuple[float, int]:
     """Calculate token usage as percentage of context window.
-    
+
     Args:
         total_tokens: Total tokens used in this request
         model: Model name
-        
+
     Returns:
         Tuple of (percentage: float, context_window: int)
     """
@@ -92,13 +92,13 @@ def format_token_summary(
     model: str | None = None,
 ) -> str:
     """Format token usage as a human-readable string.
-    
+
     Args:
         total_tokens: Total tokens used
         input_tokens: Input tokens (optional)
         output_tokens: Output tokens (optional)
         model: Model name (optional)
-        
+
     Returns:
         Formatted string like "267/128K tokens (0.2%)" or "267 tokens"
     """
@@ -126,18 +126,18 @@ def format_placeholder_text(
     model: str | None = None,
 ) -> tuple[str, str]:
     """Format token usage for placeholder display with highlight group.
-    
+
     Concise format suitable for inline display. Highlight based on usage:
     - 0-40%: OkMsg (green/success)
     - 41-95%: WarningMsg (yellow/warning)
     - 96-100%: ErrorMsg (red/error)
-    
+
     Args:
         total_tokens: Total tokens used
         input_tokens: Input tokens (optional)
         output_tokens: Output tokens (optional)
         model: Model name (optional)
-        
+
     Returns:
         Tuple of (formatted_string, highlight_group)
         Formatted string like "25% of 128K" or "267 tokens"
@@ -175,7 +175,7 @@ def reset_session_tokens():
 
 def update_session_tokens(prompt_tokens: int, completion_tokens: int):
     """Update session token usage.
-    
+
     Args:
         prompt_tokens: Input tokens used
         completion_tokens: Output tokens generated
@@ -186,7 +186,7 @@ def update_session_tokens(prompt_tokens: int, completion_tokens: int):
 
 def calculate_max_tokens() -> int:
     """Calculate max_tokens for next request based on session usage.
-    
+
     Returns:
         Max tokens to use for next request, capped at 95% of remaining context.
     """

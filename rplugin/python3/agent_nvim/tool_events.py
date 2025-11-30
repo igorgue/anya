@@ -3,8 +3,9 @@
 import json
 
 
-
-def handle_tool_event(event, content_bufnr, nvim, logger, append_content_fn, emit_event_fn=None):
+def handle_tool_event(
+    event, content_bufnr, nvim, logger, append_content_fn, emit_event_fn=None
+):
     """Handle tool-related events and display tool calls.
 
     Args:
@@ -44,8 +45,13 @@ def handle_tool_event(event, content_bufnr, nvim, logger, append_content_fn, emi
                     tool_result = data_dict.get("result") or data_dict.get("output")
                     if tool_result:
                         display_tool_result(
-                            tool_result, nvim, logger, append_content_fn, content_bufnr,
-                            emit_event_fn=emit_event_fn, request_id=None
+                            tool_result,
+                            nvim,
+                            logger,
+                            append_content_fn,
+                            content_bufnr,
+                            emit_event_fn=emit_event_fn,
+                            request_id=None,
                         )
                         return
 
@@ -101,7 +107,7 @@ def display_tool_call(
         _G.agent_stream_paused = true
         """
         nvim.async_call(lambda: nvim.exec_lua(flush_and_pause_lua))
-        
+
         # Extract tool arguments
         args = tool_data.get("arguments") or tool_data.get("args") or {}
 
@@ -131,7 +137,13 @@ def display_tool_call(
 
 
 def display_tool_result(
-    tool_result, nvim, logger, append_content_fn, content_bufnr=None, emit_event_fn=None, request_id=None
+    tool_result,
+    nvim,
+    logger,
+    append_content_fn,
+    content_bufnr=None,
+    emit_event_fn=None,
+    request_id=None,
 ):
     """Display tool call and result combined in a code block.
 
@@ -167,36 +179,45 @@ def display_tool_result(
 
         if tool_info:
             tool_name = tool_info["tool_name"]
-            
+
             # Special handling for apply_patch
             # Debug logging to diagnose why interception might fail
             if tool_name == "apply_patch":
-                logger.info(f"Attempting to intercept apply_patch. append_content_fn type: {type(append_content_fn)}")
+                logger.info(
+                    f"Attempting to intercept apply_patch. append_content_fn type: {type(append_content_fn)}"
+                )
                 if hasattr(append_content_fn, "__self__"):
-                    logger.info(f"append_content_fn has __self__: {type(append_content_fn.__self__)}")
+                    logger.info(
+                        f"append_content_fn has __self__: {type(append_content_fn.__self__)}"
+                    )
                     if hasattr(append_content_fn.__self__, "render_diff_block"):
                         logger.info("Found render_diff_block method")
-                        
+
                         # Use the buffer manager's render_diff_block method
                         buffer_manager = append_content_fn.__self__
-                        
+
                         # Show a small header
                         header = f"**  {tool_name}**"
                         nvim.async_call(lambda: append_content_fn([header]))
-                        
+
                         # Render the diff block
-                        nvim.async_call(lambda: buffer_manager.render_diff_block(result_str))
-                        
+                        nvim.async_call(
+                            lambda: buffer_manager.render_diff_block(result_str)
+                        )
+
                         # Add blank lines after the diff block to prevent LLM response from merging
                         nvim.async_call(lambda: append_content_fn(["", ""]))
-                        
+
                         # Resume streaming
                         nvim.exec_lua("_G.agent_stream_paused = false")
                         if emit_event_fn and request_id:
-                            emit_event_fn("AgentToolCall", {
-                                "id": request_id,
-                                "message": "thinking",
-                            })
+                            emit_event_fn(
+                                "AgentToolCall",
+                                {
+                                    "id": request_id,
+                                    "message": "thinking",
+                                },
+                            )
                         return
                     else:
                         logger.warning("render_diff_block not found on buffer_manager")
@@ -204,12 +225,12 @@ def display_tool_result(
                     logger.warning("append_content_fn does not have __self__")
 
             args = tool_info["args"]
-            
+
             # Extract first parameter for title
             first_param = None
             if args:
                 first_param = next(iter(args.values()), None)
-            
+
             # Format title with first parameter
             if first_param:
                 param_str = str(first_param)
@@ -218,7 +239,7 @@ def display_tool_result(
                 tool_title = f"**  {tool_name}** — `{param_str}`"
             else:
                 tool_title = f"**  {tool_name}**"
-            
+
             output_lines.append(tool_title)
             output_lines.append("``````")
             output_lines.append("**Arguments**:")
@@ -249,18 +270,29 @@ def display_tool_result(
             nvim.exec_lua("_G.agent_stream_paused = false")
             # Emit event to reset fidget back to "thinking"
             if emit_event_fn and request_id:
-                emit_event_fn("AgentToolCall", {
-                    "id": request_id,
-                    "message": "thinking",
-                })
-        
+                emit_event_fn(
+                    "AgentToolCall",
+                    {
+                        "id": request_id,
+                        "message": "thinking",
+                    },
+                )
+
         nvim.async_call(append_and_resume)
 
     except Exception as e:
         logger.error(f"Error displaying tool result: {e}")
 
 
-def handle_tool_call_delta(data, content_bufnr, nvim, logger, append_content_fn, emit_event_fn=None, request_id=None):
+def handle_tool_call_delta(
+    data,
+    content_bufnr,
+    nvim,
+    logger,
+    append_content_fn,
+    emit_event_fn=None,
+    request_id=None,
+):
     """Handle tool call delta events.
 
     Args:
@@ -280,11 +312,10 @@ def handle_tool_call_delta(data, content_bufnr, nvim, logger, append_content_fn,
 
             # Emit fidget status update
             if emit_event_fn and request_id:
-                emit_event_fn("AgentToolCall", {
-                    "id": request_id,
-                    "message": f"{tool_name}",
-                    "tool": tool_name
-                })
+                emit_event_fn(
+                    "AgentToolCall",
+                    {"id": request_id, "message": f"{tool_name}", "tool": tool_name},
+                )
 
             # Display the tool call
             lines = ["```", f"  {tool_name}"]
@@ -317,7 +348,9 @@ def handle_tool_call_delta(data, content_bufnr, nvim, logger, append_content_fn,
         logger.error(f"Error handling tool call delta: {e}")
 
 
-def handle_tool_call_end(data, content_bufnr, logger, emit_event_fn=None, request_id=None):
+def handle_tool_call_end(
+    data, content_bufnr, logger, emit_event_fn=None, request_id=None
+):
     """Handle tool call end events.
 
     Args:
@@ -334,7 +367,15 @@ def handle_tool_call_end(data, content_bufnr, logger, emit_event_fn=None, reques
         logger.error(f"Error handling tool call end: {e}")
 
 
-def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn, emit_event_fn=None, request_id=None):
+def handle_tool_call_output(
+    data,
+    content_bufnr,
+    nvim,
+    logger,
+    append_content_fn,
+    emit_event_fn=None,
+    request_id=None,
+):
     """Handle tool call output events.
 
     Args:
@@ -352,10 +393,13 @@ def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn
 
             # Emit fidget status update
             if emit_event_fn and request_id:
-                emit_event_fn("AgentToolResult", {
-                    "id": request_id,
-                    "message": "processing result...",
-                })
+                emit_event_fn(
+                    "AgentToolResult",
+                    {
+                        "id": request_id,
+                        "message": "processing result...",
+                    },
+                )
 
             # Format the output
             if isinstance(output, str):
@@ -376,7 +420,15 @@ def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn
         logger.error(f"Error handling tool call output: {e}")
 
 
-def handle_tool_call_event(event, content_bufnr, nvim, logger, append_content_fn, emit_event_fn=None, request_id=None):
+def handle_tool_call_event(
+    event,
+    content_bufnr,
+    nvim,
+    logger,
+    append_content_fn,
+    emit_event_fn=None,
+    request_id=None,
+):
     """Handle generic tool call events.
 
     Args:
@@ -400,11 +452,14 @@ def handle_tool_call_event(event, content_bufnr, nvim, logger, append_content_fn
             if tool_name:
                 # Emit fidget status update
                 if emit_event_fn and request_id:
-                    emit_event_fn("AgentToolCall", {
-                        "id": request_id,
-                        "message": f"{tool_name}...",
-                        "tool": tool_name
-                    })
+                    emit_event_fn(
+                        "AgentToolCall",
+                        {
+                            "id": request_id,
+                            "message": f"{tool_name}...",
+                            "tool": tool_name,
+                        },
+                    )
                 lines = ["", "🔧 **Tool call event**: `" + tool_name + "`"]
                 nvim.async_call(lambda: append_content_fn(lines))
 
@@ -412,7 +467,15 @@ def handle_tool_call_event(event, content_bufnr, nvim, logger, append_content_fn
         logger.error(f"Error handling tool call event: {e}")
 
 
-def handle_tool_item(item, content_bufnr, nvim, logger, append_content_fn, emit_event_fn=None, request_id=None):
+def handle_tool_item(
+    item,
+    content_bufnr,
+    nvim,
+    logger,
+    append_content_fn,
+    emit_event_fn=None,
+    request_id=None,
+):
     """Handle tool call items from result_stream.new_items.
 
     Args:
@@ -501,11 +564,14 @@ def handle_tool_item(item, content_bufnr, nvim, logger, append_content_fn, emit_
             if tool_name:
                 # Emit fidget status update
                 if emit_event_fn and request_id:
-                    emit_event_fn("AgentToolCall", {
-                        "id": request_id,
-                        "message": f"{tool_name}...",
-                        "tool": tool_name
-                    })
+                    emit_event_fn(
+                        "AgentToolCall",
+                        {
+                            "id": request_id,
+                            "message": f"{tool_name}...",
+                            "tool": tool_name,
+                        },
+                    )
                 logger.info(f"Displaying tool call for: {tool_name}")
                 tool_data = {"arguments": arguments} if arguments else {}
                 display_tool_call(
@@ -525,8 +591,13 @@ def handle_tool_item(item, content_bufnr, nvim, logger, append_content_fn, emit_
 
             output_str = str(output) if output else "No output"
             display_tool_result(
-               output_str, nvim, logger, append_content_fn, content_bufnr,
-               emit_event_fn=emit_event_fn, request_id=request_id
+                output_str,
+                nvim,
+                logger,
+                append_content_fn,
+                content_bufnr,
+                emit_event_fn=emit_event_fn,
+                request_id=request_id,
             )
         else:
             # This might be a different type of item

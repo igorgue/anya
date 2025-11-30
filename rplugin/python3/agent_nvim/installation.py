@@ -8,7 +8,7 @@ import asyncio
 
 async def install_deps(nvim, plugin_root: str):
     """Install dependencies to the current Python environment.
-    
+
     Args:
         nvim: Neovim instance
         plugin_root: Root directory of the plugin
@@ -45,14 +45,12 @@ async def install_deps(nvim, plugin_root: str):
                 f"Failed to install dependencies: {stderr.decode()}\n",
             )
     except Exception as e:
-        nvim.async_call(
-            nvim.err_write, f"Exception during install: {str(e)}\n"
-        )
+        nvim.async_call(nvim.err_write, f"Exception during install: {str(e)}\n")
 
 
 def test_imports(nvim):
     """Test that required imports are available.
-    
+
     Args:
         nvim: Neovim instance
     """

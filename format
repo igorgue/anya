@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+export PATH=".venv/bin:$HOME/.local/share/nvim/mason/bin:$PATH"
+
 function print_formatter {
   echo -e "\033[1m* $1 *\033[0m"
   echo
