@@ -279,12 +279,18 @@ class AgentPlugin(object):
                 """Execute Lua code inside Neovim."""
                 return await tools.exec_lua(code, nvim=self.nvim, logger=self.logger)
             
+            def exec(command: str, timeout: int = 30) -> str:
+                """Execute a shell command."""
+                cwd = getattr(self, "_cached_cwd", None)
+                return tools.exec(command, cwd=cwd, timeout=timeout)
+            
             return {
                 'read_file': function_tool(read_file),
                 'list_files': function_tool(list_files),
                 'search_repo': function_tool(search_repo),
                 'apply_patch': function_tool(apply_patch),
                 'exec_lua': function_tool(exec_lua),
+                'exec': function_tool(exec),
             }
         except ImportError:
             self.logger.warning("Could not import function_tool from agents")

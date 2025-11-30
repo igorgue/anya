@@ -199,13 +199,15 @@ def display_tool_result(
         output_lines.append(result_str)
         output_lines.append("```")
         output_lines.append("``````")
-        output_lines.append("")
 
         fold_summary = f"**  {tool_name}**"
 
         # Append content and fold it, then resume streaming
         def append_and_resume():
+            # Add blank lines AFTER folding to create separation
             append_content_fn(output_lines, fold=True)
+            # Add blank lines separately (not folded)
+            append_content_fn(["", ""])
             # Resume streaming after tool output is written
             nvim.exec_lua("_G.agent_stream_paused = false")
         
