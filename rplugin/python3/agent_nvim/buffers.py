@@ -1,6 +1,7 @@
 """Buffer management for agent.nvim plugin."""
 
 import os
+import re
 import subprocess
 import tempfile
 
@@ -35,6 +36,9 @@ class BufferManager:
         self._username_highlight_ns = nvim.api.create_namespace(
             "agent_username_highlight"
         )
+        # File backups for undo support when git apply can't be used
+        # Maps absolute filepath -> original content (or None if file didn't exist)
+        self._file_backups = {}
 
     def create_layout(self):
         """Create the agent UI layout with content and prompt buffers."""
@@ -200,54 +204,403 @@ class BufferManager:
                         applied_count += 1
 
             if applied_count > 0:
-                self.append_content([f"> **Applied {applied_count} patch(es)**", ""])
+                self.append_content(["", f"> **Applied {applied_count} patch(es)**"])
 
         except Exception as e:
             self.logger.error(f"Error applying pending patches: {e}")
             self.nvim.err_write(f"Error applying patches: {e}\n")
 
+    def _can_use_git_apply(self, filepath: str, cwd: str) -> bool:
+        """Check if a file can be patched using git apply.
+
+        Git apply works for:
+        - Files that are tracked and unmodified (clean)
+        - Files that are staged (changes in index)
+
+        Git apply fails for:
+        - Untracked files (not in git)
+        - Files with unstaged modifications
+
+        Args:
+            filepath: Relative path to the file
+            cwd: Current working directory (git repo root)
+
+        Returns:
+            True if git apply can be used, False if direct file manipulation needed
+        """
+        try:
+            # Check git status for this specific file
+            result = subprocess.run(
+                ["git", "status", "--porcelain", "--", filepath],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+
+            if result.returncode != 0:
+                # Not a git repo or git error - use direct method
+                return False
+
+            status = result.stdout.strip()
+
+            if not status:
+                # Empty status means file is tracked and clean - git apply works
+                return True
+
+            # Parse status codes (first two characters)
+            # XY format: X=index status, Y=worktree status
+            if len(status) >= 2:
+                worktree_status = status[1]
+
+                # Untracked file (??) - git apply won't work
+                if status.startswith("??"):
+                    return False
+
+                # File has unstaged modifications ( M, MM, AM, etc.)
+                # The worktree has changes not in index - git apply may fail
+                if worktree_status == "M":
+                    return False
+
+                # Staged changes only (M , A , etc.) - git apply works
+                if worktree_status == " ":
+                    return True
+
+            # Default to trying git apply
+            return True
+
+        except Exception as e:
+            self.logger.warning(f"Error checking git status for {filepath}: {e}")
+            return False
+
+    def _parse_patch_files(self, patch_content: str, cwd: str) -> list:
+        """Parse patch content to extract target file paths.
+
+        Args:
+            patch_content: The unified diff patch content
+            cwd: Current working directory for resolving paths
+
+        Returns:
+            List of tuples: (relative_path, absolute_path, is_new_file)
+        """
+        files = []
+        lines = patch_content.split("\n")
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+
+            # Look for +++ b/path or +++ path (target file)
+            if line.startswith("+++ "):
+                target = line[4:].strip()
+
+                # Remove b/ prefix if present
+                if target.startswith("b/"):
+                    target = target[2:]
+
+                # Check if this is a new file by looking at the --- line
+                is_new_file = False
+                if i > 0:
+                    prev_line = lines[i - 1]
+                    if prev_line.startswith("--- /dev/null") or prev_line.startswith(
+                        "--- a/dev/null"
+                    ):
+                        is_new_file = True
+
+                # Skip /dev/null targets (file deletions)
+                if target != "/dev/null" and not target.endswith("/dev/null"):
+                    abs_path = os.path.join(cwd, target)
+                    files.append((target, abs_path, is_new_file))
+
+            i += 1
+
+        return files
+
+    def _parse_hunks(self, patch_content: str, target_file: str) -> list:
+        """Parse patch hunks for a specific file.
+
+        Args:
+            patch_content: The unified diff patch content
+            target_file: The target file path (relative, without b/ prefix)
+
+        Returns:
+            List of hunk dicts with keys: old_start, old_count, new_start, new_count, lines
+        """
+        hunks = []
+        lines = patch_content.split("\n")
+        in_target_file = False
+        current_hunk = None
+
+        for line in lines:
+            # Check if we're entering a new file section
+            if line.startswith("+++ "):
+                target = line[4:].strip()
+                if target.startswith("b/"):
+                    target = target[2:]
+                in_target_file = target == target_file
+
+            # Parse hunk header
+            elif line.startswith("@@ ") and in_target_file:
+                # Save previous hunk if exists
+                if current_hunk:
+                    hunks.append(current_hunk)
+
+                # Parse @@ -old_start,old_count +new_start,new_count @@
+                match = re.match(
+                    r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line
+                )
+                if match:
+                    current_hunk = {
+                        "old_start": int(match.group(1)),
+                        "old_count": int(match.group(2) or 1),
+                        "new_start": int(match.group(3)),
+                        "new_count": int(match.group(4) or 1),
+                        "lines": [],
+                    }
+
+            # Collect hunk lines
+            elif current_hunk and in_target_file:
+                if line.startswith(("+", "-", " ")):
+                    current_hunk["lines"].append(line)
+                elif line.startswith("\\"):
+                    # "\ No newline at end of file" - note but don't add
+                    current_hunk["lines"].append(line)
+
+        # Don't forget the last hunk
+        if current_hunk:
+            hunks.append(current_hunk)
+
+        return hunks
+
+    def _apply_hunks_to_content(self, content: str, hunks: list) -> str:
+        """Apply parsed hunks to file content.
+
+        Args:
+            content: Original file content
+            hunks: List of parsed hunks from _parse_hunks
+
+        Returns:
+            Modified file content
+        """
+        lines = content.splitlines(keepends=True)
+
+        # Track offset as we apply hunks (line numbers shift)
+        offset = 0
+
+        for hunk in hunks:
+            old_start = hunk["old_start"] - 1 + offset  # Convert to 0-indexed
+            old_count = hunk["old_count"]
+
+            # Build new lines from hunk
+            new_lines = []
+            for hunk_line in hunk["lines"]:
+                if hunk_line.startswith("+") and not hunk_line.startswith("+++"):
+                    # Added line - include it (remove the + prefix)
+                    new_lines.append(hunk_line[1:] + "\n")
+                elif hunk_line.startswith(" "):
+                    # Context line - include it
+                    new_lines.append(hunk_line[1:] + "\n")
+                elif hunk_line.startswith("\\"):
+                    # "\ No newline at end of file" - remove newline from last line
+                    if new_lines:
+                        new_lines[-1] = new_lines[-1].rstrip("\n")
+                # Lines starting with - are removed (not added to new_lines)
+
+            # Replace old lines with new lines
+            lines[old_start : old_start + old_count] = new_lines
+
+            # Update offset for next hunk
+            offset += len(new_lines) - old_count
+
+        return "".join(lines)
+
+    def _apply_patch_directly(self, patch_content: str, cwd: str) -> bool:
+        """Apply patch using direct file manipulation.
+
+        Args:
+            patch_content: The unified diff patch content
+            cwd: Current working directory
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            files = self._parse_patch_files(patch_content, cwd)
+
+            for rel_path, abs_path, is_new_file in files:
+                # Backup original content before modifying
+                if os.path.exists(abs_path):
+                    with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+                        self._file_backups[abs_path] = f.read()
+                else:
+                    # File doesn't exist - mark as None for undo (will delete)
+                    self._file_backups[abs_path] = None
+
+                if is_new_file:
+                    # New file - extract content from + lines
+                    hunks = self._parse_hunks(patch_content, rel_path)
+                    new_content = []
+                    for hunk in hunks:
+                        for line in hunk["lines"]:
+                            if line.startswith("+") and not line.startswith("+++"):
+                                new_content.append(line[1:])
+
+                    # Create parent directories if needed
+                    parent_dir = os.path.dirname(abs_path)
+                    if parent_dir and not os.path.exists(parent_dir):
+                        os.makedirs(parent_dir)
+
+                    with open(abs_path, "w", encoding="utf-8") as f:
+                        f.write("\n".join(new_content))
+                        if new_content:
+                            f.write("\n")
+                else:
+                    # Existing file - apply hunks
+                    with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+
+                    hunks = self._parse_hunks(patch_content, rel_path)
+                    new_content = self._apply_hunks_to_content(content, hunks)
+
+                    with open(abs_path, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+
+                self.logger.info(f"Applied patch directly to {abs_path}")
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error applying patch directly: {e}")
+            self.nvim.err_write(f"Error applying patch directly: {e}\n")
+            return False
+
+    def _restore_backups(self) -> bool:
+        """Restore files from backups (undo operation).
+
+        Returns:
+            True if all files restored successfully, False otherwise
+        """
+        try:
+            for abs_path, original_content in self._file_backups.items():
+                if original_content is None:
+                    # File was newly created - delete it
+                    if os.path.exists(abs_path):
+                        os.remove(abs_path)
+                        self.logger.info(f"Deleted newly created file: {abs_path}")
+                else:
+                    # Restore original content
+                    with open(abs_path, "w", encoding="utf-8") as f:
+                        f.write(original_content)
+                    self.logger.info(f"Restored original content: {abs_path}")
+
+            self._file_backups.clear()
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error restoring backups: {e}")
+            self.nvim.err_write(f"Error restoring backups: {e}\n")
+            return False
+
     def _apply_single_patch(self, patch_content, reverse=False):
         """Apply a single patch content string.
+
+        Uses git apply for clean tracked files, falls back to direct file
+        manipulation for untracked or modified files.
 
         Args:
             patch_content: The patch content
             reverse: If True, apply in reverse (undo/reject)
+
+        Returns:
+            True if successful, False otherwise
         """
         try:
             self.logger.info(
-                f"Applying patch content (len={len(patch_content)}):\n{patch_content}"
+                f"Applying patch content (len={len(patch_content)}, reverse={reverse}):\n{patch_content}"
             )
-            with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
-                tmp.write(patch_content)
-                tmp_path = tmp.name
 
             cwd = self.nvim.call("getcwd")
-            cmd = [
-                "git",
-                "apply",
-                "--ignore-space-change",
-                "--ignore-whitespace",
-            ]
 
+            # Handle reverse/undo operation
             if reverse:
-                cmd.append("--reverse")
+                # If we have backups, use them (from direct apply)
+                if self._file_backups:
+                    return self._restore_backups()
 
-            cmd.append(tmp_path)
+                # Otherwise try git apply --reverse
+                with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
+                    tmp.write(patch_content)
+                    tmp_path = tmp.name
 
-            proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-            os.remove(tmp_path)
+                cmd = [
+                    "git",
+                    "apply",
+                    "--ignore-space-change",
+                    "--ignore-whitespace",
+                    "--reverse",
+                    tmp_path,
+                ]
 
-            if proc.returncode == 0:
-                return True
+                proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+                os.remove(tmp_path)
+
+                if proc.returncode == 0:
+                    return True
+                else:
+                    self.logger.error(f"Failed to reverse patch: {proc.stderr}")
+                    self.nvim.err_write(
+                        f"Failed to reverse patch: {proc.stderr.strip()}\n"
+                    )
+                    return False
+
+            # Forward apply - determine which method to use
+            files = self._parse_patch_files(patch_content, cwd)
+
+            # Check if all files can use git apply
+            use_git_apply = True
+            for rel_path, abs_path, is_new_file in files:
+                if is_new_file:
+                    # New files - check if path already exists as untracked
+                    if os.path.exists(abs_path):
+                        use_git_apply = False
+                        break
+                else:
+                    if not self._can_use_git_apply(rel_path, cwd):
+                        use_git_apply = False
+                        break
+
+            if use_git_apply:
+                # Try git apply
+                with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
+                    tmp.write(patch_content)
+                    tmp_path = tmp.name
+
+                cmd = [
+                    "git",
+                    "apply",
+                    "--ignore-space-change",
+                    "--ignore-whitespace",
+                    tmp_path,
+                ]
+
+                proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+                os.remove(tmp_path)
+
+                if proc.returncode == 0:
+                    self.logger.info("Applied patch using git apply")
+                    return True
+                else:
+                    # Git apply failed - fall back to direct method
+                    self.logger.warning(
+                        f"git apply failed ({proc.stderr.strip()}), trying direct method"
+                    )
+                    return self._apply_patch_directly(patch_content, cwd)
             else:
-                self.logger.error(f"Failed to apply patch: {proc.stderr}")
-                # Show first few lines of patch in error to help debug
-                lines = patch_content.split("\n")
-                preview = "\n".join(lines[:5])
-                self.nvim.err_write(
-                    f"Failed to apply patch: {proc.stderr.strip()}\nPatch preview:\n{preview}\n"
+                # Use direct file manipulation
+                self.logger.info(
+                    "Using direct file manipulation (untracked or modified files)"
                 )
-                return False
+                return self._apply_patch_directly(patch_content, cwd)
+
         except Exception as e:
             self.logger.error(f"Exception applying patch: {e}")
             self.nvim.err_write(f"Exception applying patch: {e}\n")
@@ -681,6 +1034,7 @@ class BufferManager:
             _G.agent_stream_queue = {{}}
             _G.agent_stream_timer = nil
             _G.agent_stream_paused = false
+            _G.agent_stream_spacing_checked = false
         end
 
         -- Add text to queue
@@ -717,6 +1071,23 @@ class BufferManager:
                         vim.api.nvim_buf_set_lines(item.bufnr, last_line_idx, last_line_idx + 1, false, {{}})
                     end
                     item.remove_last_line = false
+                end
+
+                -- Ensure blank line separation once per streaming session
+                -- This handles spacing after tool output when streaming resumes
+                if not _G.agent_stream_spacing_checked then
+                    _G.agent_stream_spacing_checked = true
+                    local line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                    local last_line_idx = line_count - 1
+                    local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
+                    local last_content = last_line[1] or ""
+                    -- Check if text starts with newline (model provides its own spacing)
+                    local text_starts_with_newline = item.text:sub(1, 1) == "\\n"
+                    -- If text doesn't start with newline, prepend one for separation
+                    -- This ensures blank line isn't overwritten by set_text
+                    if not text_starts_with_newline then
+                        item.text = "\\n" .. item.text
+                    end
                 end
 
                 -- Vary characters written: more natural variation
@@ -832,8 +1203,13 @@ class BufferManager:
             pass
 
     def reset_agent_response_flag(self):
-        """Reset the agent response started flag."""
+        """Reset the agent response started flag and Lua spacing check."""
         self._agent_response_started = False
+        # Also reset the Lua spacing check for the new response
+        try:
+            self.nvim.exec_lua("_G.agent_stream_spacing_checked = false")
+        except Exception:
+            pass
 
     def highlight_prompt_buffer(self):
         """Highlight file references and slash commands in the prompt buffer as user types."""

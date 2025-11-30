@@ -861,7 +861,7 @@ class AgentPlugin(object):
             self._update_fidget_progress("Analyzing context...")
             self.nvim.async_call(
                 self.buffer_manager.append_content,
-                ["> **Analyzing conversation context...**"],
+                ["", "> **Analyzing conversation context...**"],
             )
 
             # Check for cancellation
@@ -968,7 +968,7 @@ class AgentPlugin(object):
                     self._update_fidget_progress("Applying context...")
                     self.nvim.async_call(
                         self.buffer_manager.append_content,
-                        ["> **Applying compacted context...**"],
+                        ["", "> **Applying compacted context...**"],
                     )
                     # Clear buffer and redraw with compacted history
                     self.nvim.async_call(

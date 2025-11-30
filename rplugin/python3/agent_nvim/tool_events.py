@@ -87,27 +87,45 @@ def display_tool_call(
     try:
         # Flush the stream queue first, then pause
         # This ensures any pending text appears BEFORE the tool output
-        flush_and_pause_lua = """
-        -- First, flush all pending stream content immediately
-        if _G.agent_stream_queue then
-            for _, item in ipairs(_G.agent_stream_queue) do
-                if vim.api.nvim_buf_is_valid(item.bufnr) and item.text ~= "" then
-                    local line_count = vim.api.nvim_buf_line_count(item.bufnr)
-                    local last_line_idx = line_count - 1
-                    local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
-                    local last_column = #(last_line[1] or "")
+        bufnr = content_bufnr if content_bufnr else -1
 
-                    local lines = vim.split(item.text, "\\n", {plain = true})
-                    vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
+        def flush_and_pause():
+            nvim.exec_lua(
+                """
+            local content_bufnr = ...
+            -- First, flush all pending stream content immediately
+            if _G.agent_stream_queue then
+                for _, item in ipairs(_G.agent_stream_queue) do
+                    if vim.api.nvim_buf_is_valid(item.bufnr) and item.text ~= "" then
+                        local line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                        local last_line_idx = line_count - 1
+                        local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
+                        local last_column = #(last_line[1] or "")
+
+                        local lines = vim.split(item.text, "\\n", {plain = true})
+                        vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
+                    end
+                end
+                -- Clear the queue after flushing
+                _G.agent_stream_queue = {}
+            end
+            -- Add blank line for separation before tool output (use passed buffer)
+            if content_bufnr and content_bufnr > 0 and vim.api.nvim_buf_is_valid(content_bufnr) then
+                local line_count = vim.api.nvim_buf_line_count(content_bufnr)
+                local last_line = vim.api.nvim_buf_get_lines(content_bufnr, line_count - 1, line_count, false)
+                if (last_line[1] or "") ~= "" then
+                    vim.api.nvim_buf_set_lines(content_bufnr, -1, -1, false, {""})
                 end
             end
-            -- Clear the queue after flushing
-            _G.agent_stream_queue = {}
-        end
-        -- Now pause streaming to prevent new text from appearing before tool output
-        _G.agent_stream_paused = true
-        """
-        nvim.async_call(lambda: nvim.exec_lua(flush_and_pause_lua))
+            -- Now pause streaming to prevent new text from appearing before tool output
+            _G.agent_stream_paused = true
+            -- Reset spacing check so it will re-check when streaming resumes after tool output
+            _G.agent_stream_spacing_checked = false
+            """,
+                bufnr,
+            )
+
+        nvim.async_call(flush_and_pause)
 
         # Extract tool arguments
         args = tool_data.get("arguments") or tool_data.get("args") or {}
@@ -255,9 +273,8 @@ def display_tool_result(
                                     logger.warning("YOLO: Patch failed to apply")
 
                             nvim.async_call(apply_yolo_patch)
-                        else:
-                            # Normal mode - just add blank line, user will approve/reject
-                            nvim.async_call(lambda: append_content_fn([""]))
+                        # Normal mode - user will approve/reject
+                        # No blank line needed here - flush_and_pause handles spacing
 
                         # Resume streaming
                         nvim.exec_lua("_G.agent_stream_paused = false")
@@ -317,10 +334,8 @@ def display_tool_result(
 
         # Append content and fold it, then resume streaming
         def append_and_resume():
-            # Add blank lines AFTER folding to create separation
             append_content_fn(output_lines, fold=True)
-            # Add blank lines separately (not folded)
-            append_content_fn([""])
+            # No blank line needed here - flush_and_pause handles spacing before next content
             # Resume streaming after tool output is written
             nvim.exec_lua("_G.agent_stream_paused = false")
             # Emit event to reset fidget back to "thinking"

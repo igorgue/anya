@@ -200,7 +200,7 @@ Constraints:
 
         # Add agent header with proper spacing (skip for patch continuations)
         if not skip_header:
-            header_lines = ["", f"# Agent ({display_model})", "", ""]
+            header_lines = ["", f"# Agent ({display_model})", ""]
             nvim.async_call(buffer_manager.append_content, header_lines)
 
         # Track the line number where agent response will start
@@ -529,7 +529,8 @@ Constraints:
                 nvim.async_call(
                     buffer_manager.append_content,
                     [
-                        "> Press **1** to apply, **2** to reject, and **za** to open the diff on top of the fold."
+                        "",
+                        "> Press **1** to apply, **2** to reject, and **za** to open the diff on top of the fold.",
                     ],
                 )
 

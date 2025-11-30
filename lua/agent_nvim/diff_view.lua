@@ -100,7 +100,7 @@ local function get_header_virt_text(state, additions, modifications, deletions)
             elseif state == STATE_REJECT then hl = HL_REJECT
             end
             -- Highlight the active option
-            table.insert(virt_text, { string.format("[%s: %s]", key, label), hl })
+            table.insert(virt_text, { string.format("%s: %s", key, label), hl })
         else
             table.insert(virt_text, { string.format("%s: %s", key, label), HL_PENDING })
         end
