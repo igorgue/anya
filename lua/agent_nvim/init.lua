@@ -8,22 +8,22 @@ local highlight = require("agent_nvim.highlight")
 
 -- Function to highlight prompt buffer file references
 local function highlight_prompt_buffer()
-	-- Get the current plugin instance
-	local plugin = vim.fn.rpcrequest(
-		vim.fn.sockconnect("pipe", vim.fn.serverlist()[1] or ""),
-		"nvim_call_function",
-		"AgentHighlightPrompt",
-		{}
-	)
+  -- Get the current plugin instance
+  local plugin = vim.fn.rpcrequest(
+    vim.fn.sockconnect("pipe", vim.fn.serverlist()[1] or ""),
+    "nvim_call_function",
+    "AgentHighlightPrompt",
+    {}
+  )
 end
 
 return {
-	highlight = highlight,
-	highlight_prompt_buffer = function()
-		pcall(function()
-			if vim.fn.exists(":AgentHighlightPrompt") == 2 then
-				vim.fn.AgentHighlightPrompt()
-			end
-		end)
-	end,
+  highlight = highlight,
+  highlight_prompt_buffer = function()
+    pcall(function()
+      if vim.fn.exists(":AgentHighlightPrompt") == 2 then
+        vim.fn.AgentHighlightPrompt()
+      end
+    end)
+  end,
 }

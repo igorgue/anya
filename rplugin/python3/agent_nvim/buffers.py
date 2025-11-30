@@ -20,10 +20,9 @@ class BufferManager:
 
     WELCOME_MESSAGE = [
         "```",
-        "         ▗       ▘    ",
-        " ▀▌▛▌█▌▛▌▜▘  ▛▌▌▌▌▛▛▌ ",
-        " █▌▙▌▙▖▌▌▐▖▗ ▌▌▚▘▌▌▌▌ ",
-        "   ▄▌                 ",
+        "░█▀█░█▀▀░█▀▀░█▀█░▀█▀",
+        "░█▀█░█░█░█▀▀░█░█░░█░",
+        "░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░",
         "```",
         "",
         "> Type your request in the prompt below.",
@@ -105,9 +104,9 @@ class BufferManager:
         self.content_buf = content_buf
         self.prompt_buf = prompt_buf
 
-        # Add welcome message if empty
+        # Add welcome message if empty (with animation)
         if len(content_buf) <= 1:
-            self.nvim.api.buf_set_lines(content_buf, 0, -1, False, self.WELCOME_MESSAGE)
+            self.animate_welcome_message(content_buf)
 
         # Enable render-markdown for the content buffer
         self.enable_render_markdown()
@@ -740,14 +739,8 @@ class BufferManager:
         ):
             return
 
-        # Get the current buffer lines
-        current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
-
-        # Check if buffer is empty (single empty line - Neovim always has at least one line)
-        is_empty_buffer = len(current_lines) == 1 and current_lines[0] == ""
-
         # Get the line count before appending (this is where new content starts)
-        start_line = 0 if is_empty_buffer else len(current_lines)
+        start_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
 
         # Save the current window to restore focus later
         try:
@@ -755,13 +748,8 @@ class BufferManager:
         except Exception:
             current_win = None
 
-        # Set or append lines
-        if is_empty_buffer:
-            # Replace the empty line instead of appending after it
-            self.nvim.api.buf_set_lines(self.content_buf, 0, 1, False, processed)
-        else:
-            # Append lines normally
-            self.nvim.api.buf_set_lines(self.content_buf, -1, -1, False, processed)
+        # Append lines
+        self.nvim.api.buf_set_lines(self.content_buf, -1, -1, False, processed)
 
         # Get the new line count (end of appended content)
         end_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
@@ -1093,24 +1081,10 @@ class BufferManager:
                     local last_content = last_line[1] or ""
                     -- Check if text starts with newline (model provides its own spacing)
                     local text_starts_with_newline = item.text:sub(1, 1) == "\\n"
-                    -- Check if last line is empty (blank line already exists)
-                    local has_blank_line = last_content == ""
-                    -- Ensure proper blank line separation
-                    if has_blank_line then
-                        -- Already have a blank line, just add one newline if text doesnt start with one
-                        if not text_starts_with_newline then
-                            item.text = "\\n" .. item.text
-                        end
-                    else
-                        -- No blank line exists, need to add blank line separation
-                        -- Use \\n\\n: first moves to new line, second creates blank line
-                        if text_starts_with_newline then
-                            -- Model provides one newline, add one more for blank line
-                            item.text = "\\n" .. item.text
-                        else
-                            -- Model provides no newlines, add two for blank line separation
-                            item.text = "\\n\\n" .. item.text
-                        end
+                    -- If text doesn't start with newline, prepend one for separation
+                    -- This ensures blank line isn't overwritten by set_text
+                    if not text_starts_with_newline then
+                        item.text = "\\n" .. item.text
                     end
                 end
 
@@ -1224,6 +1198,9 @@ class BufferManager:
         Returns:
             True if welcome message was cleared (first message), False otherwise
         """
+        # Always stop the logo animation when submitting
+        self.stop_logo_animation()
+
         if not self.content_buf or not self.content_buf.valid:
             return False
 
@@ -1243,6 +1220,31 @@ class BufferManager:
         try:
             # Try to enable render-markdown if it's available
             self.nvim.command("silent! RenderMarkdown enable")
+        except Exception:
+            pass
+
+    def animate_welcome_message(self, content_buf):
+        """Animate the welcome message logo with a scanning effect.
+
+        Args:
+            content_buf: Buffer to animate in
+        """
+        try:
+            bufnr = content_buf.number
+            # Use the continuous scan animation (runs until user sends message)
+            self.nvim.exec_lua(
+                "require('agent_nvim.logo_animation').animate_logo_scan(...)",
+                bufnr,
+            )
+        except Exception as e:
+            self.logger.debug(f"Animation failed, falling back to static: {e}")
+            # Fallback to static welcome message
+            self.nvim.api.buf_set_lines(content_buf, 0, -1, False, self.WELCOME_MESSAGE)
+
+    def stop_logo_animation(self):
+        """Stop the logo animation (called when user submits a message)."""
+        try:
+            self.nvim.exec_lua("require('agent_nvim.logo_animation').stop_animation()")
         except Exception:
             pass
 
