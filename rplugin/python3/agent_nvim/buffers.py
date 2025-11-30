@@ -15,18 +15,60 @@ except ImportError:
     Any = object
 
 
+
+def _get_plugin_root():
+    """Get the plugin root directory."""
+    # __file__ = .../rplugin/python3/agent_nvim/buffers.py
+    # Go up 4 levels to get plugin root
+    path = os.path.abspath(__file__)
+    for _ in range(4):
+        path = os.path.dirname(path)
+    return path
+
+
+def _load_logo():
+    """Load logo from res/logo.txt file."""
+    import logging
+    logger = logging.getLogger("agent.nvim")
+
+    plugin_dir = _get_plugin_root()
+    logo_path = os.path.join(plugin_dir, "res", "logo.txt")
+    lines = []
+    try:
+        with open(logo_path, "r", encoding="utf-8") as f:
+            lines = [line.rstrip("\n") for line in f]
+        logger.info(f"Loaded logo from file: {logo_path}")
+    except (FileNotFoundError, IOError) as e:
+        logger.warning(f"Could not load logo from {logo_path}: {e}, using fallback")
+        # Fallback to hardcoded logo if file not found
+        lines = [
+            "░█▀█░█▀▀░█▀▀░█▀█░▀█▀░░░░█▀█░█░█░▀█▀░█▄█",
+            "░█▀█░█░█░█▀▀░█░█░░█░░░░░█░█░▀▄▀░░█░░█░█",
+            "░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀░░▀░▀░░▀░░▀▀▀░▀░▀",
+        ]
+    return lines
+
+
+def _build_welcome_message():
+    """Build welcome message with logo loaded from file."""
+    logo_lines = _load_logo()
+    msg = ["```"]
+    msg.extend(logo_lines)
+    msg.extend(["```", "", "> Type your request in the prompt below."])
+    return msg
+
 class BufferManager:
     """Manages Neovim buffers for agent.nvim plugin."""
 
-    WELCOME_MESSAGE = [
-        "```",
-        "░█▀█░█▀▀░█▀▀░█▀█░▀█▀░░░░█▀█░█░█░▀█▀░█▄█",
-        "░█▀█░█░█░█▀▀░█░█░░█░░░░░█░█░▀▄▀░░█░░█░█",
-        "░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀░░▀░▀░░▀░░▀▀▀░▀░▀",
-        "```",
-        "",
-        "> Type your request in the prompt below.",
-    ]
+    _welcome_message_cache = None
+
+    @property
+    def WELCOME_MESSAGE(self):
+        """Lazy-load welcome message on first access."""
+        if BufferManager._welcome_message_cache is None:
+            BufferManager._welcome_message_cache = _build_welcome_message()
+            self.logger.info(f"Welcome message loaded, logo has {len(BufferManager._welcome_message_cache) - 4} lines")
+        return BufferManager._welcome_message_cache
 
     def __init__(self, nvim, logger):
         """Initialize buffer manager.
