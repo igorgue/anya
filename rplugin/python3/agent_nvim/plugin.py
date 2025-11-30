@@ -229,6 +229,10 @@ class AgentPlugin(object):
             agent = self.config_manager.get("agent", "AUTO")
             mode = self.config_manager.get("mode", "ASK")
 
+            # Sync YOLO mode to environment variable so is_yolo_mode() works
+            import os
+            os.environ["AGENT_YOLO"] = "1" if mode == "YOLO" else ""
+
             # Set global Lua state for toolbar
             lua_code = f"""
             _G.agent_state = {{
@@ -257,6 +261,12 @@ class AgentPlugin(object):
         """
         try:
             self.config_manager.set(key, value)
+            
+            # Sync YOLO mode to environment variable so is_yolo_mode() works
+            if key == "mode":
+                import os
+                os.environ["AGENT_YOLO"] = "1" if value == "YOLO" else ""
+            
             self.logger.debug(f"Updated config: {key} = {value}")
         except Exception as e:
             self.logger.error(f"Failed to update config: {e}")

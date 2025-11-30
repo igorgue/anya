@@ -346,9 +346,9 @@ def display_tool_result(
                 param_str = str(first_param)
                 if len(param_str) > 80:
                     param_str = param_str[:77] + "..."
-                tool_title = f"** {icon}  {tool_name} ** — `{param_str}`"
+                tool_title = f"{icon}  {tool_name} `{param_str}`"
             else:
-                tool_title = f"** {icon}  {tool_name} **"
+                tool_title = f"{icon}  {tool_name}"
 
             output_lines.append(tool_title)
             output_lines.append("``````")
