@@ -455,18 +455,26 @@ class AgentPlugin(object):
     def agent_patch_action(self, args):
         """Handle patch actions from Lua (apply/reject) and continue conversation."""
         try:
-            action, patch_content = args
+            # Args: action, patch_content, previous_state
+            # previous_state: 0=PENDING (first decision), 1=ACCEPT, 2=REJECT
+            action = args[0]
+            patch_content = args[1]
+            previous_state = args[2] if len(args) > 2 else 0
+
             success = False
             message = ""
+            is_first_decision = previous_state == 0  # PENDING state
 
             if action == "apply":
                 success = self.buffer_manager._apply_single_patch(patch_content)
                 if success:
                     self.logger.info("Patch applied!")
-                    message = "PATCH_APPLIED: The patch was successfully applied."
+                    if is_first_decision:
+                        message = "PATCH_APPLIED: The patch was successfully applied."
                 else:
                     # Get the error from the last apply attempt
-                    message = "PATCH_FAILED: The patch could not be applied. Please read the target file again and regenerate the patch with correct context lines."
+                    if is_first_decision:
+                        message = "PATCH_FAILED: The patch could not be applied. Please read the target file again and regenerate the patch with correct context lines."
             elif action == "reject":
                 # Reverse the patch (undo) - this is called when user rejects an already-applied patch
                 # In normal mode: user pressed 1 (apply) then 2 (reject)
@@ -480,36 +488,39 @@ class AgentPlugin(object):
                     self.logger.warning(
                         "Failed to reverse patch - may not have been applied"
                     )
-                # Always mark as rejected regardless of reverse success
+                # Don't continue agent - this is an undo action
+                return
+            elif action == "reject_pending":
+                # First decision to reject (from PENDING state) - no patch to reverse
                 success = True
                 message = "PATCH_REJECTED: The user rejected the patch. Ask if they want changes or a different approach."
 
-            # Add the result to conversation history and continue the agent
-            if message:
+            # Only continue agent on first decision (from PENDING state)
+            if message and is_first_decision:
                 self._conversation_history.append({"role": "user", "content": message})
 
                 # Show feedback in content buffer
                 feedback_text = (
-                    "✓ Patch applied successfully."
+                    "> Patch applied successfully."
                     if action == "apply" and success
                     else (
-                        "✗ Patch rejected by user."
-                        if action == "reject"
-                        else "✗ Patch failed to apply."
+                        "> ✗ Patch rejected by user."
+                        if action == "reject_pending"
+                        else "> ✗ Patch failed to apply."
                     )
                 )
                 self.nvim.async_call(
-                    self.buffer_manager.append_content, [f"> {feedback_text}"]
+                    self.buffer_manager.append_content, ["", feedback_text, ""]
                 )
 
-                # Continue the agent automatically
-                self._continue_agent_after_patch()
+                # Continue the agent automatically (without header)
+                self._continue_agent_after_patch(skip_header=True)
 
         except Exception as e:
             self.logger.error(f"Error in AgentPatchAction: {e}")
             self.nvim.err_write(f"Error applying/reverting patch: {e}\n")
 
-    def _continue_agent_after_patch(self):
+    def _continue_agent_after_patch(self, skip_header=False):
         """Continue the agent after a patch action."""
         import uuid
 
@@ -530,7 +541,7 @@ class AgentPlugin(object):
         self._agent_busy = True
 
         # Run agent in background
-        asyncio.create_task(self._run_agent_wrapper(request_id))
+        asyncio.create_task(self._run_agent_wrapper(request_id, skip_header=skip_header))
 
     @pynvim.command("AgentHistoryTest", sync=True)
     def agent_history_test(self):
@@ -1210,7 +1221,7 @@ class AgentPlugin(object):
         # Run agent in background
         asyncio.create_task(self._run_agent_wrapper(request_id))
 
-    async def _run_agent_wrapper(self, request_id):
+    async def _run_agent_wrapper(self, request_id, skip_header=False):
         """Wrapper to call run_agent with all necessary parameters."""
         import os
 
@@ -1244,6 +1255,7 @@ class AgentPlugin(object):
                 emit_event_fn=lambda name, data: utils.emit_user_event(
                     self.nvim, name, data
                 ),
+                skip_header=skip_header,
             )
         finally:
             pass

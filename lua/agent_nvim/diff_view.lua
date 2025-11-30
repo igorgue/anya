@@ -183,17 +183,20 @@ function M.handle_keypress(bufnr, key)
             update_patch_header(bufnr, id)
             
             -- Handle actions based on transition
+            -- Pass current_state so Python knows if this is first decision (PENDING) or undo
             if new_state == STATE_ACCEPT then
                 -- Moving TO accept: Always apply
                 -- (If we were PENDING or REJECT, we need to apply)
-                vim.fn.AgentPatchAction("apply", patch_registry[id].content)
+                vim.fn.AgentPatchAction("apply", patch_registry[id].content, current_state)
             elseif new_state == STATE_REJECT then
                 -- Moving TO reject:
                 -- Only reverse if we were previously ACCEPTED
                 if current_state == STATE_ACCEPT then
-                    vim.fn.AgentPatchAction("reject", patch_registry[id].content)
+                    vim.fn.AgentPatchAction("reject", patch_registry[id].content, current_state)
+                elseif current_state == STATE_PENDING then
+                    -- First decision to reject - notify agent
+                    vim.fn.AgentPatchAction("reject_pending", patch_registry[id].content, current_state)
                 end
-                -- If we were PENDING, we just mark as rejected in UI, no git action needed
             end
             return
             end

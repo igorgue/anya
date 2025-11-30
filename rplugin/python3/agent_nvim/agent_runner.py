@@ -24,6 +24,7 @@ async def run_agent(
     tool_wrappers,
     cached_cwd,
     emit_event_fn,
+    skip_header=False,
 ):
     """Run the agent with streaming output.
 
@@ -39,6 +40,7 @@ async def run_agent(
         tool_wrappers: Dict of wrapped tool functions
         cached_cwd: Current working directory
         emit_event_fn: Function to emit user events
+        skip_header: If True, skip the "# Agent (model)" header
     """
     model = os.environ.get("AGENT_MODEL", "gpt-5.1")
 
@@ -186,15 +188,16 @@ Constraints:
 
         agent = Agent(**agent_kwargs)
 
-        # Display agent header with model name
+        # Display agent header with model name (unless skipped for continuations)
         display_model = model if model else "gpt-4o"
 
         # Reset the agent response started flag for intelligent spacing
         buffer_manager.reset_agent_response_flag()
 
-        # Add agent header with proper spacing
-        header_lines = ["", f"# Agent ({display_model})", "", ""]
-        nvim.async_call(buffer_manager.append_content, header_lines)
+        # Add agent header with proper spacing (skip for patch continuations)
+        if not skip_header:
+            header_lines = ["", f"# Agent ({display_model})", "", ""]
+            nvim.async_call(buffer_manager.append_content, header_lines)
 
         # Track the line number where agent response will start
         # Used to capture only the LLM response if cancelled
