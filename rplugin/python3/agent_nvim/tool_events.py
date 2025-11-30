@@ -4,7 +4,7 @@ import json
 
 
 
-def handle_tool_event(event, content_bufnr, nvim, logger, append_content_fn):
+def handle_tool_event(event, content_bufnr, nvim, logger, append_content_fn, emit_event_fn=None, request_id=None):
     """Handle tool-related events and display tool calls.
 
     Args:
@@ -44,7 +44,8 @@ def handle_tool_event(event, content_bufnr, nvim, logger, append_content_fn):
                     tool_result = data_dict.get("result") or data_dict.get("output")
                     if tool_result:
                         display_tool_result(
-                            tool_result, nvim, logger, append_content_fn, content_bufnr
+                            tool_result, nvim, logger, append_content_fn, content_bufnr,
+                            emit_event_fn=emit_event_fn, request_id=request_id
                         )
                         return
 
@@ -130,7 +131,7 @@ def display_tool_call(
 
 
 def display_tool_result(
-    tool_result, nvim, logger, append_content_fn, content_bufnr=None
+    tool_result, nvim, logger, append_content_fn, content_bufnr=None, emit_event_fn=None, request_id=None
 ):
     """Display tool call and result combined in a code block.
 
@@ -140,6 +141,8 @@ def display_tool_result(
         logger: Logger instance
         append_content_fn: Function to append content to buffer
         content_bufnr: Buffer number for creating folds
+        emit_event_fn: Function to emit fidget events
+        request_id: Request ID for fidget updates
     """
     try:
         # Format result
@@ -207,9 +210,15 @@ def display_tool_result(
             # Add blank lines AFTER folding to create separation
             append_content_fn(output_lines, fold=True)
             # Add blank lines separately (not folded)
-            append_content_fn(["", ""])
+            append_content_fn([""])
             # Resume streaming after tool output is written
             nvim.exec_lua("_G.agent_stream_paused = false")
+            # Emit event to show we're thinking again
+            if emit_event_fn and request_id:
+                emit_event_fn("AgentThinking", {
+                    "id": request_id,
+                    "message": "thinking...",
+                })
         
         nvim.async_call(append_and_resume)
 
@@ -217,7 +226,7 @@ def display_tool_result(
         logger.error(f"Error displaying tool result: {e}")
 
 
-def handle_tool_call_delta(data, content_bufnr, nvim, logger, append_content_fn):
+def handle_tool_call_delta(data, content_bufnr, nvim, logger, append_content_fn, emit_event_fn=None, request_id=None):
     """Handle tool call delta events.
 
     Args:
@@ -226,12 +235,22 @@ def handle_tool_call_delta(data, content_bufnr, nvim, logger, append_content_fn)
         nvim: Neovim instance
         logger: Logger instance
         append_content_fn: Function to append content to buffer
+        emit_event_fn: Function to emit fidget events
+        request_id: Request ID for fidget updates
     """
     try:
         # Check if this is the start of a tool call (has arguments but no output yet)
         if hasattr(data, "arguments") and data.arguments:
             tool_name = getattr(data, "name", "unknown_tool")
             arguments = data.arguments
+
+            # Emit fidget status update
+            if emit_event_fn and request_id:
+                emit_event_fn("AgentToolCall", {
+                    "id": request_id,
+                    "message": f"{tool_name}",
+                    "tool": tool_name
+                })
 
             # Display the tool call
             lines = ["```", f"  {tool_name}"]
@@ -264,13 +283,15 @@ def handle_tool_call_delta(data, content_bufnr, nvim, logger, append_content_fn)
         logger.error(f"Error handling tool call delta: {e}")
 
 
-def handle_tool_call_end(data, content_bufnr, logger):
+def handle_tool_call_end(data, content_bufnr, logger, emit_event_fn=None, request_id=None):
     """Handle tool call end events.
 
     Args:
         data: Tool call end data
         content_bufnr: Buffer number for content display
         logger: Logger instance
+        emit_event_fn: Function to emit fidget events
+        request_id: Request ID for fidget updates
     """
     try:
         # Tool call completed, ready for result
@@ -279,7 +300,7 @@ def handle_tool_call_end(data, content_bufnr, logger):
         logger.error(f"Error handling tool call end: {e}")
 
 
-def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn):
+def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn, emit_event_fn=None, request_id=None):
     """Handle tool call output events.
 
     Args:
@@ -288,10 +309,19 @@ def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn
         nvim: Neovim instance
         logger: Logger instance
         append_content_fn: Function to append content to buffer
+        emit_event_fn: Function to emit fidget events
+        request_id: Request ID for fidget updates
     """
     try:
         if hasattr(data, "output") and data.output:
             output = data.output
+
+            # Emit fidget status update
+            if emit_event_fn and request_id:
+                emit_event_fn("AgentToolResult", {
+                    "id": request_id,
+                    "message": "processing result...",
+                })
 
             # Format the output
             if isinstance(output, str):
@@ -312,7 +342,7 @@ def handle_tool_call_output(data, content_bufnr, nvim, logger, append_content_fn
         logger.error(f"Error handling tool call output: {e}")
 
 
-def handle_tool_call_event(event, content_bufnr, nvim, logger, append_content_fn):
+def handle_tool_call_event(event, content_bufnr, nvim, logger, append_content_fn, emit_event_fn=None, request_id=None):
     """Handle generic tool call events.
 
     Args:
@@ -321,6 +351,8 @@ def handle_tool_call_event(event, content_bufnr, nvim, logger, append_content_fn
         nvim: Neovim instance
         logger: Logger instance
         append_content_fn: Function to append content to buffer
+        emit_event_fn: Function to emit fidget events
+        request_id: Request ID for fidget updates
     """
     try:
         event_str = str(event)
@@ -332,6 +364,13 @@ def handle_tool_call_event(event, content_bufnr, nvim, logger, append_content_fn
             tool_name = getattr(data, "name", None) or getattr(data, "tool_name", None)
 
             if tool_name:
+                # Emit fidget status update
+                if emit_event_fn and request_id:
+                    emit_event_fn("AgentToolCall", {
+                        "id": request_id,
+                        "message": f"{tool_name}",
+                        "tool": tool_name
+                    })
                 lines = ["", "🔧 **Tool call event**: `" + tool_name + "`"]
                 nvim.async_call(lambda: append_content_fn(lines))
 
@@ -339,7 +378,7 @@ def handle_tool_call_event(event, content_bufnr, nvim, logger, append_content_fn
         logger.error(f"Error handling tool call event: {e}")
 
 
-def handle_tool_item(item, content_bufnr, nvim, logger, append_content_fn):
+def handle_tool_item(item, content_bufnr, nvim, logger, append_content_fn, emit_event_fn=None, request_id=None):
     """Handle tool call items from result_stream.new_items.
 
     Args:
@@ -348,6 +387,8 @@ def handle_tool_item(item, content_bufnr, nvim, logger, append_content_fn):
         nvim: Neovim instance
         logger: Logger instance
         append_content_fn: Function to append content to buffer
+        emit_event_fn: Function to emit fidget events
+        request_id: Request ID for fidget updates
     """
     try:
         item_type = type(item).__name__
@@ -424,6 +465,13 @@ def handle_tool_item(item, content_bufnr, nvim, logger, append_content_fn):
                         break
 
             if tool_name:
+                # Emit fidget status update
+                if emit_event_fn and request_id:
+                    emit_event_fn("AgentToolCall", {
+                        "id": request_id,
+                        "message": f"{tool_name}",
+                        "tool": tool_name
+                    })
                 logger.info(f"Displaying tool call for: {tool_name}")
                 tool_data = {"arguments": arguments} if arguments else {}
                 display_tool_call(
@@ -443,7 +491,8 @@ def handle_tool_item(item, content_bufnr, nvim, logger, append_content_fn):
 
             output_str = str(output) if output else "No output"
             display_tool_result(
-                output_str, nvim, logger, append_content_fn, content_bufnr
+                output_str, nvim, logger, append_content_fn, content_bufnr,
+                emit_event_fn=emit_event_fn, request_id=request_id
             )
         else:
             # This might be a different type of item

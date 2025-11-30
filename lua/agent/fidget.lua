@@ -26,13 +26,46 @@ function M:init()
 	})
 
 	vim.api.nvim_create_autocmd({ "User" }, {
+		pattern = "AgentToolCall",
+		group = group,
+		callback = function(event)
+			local handle = M:get_progress_handle(event.data.id)
+			if handle then
+				handle.message = event.data.message or "calling tool"
+			end
+		end,
+	})
+
+	vim.api.nvim_create_autocmd({ "User" }, {
+		pattern = "AgentToolResult",
+		group = group,
+		callback = function(event)
+			local handle = M:get_progress_handle(event.data.id)
+			if handle then
+				handle.message = event.data.message or "processing result"
+				-- Reset back to "thinking" after showing result message briefly
+				vim.defer_fn(function()
+					local current_handle = M:get_progress_handle(event.data.id)
+					if current_handle then
+						current_handle.message = "thinking"
+					end
+				end, 300)
+			end
+		end,
+	})
+
+	vim.api.nvim_create_autocmd({ "User" }, {
 		pattern = "AgentRequestFinished",
 		group = group,
 		callback = function(event)
-			local handle = M:pop_progress_handle(event.data.id)
+			local handle = M:get_progress_handle(event.data.id)
 			if handle then
 				M:report_exit_status(handle, event)
-				handle:finish()
+				-- Display completion message for at least 1 second
+				vim.defer_fn(function()
+					M:pop_progress_handle(event.data.id)
+					handle:finish()
+				end, 1000)
 			end
 		end,
 	})
@@ -40,6 +73,10 @@ end
 
 function M:store_progress_handle(id, handle)
 	M.handles[id] = handle
+end
+
+function M:get_progress_handle(id)
+	return M.handles[id]
 end
 
 function M:pop_progress_handle(id)
@@ -53,7 +90,7 @@ function M:create_progress_handle(event)
 	local data = event.data or event
 	return fidget_progress.handle.create({
 		title = "",
-		message = data.message or "Thinking...",
+		message = data.message or "thinking",
 		lsp_client = {
 			name = M:get_model_name(data),
 		},
@@ -67,11 +104,11 @@ end
 
 function M:report_exit_status(handle, event)
 	if event.data.status == "success" then
-		handle.message = "✓ Completed"
+		handle.message = "✓ completed"
 	elseif event.data.status == "error" then
-		handle.message = " Error"
+		handle.message = " error"
 	else
-		handle.message = "󰜺 Cancelled"
+		handle.message = "󰜺 cancelled"
 	end
 end
 

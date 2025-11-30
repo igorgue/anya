@@ -583,13 +583,19 @@ class BufferManager:
                     item.remove_last_line = false
                 end
 
-                -- Vary characters written: mostly 3, sometimes 2 or 4 for irregularity
+                -- Vary characters written: more natural variation
                 local rand = math.random()
                 local chars_to_write = 3
-                if rand < 0.15 then
-                    chars_to_write = 2  -- 15% slower
-                elseif rand > 0.85 then
-                    chars_to_write = 4  -- 15% faster
+                if rand < 0.1 then
+                    chars_to_write = 1  -- 10% very slow
+                elseif rand < 0.25 then
+                    chars_to_write = 2  -- 15% slow
+                elseif rand < 0.6 then
+                    chars_to_write = 3  -- 35% normal
+                elseif rand < 0.8 then
+                    chars_to_write = 4  -- 20% fast
+                else
+                    chars_to_write = 5  -- 20% very fast
                 end
 
                 local chunk = item.text:sub(1, chars_to_write)
@@ -631,8 +637,8 @@ class BufferManager:
 
             _G.agent_stream_timer = vim.loop.new_timer()
             -- Start with random delay and keep repeating with slight variation
-            local base_interval = 15
-            _G.agent_stream_timer:start(math.random(10, 20), base_interval, vim.schedule_wrap(timer_callback))
+            local base_interval = 8
+            _G.agent_stream_timer:start(math.random(5, 10), base_interval, vim.schedule_wrap(timer_callback))
         end
         """
         try:

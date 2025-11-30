@@ -43,7 +43,7 @@ async def run_agent(
     model = os.environ.get("AGENT_MODEL", "gpt-5.1")
 
     # Emit fidget start event
-    emit_event_fn("AgentRequestStarted", {"id": request_id, "model": model})
+    emit_event_fn("AgentRequestStarted", {"id": request_id, "model": model, "message": "thinking..."})
 
     status = "error"  # Default to error, will be set to success if completion succeeds
 
@@ -316,7 +316,8 @@ Constraints:
                 elif "Tool" in data_type or "tool" in data_type.lower():
                     logger.info(f"Tool event in responses: {data_type}")
                     tool_events.handle_tool_event(
-                        event, content_bufnr, nvim, logger, buffer_manager.append_content
+                        event, content_bufnr, nvim, logger, buffer_manager.append_content,
+                        emit_event_fn=emit_event_fn, request_id=request_id
                     )
 
                 # Look for other potential tool-related events
@@ -327,7 +328,8 @@ Constraints:
                 ]:
                     logger.info(f"Found tool-related event: {data_type}")
                     tool_events.handle_tool_event(
-                        event, content_bufnr, nvim, logger, buffer_manager.append_content
+                        event, content_bufnr, nvim, logger, buffer_manager.append_content,
+                        emit_event_fn=emit_event_fn, request_id=request_id
                     )
                 else:
                     # Log unknown types for debugging
@@ -349,15 +351,17 @@ Constraints:
                 elif data_type == "ChatCompletionsToolCallDeltaEvent":
                     logger.info(f"Tool call delta: {data}")
                     tool_events.handle_tool_call_delta(
-                        data, content_bufnr, nvim, logger, buffer_manager.append_content
+                        data, content_bufnr, nvim, logger, buffer_manager.append_content,
+                        emit_event_fn=emit_event_fn, request_id=request_id
                     )
                 elif data_type == "ChatCompletionsToolCallEndEvent":
                     logger.info(f"Tool call end: {data}")
-                    tool_events.handle_tool_call_end(data, content_bufnr, logger)
+                    tool_events.handle_tool_call_end(data, content_bufnr, logger, emit_event_fn=emit_event_fn, request_id=request_id)
                 elif data_type == "ChatCompletionsToolCallOutputEvent":
                     logger.info(f"Tool call output: {data}")
                     tool_events.handle_tool_call_output(
-                        data, content_bufnr, nvim, logger, buffer_manager.append_content
+                        data, content_bufnr, nvim, logger, buffer_manager.append_content,
+                        emit_event_fn=emit_event_fn, request_id=request_id
                     )
                 else:
                     # Log unknown event types for debugging
@@ -380,19 +384,23 @@ Constraints:
                             content_bufnr,
                             nvim,
                             logger,
-                            buffer_manager.append_content
+                            buffer_manager.append_content,
+                            emit_event_fn=emit_event_fn,
+                            request_id=request_id
                         )
 
             # Handle other tool-related events
             elif "ToolCall" in event_type:
                 logger.info(f"ToolCall event: {event_type}")
                 tool_events.handle_tool_call_event(
-                    event, content_bufnr, nvim, logger, buffer_manager.append_content
+                    event, content_bufnr, nvim, logger, buffer_manager.append_content,
+                    emit_event_fn=emit_event_fn, request_id=request_id
                 )
             elif "Tool" in event_type:
                 logger.info(f"Tool event: {event_type}")
                 tool_events.handle_tool_event(
-                    event, content_bufnr, nvim, logger, buffer_manager.append_content
+                    event, content_bufnr, nvim, logger, buffer_manager.append_content,
+                    emit_event_fn=emit_event_fn, request_id=request_id
                 )
             else:
                 # Log other event types for debugging

@@ -70,13 +70,11 @@ def emit_user_event(nvim, event_name: str, data: dict):
     try:
         # Serialize data to JSON
         data_json = json.dumps(data)
-        # Escape single quotes for Vim command
-        data_json_escaped = data_json.replace("'", "''")
+        # Use Lua bracket notation [[...]] to avoid quote escaping issues
+        lua_code = f"""vim.api.nvim_exec_autocmds('User', {{pattern = '{event_name}', data = vim.fn.json_decode([[{data_json}]])}})"""
         # Execute doautocmd with data
         nvim.async_call(
-            lambda: nvim.exec_lua(
-                f"vim.api.nvim_exec_autocmds('User', {{pattern = '{event_name}', data = vim.fn.json_decode('{data_json_escaped}')}})"
-            )
+            lambda: nvim.exec_lua(lua_code)
         )
     except Exception as e:
         # Can't use logger here as it's not passed, will be logged at call site if needed

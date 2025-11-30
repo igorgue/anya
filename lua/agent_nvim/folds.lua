@@ -10,23 +10,16 @@ function M.create_fold(bufnr, start_line, end_line, fold_text)
         return false
     end
 
-    -- Save the current window to restore later
-    local original_win = vim.api.nvim_get_current_win()
-    
+    -- Find a window displaying this buffer and use nvim_win_call
+    -- nvim_win_call executes in window context without visual switching
     for _, win in ipairs(vim.api.nvim_list_wins()) do
         if vim.api.nvim_win_get_buf(win) == bufnr then
-            local saved_view = vim.fn.winsaveview()
-            vim.api.nvim_set_current_win(win)
-            
-            vim.cmd(string.format("%d,%dfold", start_line, end_line))
-            
-            vim.fn.winrestview(saved_view)
-            
-            -- Restore the original window
-            if vim.api.nvim_win_is_valid(original_win) then
-                vim.api.nvim_set_current_win(original_win)
-            end
-            return true
+            local ok = pcall(function()
+                vim.api.nvim_win_call(win, function()
+                    vim.cmd(string.format("%d,%dfold", start_line, end_line))
+                end)
+            end)
+            return ok
         end
     end
 
