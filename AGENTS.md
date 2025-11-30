@@ -113,6 +113,7 @@ Dependencies are installed to `~/.local/share/agent.nvim/venv` and injected into
 - `AGENT_MAX_READ_BYTES` - Maximum bytes to read from files (default: 64000)
 - `AGENT_CONTEXT_WINDOW` - Override context window size (optional)
 - `AGENT_COMPACT_MODEL` - Custom model for CompactAgent (default: same as AGENT_MODEL)
+- `AGENT_YOLO` - Enable YOLO mode: auto-apply patches without user approval (set to 1, true, or yes)
 
 ## Special Considerations
 

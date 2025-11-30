@@ -468,8 +468,19 @@ class AgentPlugin(object):
                     # Get the error from the last apply attempt
                     message = "PATCH_FAILED: The patch could not be applied. Please read the target file again and regenerate the patch with correct context lines."
             elif action == "reject":
-                # For reject, we don't actually apply anything (patch was never applied)
-                # Just mark as rejected and continue
+                # Reverse the patch (undo) - this is called when user rejects an already-applied patch
+                # In normal mode: user pressed 1 (apply) then 2 (reject)
+                # In YOLO mode: patch was auto-applied, user pressed 2 to undo
+                success = self.buffer_manager._apply_single_patch(
+                    patch_content, reverse=True
+                )
+                if success:
+                    self.logger.info("Patch reversed (rejected)!")
+                else:
+                    self.logger.warning(
+                        "Failed to reverse patch - may not have been applied"
+                    )
+                # Always mark as rejected regardless of reverse success
                 success = True
                 message = "PATCH_REJECTED: The user rejected the patch. Ask if they want changes or a different approach."
 

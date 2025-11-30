@@ -1,6 +1,7 @@
 """Tool event handling and display for agent.nvim plugin."""
 
 import json
+import os
 
 
 def handle_tool_event(
@@ -95,7 +96,7 @@ def display_tool_call(
                     local last_line_idx = line_count - 1
                     local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
                     local last_column = #(last_line[1] or "")
-                    
+
                     local lines = vim.split(item.text, "\\n", {plain = true})
                     vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
                 end
@@ -196,13 +197,67 @@ def display_tool_result(
                         # header = f"**  {tool_name}**"
                         # nvim.async_call(lambda: append_content_fn([header]))
 
-                        # Render the diff block
+                        # Check for YOLO mode - auto-apply patches
+                        yolo_mode = os.environ.get("AGENT_YOLO", "").lower() in (
+                            "1",
+                            "true",
+                            "yes",
+                        )
+
+                        # Render the diff block (always show what's being applied)
                         nvim.async_call(
                             lambda: buffer_manager.render_diff_block(result_str)
                         )
 
-                        # Add single blank line after the diff block
-                        nvim.async_call(lambda: append_content_fn([""]))
+                        # In YOLO mode, auto-apply the patch
+                        if yolo_mode:
+                            logger.info("YOLO mode: auto-applying patch")
+
+                            # Capture result_str in closure
+                            patch_content = result_str
+
+                            def apply_yolo_patch():
+                                success = buffer_manager._apply_single_patch(
+                                    patch_content
+                                )
+                                if success:
+                                    append_content_fn(
+                                        [
+                                            "",
+                                            "> Patch auto-applied (press **2** to undo)",
+                                            "",
+                                        ]
+                                    )
+                                    logger.info("YOLO: Patch applied successfully")
+                                    # Update the diff view state to show as applied
+                                    # Use mark_latest_as_applied to update UI without re-applying
+                                    try:
+                                        nvim.exec_lua(
+                                            """
+                                            local diff_view = require('agent_nvim.diff_view')
+                                            local bufnr = vim.fn.bufnr('AgentContent')
+                                            if bufnr ~= -1 then
+                                                diff_view.mark_latest_as_applied(bufnr)
+                                            end
+                                        """
+                                        )
+                                    except Exception as e:
+                                        logger.debug(
+                                            f"Could not update diff view state: {e}"
+                                        )
+                                else:
+                                    append_content_fn(
+                                        [
+                                            "",
+                                            "> ⚠️ Patch failed to apply",
+                                        ]
+                                    )
+                                    logger.warning("YOLO: Patch failed to apply")
+
+                            nvim.async_call(apply_yolo_patch)
+                        else:
+                            # Normal mode - just add blank line, user will approve/reject
+                            nvim.async_call(lambda: append_content_fn([""]))
 
                         # Resume streaming
                         nvim.exec_lua("_G.agent_stream_paused = false")

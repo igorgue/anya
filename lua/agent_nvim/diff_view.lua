@@ -323,4 +323,27 @@ function M.get_patches(bufnr)
     return patches
 end
 
+--- Mark the latest patch as applied (for YOLO mode)
+--- This updates the UI state without triggering the apply action
+function M.mark_latest_as_applied(bufnr)
+    local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns_id, 0, -1, { details = true })
+    if #extmarks == 0 then return false end
+    
+    -- Find the last patch in the registry
+    local last_id = nil
+    for _, mark in ipairs(extmarks) do
+        local id = mark[1]
+        if patch_registry[id] then
+            last_id = id
+        end
+    end
+    
+    if not last_id or not patch_registry[last_id] then return false end
+    
+    -- Update state directly without triggering actions
+    patch_registry[last_id].state = STATE_ACCEPT
+    update_patch_header(bufnr, last_id)
+    return true
+end
+
 return M

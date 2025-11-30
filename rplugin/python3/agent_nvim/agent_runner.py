@@ -118,6 +118,7 @@ CRITICAL - patch tool behavior:
   - PATCH_REJECTED: The user rejected - ask what they want changed
   - PATCH_FAILED: The patch could not be applied - re-read the file and regenerate with correct context lines
 - Do NOT use alternative approaches (like exec with sed) - always use the patch tool for code changes
+- EXCEPTION: In YOLO mode (AGENT_YOLO=1), patches are auto-applied without stopping. You will NOT receive PATCH_APPLIED/REJECTED messages - just continue with your work.
 
 Constraints:
 - You have a limited token budget for reading files per request. If a tool tells you that the file-read budget is reached, you MUST stop using tools and instead summarize your findings and provide the best answer you can from the information available.
@@ -157,14 +158,24 @@ Constraints:
         max_tokens = calculate_max_tokens()
         logger.info(f"Calculated max_tokens: {max_tokens}")
 
+        # Check for YOLO mode - auto-apply patches without stopping
+        yolo_mode = os.environ.get("AGENT_YOLO", "").lower() in ("1", "true", "yes")
+        if yolo_mode:
+            logger.info("YOLO mode enabled - patches will be auto-applied")
+
         # Initialize Agent with optional model
         agent_kwargs = {
             "name": "Neovim Agent",
             "instructions": full_instructions,
             "tools": tools,
-            # Stop agent when patch tool is called - user must approve/reject before continuing
-            "tool_use_behavior": StopAtTools(stop_at_tool_names=["patch"]),
         }
+
+        # Only use StopAtTools if not in YOLO mode
+        if not yolo_mode:
+            # Stop agent when patch tool is called - user must approve/reject before continuing
+            agent_kwargs["tool_use_behavior"] = StopAtTools(
+                stop_at_tool_names=["patch"]
+            )
 
         # Add MCP servers if available
         if mcp_servers:
