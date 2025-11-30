@@ -102,15 +102,15 @@ local function update_toolbar()
   local mode_hl = "AgentToolbar" .. state.mode
   local agent_len = #state.agent
   local separator_start = agent_len
-  local mode_start = agent_len + 3  -- " | " is 3 chars
+  local mode_start = agent_len + 3 -- " | " is 3 chars
 
   vim.api.nvim_buf_add_highlight(state.toolbar_buf, -1, agent_hl, 0, 0, agent_len)
   vim.api.nvim_buf_add_highlight(state.toolbar_buf, -1, "AgentToolbarSeparator", 0, separator_start, mode_start)
   vim.api.nvim_buf_add_highlight(state.toolbar_buf, -1, mode_hl, 0, mode_start, -1)
 
   -- Calculate position: bottom-left of prompt window
-  local row = win_height - 1  -- Bottom row (0-indexed, relative to window)
-  local col = 0  -- Left-aligned
+  local row = win_height - 1 -- Bottom row (0-indexed, relative to window)
+  local col = 0 -- Left-aligned
 
   -- Close existing window before creating new one
   close_toolbar_win()
@@ -130,7 +130,11 @@ local function update_toolbar()
 
   -- Make toolbar window transparent and non-interactive
   if state.toolbar_win and vim.api.nvim_win_is_valid(state.toolbar_win) then
-    vim.api.nvim_set_option_value("winhl", "Normal:AgentToolbarBg,NormalFloat:AgentToolbarBg", { win = state.toolbar_win })
+    vim.api.nvim_set_option_value(
+      "winhl",
+      "Normal:AgentToolbarBg,NormalFloat:AgentToolbarBg",
+      { win = state.toolbar_win }
+    )
   end
 end
 
@@ -138,14 +142,14 @@ end
 local function setup_highlights()
   -- Create transparent background group
   vim.api.nvim_set_hl(0, "AgentToolbarBg", { bg = "NONE" })
-  
+
   -- Create separator highlight (Comment, non-bold)
   local comment_hl = vim.api.nvim_get_hl(0, { name = "Comment", link = false })
   vim.api.nvim_set_hl(0, "AgentToolbarSeparator", {
     fg = comment_hl.fg,
     bg = "NONE",
   })
-  
+
   -- Create highlight variants (bold for non-Comment, non-bold for Comment)
   for name, base_hl in pairs(HIGHLIGHTS) do
     local hl_info = vim.api.nvim_get_hl(0, { name = base_hl, link = false })

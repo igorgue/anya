@@ -288,11 +288,11 @@ def display_tool_result(
                                         nvim.exec_lua(
                                             """
                                             local diff_view = require('agent_nvim.diff_view')
-                                            local bufnr = vim.fn.bufnr('AgentContent')
+                                            local bufnr = vim.fn.bufnr('chat')
                                             if bufnr ~= -1 then
                                                 diff_view.mark_latest_as_applied(bufnr)
                                             end
-                                        """
+                                            """
                                         )
                                     except Exception as e:
                                         logger.debug(

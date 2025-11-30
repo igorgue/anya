@@ -244,9 +244,7 @@ class AgentPlugin(object):
             end
             """
             self.nvim.exec_lua(lua_code)
-            self.logger.debug(
-                f"Synced config to Lua: agent={agent}, mode={mode}"
-            )
+            self.logger.debug(f"Synced config to Lua: agent={agent}, mode={mode}")
         except Exception as e:
             self.logger.error(f"Failed to sync config to Lua: {e}")
 

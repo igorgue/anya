@@ -103,15 +103,15 @@ class BufferManager:
 
         # Try to find existing buffers
         for buf in self.nvim.buffers:
-            if buf.name.endswith("AgentContent"):
+            if buf.name.endswith("chat"):
                 content_buf = buf
-            elif buf.name.endswith("AgentPrompt"):
+            elif buf.name.endswith("prompt"):
                 prompt_buf = buf
 
         # Create content buffer if needed
         if not content_buf or not content_buf.valid:
             content_buf = self.nvim.api.create_buf(False, True)
-            self.nvim.api.buf_set_name(content_buf, "AgentContent")
+            self.nvim.api.buf_set_name(content_buf, "chat")
             # Use markdown.agent-content to inherit markdown behavior
             self.nvim.api.buf_set_option(
                 content_buf, "filetype", "markdown.agent-content"
@@ -124,7 +124,7 @@ class BufferManager:
         # Create prompt buffer if needed
         if not prompt_buf or not prompt_buf.valid:
             prompt_buf = self.nvim.api.create_buf(False, True)
-            self.nvim.api.buf_set_name(prompt_buf, "AgentPrompt")
+            self.nvim.api.buf_set_name(prompt_buf, "prompt")
             self.nvim.api.buf_set_option(prompt_buf, "filetype", "agent-prompt")
             self.nvim.api.buf_set_option(prompt_buf, "buftype", "nofile")
             self.nvim.api.buf_set_option(prompt_buf, "swapfile", False)
