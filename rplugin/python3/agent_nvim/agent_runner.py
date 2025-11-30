@@ -660,3 +660,24 @@ Constraints:
 
         # Emit fidget finish event
         emit_event_fn("AgentRequestFinished", {"id": request_id, "status": status})
+
+        # Send desktop notification on Linux when agent turn is complete
+        import sys
+        import subprocess
+
+        if sys.platform == "linux":
+            try:
+                title = "Agent.nvim"
+                if status == "success":
+                    message = "Agent finished responding"
+                elif status == "cancelled":
+                    message = "Agent request was cancelled"
+                else:
+                    message = f"Agent finished with status: {status}"
+                subprocess.run(
+                    ["notify-send", title, message],
+                    capture_output=True,
+                    timeout=5,
+                )
+            except Exception:
+                pass  # Silently fail if notify-send is not available

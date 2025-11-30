@@ -98,9 +98,9 @@ class AgentPlugin(object):
             )
             return custom_model
 
-        # Get the main agent's model
-        model = os.environ.get("AGENT_MODEL", "gpt-4o")
-        self.logger.info(f"Using main agent model for compact agent: {model}")
+        # Use a fast, cheap model for compaction by default
+        model = "gpt-4.1-mini"
+        self.logger.info(f"Using default compact model: {model}")
         return model
 
     def _get_conversation_context(self) -> List[Dict]:
@@ -512,7 +512,7 @@ class AgentPlugin(object):
                     self.buffer_manager.append_content, ["", feedback_text]
                 )
 
-                self.nvim.async_call(self.buffer_manager.append_content, [""])
+                self.nvim.async_call(self.buffer_manager.append_content, ["", ""])
 
                 # Continue the agent automatically (without header)
                 self._continue_agent_after_patch(skip_header=True)
