@@ -18,6 +18,17 @@ except ImportError:
 class BufferManager:
     """Manages Neovim buffers for agent.nvim plugin."""
 
+    WELCOME_MESSAGE = [
+        "```",
+        "         ▗       ▘    ",
+        " ▀▌▛▌█▌▛▌▜▘  ▛▌▌▌▌▛▛▌ ",
+        " █▌▙▌▙▖▌▌▐▖▗ ▌▌▚▘▌▌▌▌ ",
+        "   ▄▌                 ",
+        "```",
+        "",
+        "> Type your request in the prompt below.",
+    ]
+
     def __init__(self, nvim, logger):
         """Initialize buffer manager.
 
@@ -96,17 +107,7 @@ class BufferManager:
 
         # Add welcome message if empty
         if len(content_buf) <= 1:
-            welcome = [
-                "```",
-                "         ▗       ▘    ",
-                " ▀▌▛▌█▌▛▌▜▘  ▛▌▌▌▌▛▛▌ ",
-                " █▌▙▌▙▖▌▌▐▖▗ ▌▌▚▘▌▌▌▌ ",
-                "   ▄▌                 ",
-                "```",
-                "",
-                "> Type your request in the prompt below.",
-            ]
-            self.nvim.api.buf_set_lines(content_buf, 0, -1, False, welcome)
+            self.nvim.api.buf_set_lines(content_buf, 0, -1, False, self.WELCOME_MESSAGE)
 
         # Enable render-markdown for the content buffer
         self.enable_render_markdown()
@@ -741,8 +742,14 @@ class BufferManager:
         ):
             return
 
+        # Get the current buffer lines
+        current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+        
+        # Check if buffer is empty (single empty line - Neovim always has at least one line)
+        is_empty_buffer = len(current_lines) == 1 and current_lines[0] == ""
+        
         # Get the line count before appending (this is where new content starts)
-        start_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
+        start_line = 0 if is_empty_buffer else len(current_lines)
 
         # Save the current window to restore focus later
         try:
@@ -750,8 +757,13 @@ class BufferManager:
         except Exception:
             current_win = None
 
-        # Append lines
-        self.nvim.api.buf_set_lines(self.content_buf, -1, -1, False, processed)
+        # Set or append lines
+        if is_empty_buffer:
+            # Replace the empty line instead of appending after it
+            self.nvim.api.buf_set_lines(self.content_buf, 0, 1, False, processed)
+        else:
+            # Append lines normally
+            self.nvim.api.buf_set_lines(self.content_buf, -1, -1, False, processed)
 
         # Get the new line count (end of appended content)
         end_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
@@ -1083,9 +1095,16 @@ class BufferManager:
                     local last_content = last_line[1] or ""
                     -- Check if text starts with newline (model provides its own spacing)
                     local text_starts_with_newline = item.text:sub(1, 1) == "\\n"
+                    -- Check if last line is empty (blank line already exists)
+                    local has_blank_line = last_content == ""
                     -- If text doesn't start with newline, prepend one for separation
                     -- This ensures blank line isn't overwritten by set_text
                     if not text_starts_with_newline then
+                        item.text = "\\n" .. item.text
+                    elseif not has_blank_line then
+                        -- Text starts with newline but there's no blank line
+                        -- (blank line was removed because model provided spacing)
+                        -- Prepend extra newline to restore the blank line
                         item.text = "\\n" .. item.text
                     end
                 end
@@ -1193,6 +1212,24 @@ class BufferManager:
                     self.append_content(["", "> **[Request cancelled by user]**"])
                 else:
                     self.append_content(["> **[Request cancelled by user]**"])
+
+    def clear_welcome_message(self):
+        """Remove the welcome message if it's the only content in the buffer.
+        
+        Returns:
+            True if welcome message was cleared (first message), False otherwise
+        """
+        if not self.content_buf or not self.content_buf.valid:
+            return False
+
+        lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+        
+        # Check if buffer contains only the welcome message
+        if lines == self.WELCOME_MESSAGE:
+            # Remove all the welcome message lines
+            self.nvim.api.buf_set_lines(self.content_buf, 0, len(self.WELCOME_MESSAGE), False, [])
+            return True
+        return False
 
     def enable_render_markdown(self):
         """Enable render-markdown for the content buffer."""

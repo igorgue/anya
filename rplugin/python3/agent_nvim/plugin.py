@@ -1207,8 +1207,15 @@ class AgentPlugin(object):
             except Exception:
                 pass
 
+        # Clear welcome message if this is the first message
+        is_first_message = self.buffer_manager.clear_welcome_message()
+
         # Append user message (show original text to user)
-        self.buffer_manager.append_content(["", f"# {username}", "", text])
+        # No blank line on top for first message, add blank line for subsequent messages
+        if is_first_message:
+            self.buffer_manager.append_content([f"# {username}", "", text])
+        else:
+            self.buffer_manager.append_content(["", f"# {username}", "", text])
 
         # Add user message to conversation history
         self._conversation_history.append({"role": "user", "content": resolved_text})
