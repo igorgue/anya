@@ -345,3 +345,7 @@ read_many_files(["file1.py", "file2.py", "file3.py@50-100", "file4.py@start-end"
 - Error messages are written to stderr via `nvim.err_write`
 - Tool calls and results are automatically folded to reduce interface clutter
 - Streaming is used for agent responses but instant append is used for tool output
+
+## Coding Guidelines for Agents
+
+- Do not add color emojis to the codebase. Use only monospace Unicode characters or text-based indicators where visual elements are needed.
