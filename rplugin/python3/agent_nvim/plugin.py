@@ -272,7 +272,7 @@ class AgentPlugin(object):
 
             # Create closures that capture self, cached_cwd, and tool_budget
             # Budget tracking is done inline to preserve function signatures for the SDK
-            def read_file(path: str) -> str:
+            async def read_file(path: str, timeout: int = 30) -> str:
                 """Read file content with automatic truncation for large files.
 
                 SYNTAX: Use @ notation for line ranges:
@@ -284,17 +284,28 @@ class AgentPlugin(object):
 
                 IMPORTANT: When you see "[FILE TOO LARGE]" message with current range info,
                 IMMEDIATELY use the @start-end syntax to read the full file. Do NOT keep
-                reading the same truncated file without specifying a range."""
+                reading the same truncated file without specifying a range.
+
+                Args:
+                    path: File path with optional @range specification
+                    timeout: Timeout in seconds (default 30)"""
                 # Check budget before reading (heavy tool)
                 if tool_budget and not tool_budget.can_use_budget(heavy_tool=True):
                     return tool_budget.get_budget_exceeded_message()
 
                 cwd = getattr(self, "_cached_cwd", None)
-                result = tools.read_file(path, cwd)
 
-                # Track token usage
-                if tool_budget and isinstance(result, str):
-                    tool_budget.consume(result)
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(tools.read_file, path, cwd),
+                        timeout=timeout
+                    )
+
+                    # Track token usage
+                    if tool_budget and isinstance(result, str):
+                        tool_budget.consume(result)
+                except asyncio.TimeoutError:
+                    result = f"Error: Tool timed out after {timeout} seconds"
 
                 # Record file read for conversation history preservation
                 truncated = (
@@ -304,18 +315,29 @@ class AgentPlugin(object):
 
                 return result
 
-            def read_many_files(files: List[str]) -> str:
-                """Read multiple files in a single call, with optional line ranges (file@start-end)."""
+            async def read_many_files(files: List[str], timeout: int = 30) -> str:
+                """Read multiple files in a single call, with optional line ranges (file@start-end).
+
+                Args:
+                    files: List of file paths with optional @range specifications
+                    timeout: Timeout in seconds (default 30)"""
                 # Check budget before reading (heavy tool)
                 if tool_budget and not tool_budget.can_use_budget(heavy_tool=True):
                     return tool_budget.get_budget_exceeded_message()
 
                 cwd = getattr(self, "_cached_cwd", None)
-                result = tools.read_many_files(files, cwd)
 
-                # Track token usage
-                if tool_budget and isinstance(result, str):
-                    tool_budget.consume(result)
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(tools.read_many_files, files, cwd),
+                        timeout=timeout
+                    )
+
+                    # Track token usage
+                    if tool_budget and isinstance(result, str):
+                        tool_budget.consume(result)
+                except asyncio.TimeoutError:
+                    result = f"Error: Tool timed out after {timeout} seconds"
 
                 # Record multiple file reads for conversation history preservation
                 for file_spec in files:
@@ -326,37 +348,118 @@ class AgentPlugin(object):
 
                 return result
 
-            def list_files(path: str = ".") -> str:
-                """List files in directory."""
+            async def list_files(path: str = ".", timeout: int = 30) -> str:
+                """List files in directory.
+
+                Args:
+                    path: Directory path to list (default current directory)
+                    timeout: Timeout in seconds (default 30)"""
                 cwd = getattr(self, "_cached_cwd", None)
-                result = tools.list_files(path, cwd)
 
-                # Track token usage (light tool, no budget check)
-                if tool_budget and isinstance(result, str):
-                    tool_budget.consume(result)
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(tools.list_files, path, cwd),
+                        timeout=timeout
+                    )
 
-                # Record file list for conversation history preservation
-                tool_tracker.record_file_list(path, result)
+                    # Track token usage (light tool, no budget check)
+                    if tool_budget and isinstance(result, str):
+                        tool_budget.consume(result)
+
+                    # Record file list for conversation history preservation
+                    tool_tracker.record_file_list(path, result)
+                except asyncio.TimeoutError:
+                    result = f"Error: Tool timed out after {timeout} seconds"
 
                 return result
 
-            def search_repo(query: str) -> str:
-                """Search repository."""
+            async def search_repo(query: str, timeout: int = 30) -> str:
+                """Search repository.
+
+                Args:
+                    query: Search query string
+                    timeout: Timeout in seconds (default 30)"""
                 # Check budget before searching (heavy tool)
                 if tool_budget and not tool_budget.can_use_budget(heavy_tool=True):
                     return tool_budget.get_budget_exceeded_message()
 
                 cwd = getattr(self, "_cached_cwd", None)
-                result = tools.search_repo(query, cwd)
 
-                # Track token usage
-                if tool_budget and isinstance(result, str):
-                    tool_budget.consume(result)
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(tools.search_repo, query, cwd),
+                        timeout=timeout
+                    )
+
+                    # Track token usage
+                    if tool_budget and isinstance(result, str):
+                        tool_budget.consume(result)
+                except asyncio.TimeoutError:
+                    result = f"Error: Tool timed out after {timeout} seconds"
 
                 # Record search for conversation history preservation
                 tool_tracker.record_search(query, result)
 
                 return result
+
+            def patch(patch_str: str) -> str:
+                """Propose a patch. Agent stops and waits for user to apply (1) or reject (2)."""
+                return tools.patch(patch_str)
+
+            async def exec_lua(code: str) -> str:
+                """Execute Lua code inside Neovim."""
+                return await tools.exec_lua(code, nvim=self.nvim, logger=self.logger)
+
+            async def exec(command: str, timeout: int = 30) -> str:
+                """Execute a shell command with user permission."""
+                cwd = getattr(self, "_cached_cwd", None)
+
+                self.logger.info(f"exec called with command: {command}")
+
+                # YOLO mode: run without asking
+                if exec_permissions.is_yolo_mode():
+                    self.logger.info("YOLO mode: executing command without prompt")
+                    return tools.exec(command, cwd=cwd, timeout=timeout)
+
+                # Check if command is in allow list
+                allow_list = exec_permissions.load_allow_list()
+                self.logger.info(f"Allow list: {allow_list}")
+                self.logger.info(f"Allow list path: {exec_permissions.ALLOW_LIST_PATH}")
+
+                if exec_permissions.is_command_allowed(command):
+                    self.logger.info("Command in allow list, executing")
+                    return tools.exec(command, cwd=cwd, timeout=timeout)
+
+                self.logger.info("Command NOT in allow list, prompting user")
+
+                # Prompt user for permission
+                choice = await exec_permissions.prompt_exec_permission(
+                    self.nvim, command, self.logger
+                )
+
+                self.logger.info(f"User choice: {choice}")
+
+                if choice == "run":
+                    return tools.exec(command, cwd=cwd, timeout=timeout)
+                elif choice == "always":
+                    self.logger.info(f"Adding command to allow list: {command}")
+                    exec_permissions.add_to_allow_list(command)
+                    self.logger.info(
+                        f"Allow list after add: {exec_permissions.load_allow_list()}"
+                    )
+                    return tools.exec(command, cwd=cwd, timeout=timeout)
+                else:
+                    return "Command execution was declined by user."
+
+            return {
+                "read_file": function_tool(read_file),
+                "read_many_files": function_tool(read_many_files),
+                "list_files": function_tool(list_files),
+                "search_repo": function_tool(search_repo),
+                "patch": function_tool(patch),
+                "exec_lua": function_tool(exec_lua),
+                "exec": function_tool(exec),
+            }
 
             def patch(patch_str: str) -> str:
                 """Propose a patch. Agent stops and waits for user to apply (1) or reject (2)."""
@@ -543,10 +646,6 @@ class AgentPlugin(object):
             # Emit cancelling event for fidget
             utils.emit_user_event(
                 self.nvim, "AgentCancelling", {"id": self._current_request_id}
-            )
-            # Only add spacing if there's already content in the response
-            self.nvim.async_call(self.buffer_manager.append_cancel_message)
-        elif hasattr(self, "_compact_cancelled") and not self._compact_cancelled:
             )
             # Only add spacing if there's already content in the response
             self.nvim.async_call(self.buffer_manager.append_cancel_message)

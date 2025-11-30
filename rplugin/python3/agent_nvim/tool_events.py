@@ -182,8 +182,8 @@ def _detect_tool_error(tool_name, result_str):
     if result_str.startswith("Error:") or result_str.startswith("Error executing"):
         return True
 
-    # Timeout errors
-    if "Command timed out" in result_str:
+    # Timeout errors (both command timeout and tool timeout)
+    if "timed out" in result_str:
         return True
 
     return False
