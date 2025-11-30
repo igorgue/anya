@@ -63,7 +63,7 @@ def handle_tool_event(
         ):
             nvim.async_call(
                 lambda: append_content_fn(
-                    ["\n🔧 **Tool call detected**", f"Event: {event_str[:200]}..."]
+                    ["", "**Tool call detected**", f"Event: {event_str[:200]}..."]
                 )
             )
 
@@ -302,7 +302,7 @@ def display_tool_result(
                                     append_content_fn(
                                         [
                                             "",
-                                            "> ⚠️ Patch failed to apply",
+                                            ">   Patch failed to apply",
                                         ]
                                     )
                                     logger.warning("YOLO: Patch failed to apply")
@@ -575,7 +575,7 @@ def handle_tool_call_event(
                             "tool": tool_name,
                         },
                     )
-                lines = ["", "🔧 **Tool call event**: `" + tool_name + "`"]
+                lines = ["", "**Tool call event**: `" + tool_name + "`"]
                 nvim.async_call(lambda: append_content_fn(lines))
 
     except Exception as e:

@@ -76,7 +76,7 @@ class AgentPlugin(object):
                     "CompactAgent created but agent is None - using fallback mode"
                 )
                 self.nvim.out_write(
-                    "⚠️ CompactAgent initialized in fallback mode (limited functionality). Install OpenAI agents SDK for full features.\n"
+                    "  CompactAgent initialized in fallback mode (limited functionality). Install OpenAI agents SDK for full features.\n"
                 )
             else:
                 self.logger.info(
@@ -88,7 +88,7 @@ class AgentPlugin(object):
             self.compact_agent = None
             self.context_analyzer = None
             self.preview_modal = None
-            self.nvim.out_write(f"❌ Failed to initialize CompactAgent: {e}\n")
+            self.nvim.out_write(f"  Failed to initialize CompactAgent: {e}\n")
 
     def _get_compact_model(self) -> str:
         """Get model for compact agent, with environment variable override."""
@@ -538,9 +538,9 @@ class AgentPlugin(object):
                     "> Patch applied successfully."
                     if action == "apply" and success
                     else (
-                        "> ✗ Patch rejected by user."
+                        ">   Patch rejected by user."
                         if action == "reject_pending"
-                        else "> ✗ Patch failed to apply."
+                        else ">   Patch failed to apply."
                     )
                 )
                 self.nvim.async_call(
@@ -742,7 +742,7 @@ class AgentPlugin(object):
                 self.buffer_manager.append_content(
                     [
                         "",
-                        "❌ **Compact agent not available**",
+                        "  **Compact agent not available**",
                         "The CompactAgent failed to initialize. This could be due to:",
                         "- Missing OpenAI agents SDK installation",
                         "- Invalid API key configuration",
@@ -767,7 +767,7 @@ class AgentPlugin(object):
                     self.buffer_manager.append_content(
                         [
                             "",
-                            "❌ **Invalid token count**",
+                            "  **Invalid token count**",
                             "Please provide a valid number for --tokens parameter.",
                             "",
                         ]
@@ -791,7 +791,7 @@ class AgentPlugin(object):
                 self.buffer_manager.append_content(
                     [
                         "",
-                        "ℹ️ **No conversation to compact**",
+                        "** 󰋽  No conversation to compact **",
                         "There's no conversation history available to compact.",
                         "",
                     ]
@@ -838,7 +838,7 @@ class AgentPlugin(object):
                     # Use async_call to update UI from thread
                     self.nvim.async_call(
                         self.buffer_manager.append_content,
-                        [f"❌ **Compaction error**: {str(e)}", ""],
+                        [f"  **Compaction error**: {str(e)}", ""],
                     )
                 finally:
                     # Clean up fidget progress
@@ -864,7 +864,7 @@ class AgentPlugin(object):
         except Exception as e:
             self.logger.error(f"Error handling compact command: {e}")
             self.buffer_manager.append_content(
-                ["", f"❌ **Error during compaction**: {str(e)}", ""]
+                ["", f"**   Error during compaction **: {str(e)}", ""]
             )
 
     def _update_fidget_progress(self, message: str):

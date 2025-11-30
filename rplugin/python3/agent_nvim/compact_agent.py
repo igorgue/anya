@@ -232,14 +232,14 @@ class CompactAgent:
 
                 if missing_files:
                     validation.append(
-                        f"⚠️  Missing file references: {', '.join(missing_files)}"
+                        f"  Missing file references: {', '.join(missing_files)}"
                     )
                 else:
-                    validation.append("✅ All file references preserved")
+                    validation.append("**All file references preserved**")
 
                 # Check length reduction
                 reduction = 1 - (len(summary) / len(original))
-                validation.append(f"📊 Size reduction: {reduction:.1%}")
+                validation.append(f"Size reduction: {reduction:.1%}")
 
                 return "\n".join(validation)
 

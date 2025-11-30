@@ -114,7 +114,7 @@ def read_file(path_with_range: str, cwd: str = None) -> str:
             )
             info_parts.append(
                 f"[FILE TOO LARGE] File has {total_lines} lines total, showing lines {actual_start}-{actual_end}.\n"
-                f"⚠️ READ THE FULL FILE: Call read_file('{display_path}@start-end') to get all {total_lines} lines.\n"
+                f"  READ THE FULL FILE: Call read_file('{display_path}@start-end') to get all {total_lines} lines.\n"
                 f"Or use specific ranges: @{actual_end + 1}-{min(actual_end + 100, total_lines)} (next 100) or @{max(1, total_lines - 100)}-end (last 100)\n"
             )
 
