@@ -452,8 +452,11 @@ class BufferManager:
                  
                  # Check if this is an Agent header line (# Agent)
                  if line.startswith("# Agent"):
-                     # Highlight the agent title with CursorLineNr
-                     self.nvim.api.buf_add_highlight(bufnr, 5, "CursorLineNr", line_num, 0, -1)
+                     # Use extmark with line_hl_group to highlight full line including EOL
+                     self.nvim.api.buf_set_extmark(bufnr, self._user_prompt_ns, line_num, 0, {
+                         "line_hl_group": "CursorLineNr",
+                         "priority": 5
+                     })
                      continue
                  
                  # Check if this is a user header line (# Username, not # Agent)
@@ -461,8 +464,11 @@ class BufferManager:
                      in_user_section = True
                      user_section_start = line_num
                      skip_next_empty = True  # Skip the empty line after the header
-                     # Highlight the username line with CursorLineNr
-                     self.nvim.api.buf_add_highlight(bufnr, 5, "CursorLineNr", line_num, 0, -1)
+                     # Use extmark with line_hl_group to highlight full line including EOL
+                     self.nvim.api.buf_set_extmark(bufnr, self._user_prompt_ns, line_num, 0, {
+                         "line_hl_group": "CursorLineNr",
+                         "priority": 5
+                     })
                      continue
                  
                  # If we're in a user section and we've moved past header setup
