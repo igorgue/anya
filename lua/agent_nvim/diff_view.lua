@@ -54,7 +54,7 @@ local function get_header_virt_text(state, additions, modifications, deletions)
         icon_hl = HL_REJECT
     end
     
-    table.insert(virt_text, { icon .. " ", icon_hl })
+    table.insert(virt_text, { icon .. "  ", icon_hl })
     
     -- Controls
     local function add_option(opt_state, label, key)
