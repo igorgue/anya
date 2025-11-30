@@ -4,6 +4,10 @@ setlocal linebreak
 setlocal nolist
 let b:markdown_fenced_languages = ['diff']
 
+" Map Ctrl+C to cancel
+nnoremap <buffer> <silent> <C-c> :AgentCancel<CR>
+inoremap <buffer> <silent> <C-c> <Esc>:AgentCancel<CR>
+
 " Enable manual folding for tool calls
 setlocal foldmethod=manual
 setlocal foldlevel=99

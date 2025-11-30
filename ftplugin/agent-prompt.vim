@@ -9,6 +9,22 @@ syntax enable
 nnoremap <buffer> <silent> <C-c> :AgentCancel<CR>
 inoremap <buffer> <silent> <C-c> <Esc>:AgentCancel<CR>
 
+" Toolbar keymaps (localleader defaults to \ if not set)
+nnoremap <buffer> <silent> <localleader>a :lua require('agent_nvim.toolbar').toggle_agent()<CR>
+inoremap <buffer> <silent> <localleader>a <Esc>:lua require('agent_nvim.toolbar').toggle_agent()<CR>a
+nnoremap <buffer> <silent> <localleader>y :lua require('agent_nvim.toolbar').toggle_mode()<CR>
+inoremap <buffer> <silent> <localleader>y <Esc>:lua require('agent_nvim.toolbar').toggle_mode()<CR>a
+nnoremap <buffer> <silent> <localleader>A :lua require('agent_nvim.toolbar').pick_agent()<CR>
+inoremap <buffer> <silent> <localleader>A <Esc>:lua require('agent_nvim.toolbar').pick_agent()<CR>a
+
+" Alternative keymaps using Ctrl (in case localleader is not configured)
+nnoremap <buffer> <silent> <C-g>a :lua require('agent_nvim.toolbar').toggle_agent()<CR>
+inoremap <buffer> <silent> <C-g>a <Esc>:lua require('agent_nvim.toolbar').toggle_agent()<CR>a
+nnoremap <buffer> <silent> <C-g>y :lua require('agent_nvim.toolbar').toggle_mode()<CR>
+inoremap <buffer> <silent> <C-g>y <Esc>:lua require('agent_nvim.toolbar').toggle_mode()<CR>a
+nnoremap <buffer> <silent> <C-g>A :lua require('agent_nvim.toolbar').pick_agent()<CR>
+inoremap <buffer> <silent> <C-g>A <Esc>:lua require('agent_nvim.toolbar').pick_agent()<CR>a
+
 " Load history functionality
 lua << EOF
   local history_script = vim.fn.expand('<sfile>:p:h') .. '/agent-prompt-history.lua'

@@ -26,6 +26,7 @@ from .compact_agent import CompactAgent, ContextAnalyzer
 from .compact_preview import CompactPreviewModal
 from . import tool_tracker
 from . import exec_permissions
+from .config import ConfigManager
 
 # Constants
 PLUGIN_NAME = "agent.nvim"
@@ -38,6 +39,9 @@ class AgentPlugin(object):
     def __init__(self, nvim):
         self.nvim = nvim
         self._setup_logging()
+
+        # Initialize configuration manager
+        self.config_manager = ConfigManager(self.logger)
 
         # Initialize managers
         self.buffer_manager = BufferManager(nvim, self.logger)
@@ -59,6 +63,7 @@ class AgentPlugin(object):
         # Initialize Lua module (history will be initialized by ftplugin when buffer opens)
         try:
             nvim.exec_lua("require('agent_nvim')")
+            self._sync_config_to_lua()
         except Exception as e:
             self.logger.debug(f"Failed to initialize Lua module: {e}")
 
@@ -217,6 +222,46 @@ class AgentPlugin(object):
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
         self.logger.setLevel(logging.INFO)
+
+    def _sync_config_to_lua(self):
+        """Synchronize configuration state from Python to Lua."""
+        try:
+            agent = self.config_manager.get("agent", "AUTO")
+            mode = self.config_manager.get("mode", "ASK")
+
+            # Set global Lua state for toolbar
+            lua_code = f"""
+            _G.agent_state = {{
+                agent = "{agent}",
+                mode = "{mode}"
+            }}
+            
+            -- Set up callback for config changes from Lua
+            function _G.agent_config_callback(key, value)
+                -- This will be called by toolbar when user toggles settings
+                -- We need to inform the Python plugin via a command
+                vim.api.nvim_command(string.format("AgentConfigUpdate %s %s", key, value))
+            end
+            """
+            self.nvim.exec_lua(lua_code)
+            self.logger.debug(
+                f"Synced config to Lua: agent={agent}, mode={mode}"
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to sync config to Lua: {e}")
+
+    def _update_config_from_lua(self, key: str, value: str):
+        """Update configuration when changed from Lua toolbar.
+
+        Args:
+            key: Configuration key (agent or mode)
+            value: New value
+        """
+        try:
+            self.config_manager.set(key, value)
+            self.logger.debug(f"Updated config: {key} = {value}")
+        except Exception as e:
+            self.logger.error(f"Failed to update config: {e}")
 
     def _get_tool_wrappers(self, tool_budget: ToolBudget | None = None):
         """Get tool wrappers, creating them with optional budget tracking.
@@ -605,6 +650,39 @@ class AgentPlugin(object):
         asyncio.create_task(
             self._run_agent_wrapper(request_id, skip_header=skip_header)
         )
+
+    @pynvim.command("AgentConfigUpdate", nargs="*", sync=True)
+    def agent_config_update(self, args):
+        """Update agent configuration from Lua toolbar.
+
+        Args:
+            args: [key, value] pairs
+        """
+        try:
+            if len(args) < 2:
+                return
+
+            key = args[0]
+            value = args[1]
+
+            # Update configuration
+            self._update_config_from_lua(key, value)
+        except Exception as e:
+            self.logger.error(f"Error updating config: {e}")
+            self.nvim.err_write(f"Config update error: {e}\n")
+
+    @pynvim.command("AgentSyncConfig", sync=False)
+    def agent_sync_config(self):
+        """Reload and sync configuration from disk to Lua toolbar."""
+        try:
+            # Reload config from disk
+            self.config_manager._config = self.config_manager._load_config()
+            # Sync to Lua
+            self._sync_config_to_lua()
+            self.nvim.out_write("Configuration reloaded and synced\n")
+        except Exception as e:
+            self.logger.error(f"Error syncing config: {e}")
+            self.nvim.err_write(f"Sync config error: {e}\n")
 
     @pynvim.command("AgentHistoryTest", sync=True)
     def agent_history_test(self):

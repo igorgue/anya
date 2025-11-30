@@ -1,4 +1,4 @@
--- Placeholder functionality for agent prompt buffer
+-- Placeholder and toolbar functionality for agent prompt buffer
 local bufnr = vim.api.nvim_get_current_buf()
 local placeholder_ns = vim.api.nvim_create_namespace("agent_prompt_placeholder")
 
@@ -33,6 +33,10 @@ function _G.AgentSetPlaceholder(text, highlight)
   _G.agent_prompt_highlight = highlight or "Comment"
   update_placeholder()
 end
+
+-- Initialize toolbar
+local toolbar = require("agent_nvim.toolbar")
+toolbar.init_buffer(bufnr)
 
 -- Attach to buffer to update placeholder on text changes and trigger logo jiggle
 vim.api.nvim_buf_attach(bufnr, false, {

@@ -29,9 +29,22 @@ agent.nvim is a Neovim plugin that integrates OpenAI's Agents SDK, providing an 
 - Streaming responses with Lua animation for smooth typing effect
 
 **File Type Configuration**
-- `ftplugin/agent-prompt.vim`: Maps Enter to submit, sets completefunc
+- `ftplugin/agent-prompt.vim`: Maps Enter to submit, sets completefunc, toolbar keymaps
+- `ftplugin/agent-prompt.lua`: Placeholder display and toolbar initialization
 - `ftplugin/agent-content.vim`: Configures wrapping, fold settings, and smart autoscroll
 - `syntax/agent-prompt.vim`: Highlights slash commands and `@` mentions
+
+**Configuration Management** (`rplugin/python3/agent_nvim/config.py`)
+- Persists agent and mode settings to `~/.config/agent.nvim/config.json`
+- Integrates with Lua toolbar for state synchronization
+- Provides get/set interface for configuration values
+
+**Toolbar UI** (`lua/agent_nvim/toolbar.lua`)
+- Shows current agent and mode in bottom right of prompt buffer
+- Supports toggling between main agents (AUTO, CODER, PLAN)
+- Supports toggling between modes (ASK, YOLO)
+- Picker for specialized agents (REVIEWER, VERIFIER, COMPACT)
+- Color-coded indicators with customizable highlights
 
 **Folding System** (`lua/agent_nvim/folds.lua`)
 - Manages manual folds for tool calls and results
@@ -91,7 +104,15 @@ python3 scripts/install.py
 
 # Apply proposed patches
 :AgentApply
+
+# Sync configuration from disk
+:AgentSyncConfig
 ```
+
+### Toolbar Keymaps (in prompt buffer)
+- `<localleader>a` - Toggle main agents (AUTO → CODER → PLAN → AUTO)
+- `<localleader>y` - Toggle mode (ASK ↔ YOLO)
+- `<localleader>A` - Open picker for specialized agents (REVIEWER, VERIFIER, COMPACT)
 
 ## Dependencies
 
