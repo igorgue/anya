@@ -1198,7 +1198,7 @@ class BufferManager:
         end
         """
         try:
-            self.nvim.exec_lua(lua_code)
+            self.nvim.async_call(self.nvim.exec_lua, lua_code)
         except Exception as e:
             self.logger.error(f"Error in _append_stream_lua: {e}")
             import traceback
@@ -1226,7 +1226,7 @@ class BufferManager:
             }})
             """
             try:
-                self.nvim.exec_lua(lua_code)
+                self.nvim.async_call(self.nvim.exec_lua, lua_code)
             except Exception as e:
                 self.logger.error(f"Error queueing cancel message: {e}")
                 # Fallback: append directly if queue is not available
