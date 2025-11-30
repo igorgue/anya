@@ -1,9 +1,7 @@
 local files = {}
-local blink_utils = require('agent_nvim.blink.init')
 
--- Helper function to find @ symbol and return the path after it
-local function get_at_symbol_path(line, cursor_col)
-  -- Search from cursor position backwards for @ symbol
+-- Helper function to find @ symbol and return the query after it
+local function get_at_symbol_query(line, cursor_col)
   local at_pos = nil
 
   for i = cursor_col, 1, -1 do
@@ -12,7 +10,6 @@ local function get_at_symbol_path(line, cursor_col)
       at_pos = i
       break
     elseif char == ' ' then
-      -- Stop at space to find the previous command/mention
       break
     end
   end
@@ -21,71 +18,116 @@ local function get_at_symbol_path(line, cursor_col)
     return nil, nil
   end
 
-  -- Extract the path after @
-  local path_after_at = line:sub(at_pos + 1, cursor_col)
-  return at_pos, path_after_at
+  local query = line:sub(at_pos + 1, cursor_col)
+  return at_pos, query
 end
 
--- Helper function to find the start of the basename after the last slash
-local function get_basename_start(path, cursor_offset)
-  -- Find the last slash before the cursor position
-  local last_slash_pos = nil
-  for i = cursor_offset, 1, -1 do
-    if path:sub(i, i) == '/' then
-      last_slash_pos = i
-      break
+-- Simple fuzzy match: check if all characters in pattern appear in str in order
+local function fuzzy_match(str, pattern)
+  if pattern == '' then
+    return true, 0
+  end
+
+  local str_lower = str:lower()
+  local pattern_lower = pattern:lower()
+  local str_idx = 1
+  local score = 0
+  local consecutive = 0
+  local last_match_idx = 0
+
+  for i = 1, #pattern_lower do
+    local char = pattern_lower:sub(i, i)
+    local found = false
+
+    while str_idx <= #str_lower do
+      if str_lower:sub(str_idx, str_idx) == char then
+        found = true
+        -- Bonus for consecutive matches
+        if str_idx == last_match_idx + 1 then
+          consecutive = consecutive + 1
+          score = score + consecutive * 2
+        else
+          consecutive = 0
+        end
+        -- Bonus for matching at start or after separator
+        if str_idx == 1 or str:sub(str_idx - 1, str_idx - 1):match('[/_.-]') then
+          score = score + 5
+        end
+        last_match_idx = str_idx
+        str_idx = str_idx + 1
+        break
+      end
+      str_idx = str_idx + 1
+    end
+
+    if not found then
+      return false, 0
     end
   end
 
-  if last_slash_pos then
-    -- Start after the last slash
-    return last_slash_pos + 1
-  else
-    -- No slash found, start from the beginning
-    return 1
-  end
+  -- Prefer shorter paths (penalty for length)
+  score = score - (#str * 0.1)
+  -- Prefer matches where pattern is a larger portion of the filename
+  local basename = str:match('[^/]+$') or str
+  score = score + (#pattern / #basename) * 10
+
+  return true, score
 end
 
--- Helper function to get directory and basename from path
-local function parse_path(path)
-  if path == '' then
-    return '', ''
+-- Get project root (look for .git, fallback to cwd)
+local function get_project_root()
+  local cwd = vim.fn.getcwd()
+  local path = cwd
+
+  while path ~= '/' do
+    if vim.fn.isdirectory(path .. '/.git') == 1 then
+      return path
+    end
+    path = vim.fn.fnamemodify(path, ':h')
   end
 
-  -- Find the last slash to separate directory from basename
-  local last_slash = path:find('/[^/]*$')
-
-  if last_slash then
-    local dirname = path:sub(1, last_slash - 1)
-    local basename = path:sub(last_slash + 1)
-    return dirname, basename
-  else
-    -- No directory component, just basename
-    return '', path
-  end
+  return cwd
 end
 
--- Helper function to resolve relative path to absolute
-local function resolve_path(path)
-  if path == '' then
-    return vim.fn.getcwd()
+-- Recursively collect all files in directory
+local function collect_files(dir, root, collected, limit)
+  local uv = vim.loop
+  local handle = uv.fs_scandir(dir)
+
+  if not handle then
+    return
   end
 
-  -- If already absolute, return as is
-  if path:sub(1, 1) == '/' then
-    return path
-  end
+  while #collected < limit do
+    local name, type = uv.fs_scandir_next(handle)
+    if not name then
+      break
+    end
 
-  -- Otherwise, resolve relative to cwd
-  return vim.fn.resolve(vim.fn.getcwd() .. '/' .. path)
+    -- Skip hidden files and common ignored directories
+    if name:sub(1, 1) ~= '.' and name ~= 'node_modules' and name ~= '__pycache__'
+        and name ~= 'target' and name ~= 'build' and name ~= 'dist' and name ~= 'venv'
+        and name ~= '.venv' and name ~= 'vendor' then
+      local full_path = dir .. '/' .. name
+      local relative_path = full_path:sub(#root + 2) -- +2 for the leading slash
+
+      if type == 'directory' then
+        collect_files(full_path, root, collected, limit)
+      else
+        table.insert(collected, relative_path)
+      end
+    end
+  end
 end
 
 function files.new(opts)
+  -- Cache for project files
+  local file_cache = nil
+  local cache_root = nil
+
   return {
-    -- Check if this source should be enabled for the current buffer
     enabled = function()
-      local ft = vim.bo.filetype
-      return ft == 'agent-prompt'
+      return vim.bo.filetype == 'agent-prompt'
     end,
 
     get_trigger_characters = function()
@@ -94,10 +136,9 @@ function files.new(opts)
 
     get_completions = function(self, ctx, callback)
       local line = vim.api.nvim_buf_get_lines(ctx.bufnr, ctx.cursor[1] - 1, ctx.cursor[1], false)[1]
-      local cursor_col = ctx.cursor[2] -- cursor is {line, col} in 1-indexed format
+      local cursor_col = ctx.cursor[2]
 
-      -- Find @ symbol and get path after it
-      local at_pos, path_after_at = get_at_symbol_path(line, cursor_col)
+      local at_pos, query = get_at_symbol_query(line, cursor_col)
 
       if not at_pos then
         callback({
@@ -108,74 +149,53 @@ function files.new(opts)
         return
       end
 
-      -- Parse the path into directory and basename components
-      local dirname, basename = parse_path(path_after_at)
+      local project_root = get_project_root()
 
-      -- Resolve the directory to scan
-      local scan_dir = resolve_path(dirname)
-
-      -- Calculate where the basename starts for proper textEdit range
-      local path_length = cursor_col - at_pos -- Length of path after @
-      local basename_start_offset = get_basename_start(path_after_at, path_length)
-      local replace_start_pos = at_pos + basename_start_offset - 1 -- Convert to 0-indexed for textEdit
+      -- Refresh cache if project root changed
+      if file_cache == nil or cache_root ~= project_root then
+        file_cache = {}
+        cache_root = project_root
+        collect_files(project_root, project_root, file_cache, 5000)
+      end
 
       local items = {}
-      local uv = vim.loop
+      local scored_items = {}
 
-      -- Scan the directory
-      local handle = uv.fs_scandir(scan_dir)
-      if handle then
-        while true do
-          local name, type = uv.fs_scandir_next(handle)
-          if not name then
-            break
-          end
-
-          -- Skip hidden files and .git
-          if name:sub(1, 1) ~= '.' and name ~= '.git' then
-            -- Check if name matches the basename prefix (case insensitive)
-            if basename == '' or name:lower():find(basename:lower(), 1, true) == 1 then
-              local is_dir = type == 'directory'
-              local label = is_dir and (name .. '/') or name
-              local kind = is_dir and 19 or 17 -- 19 = Folder, 17 = File
-
-              -- For textEdit, we only want to replace the basename, not include directory
-              -- The directory part is already preserved in the text
-              table.insert(items, {
-                label = label,
-                kind = vim.lsp and vim.lsp.CompletionItemKind and kind or kind,
-                insertText = dirname .. label,
-                textEdit = {
-                  newText = label, -- Only insert the filename, not directory
-                  range = {
-                    start = {
-                      line = ctx.cursor[1] - 1, -- 0-indexed line
-                      character = replace_start_pos -- Start replacing at basename
-                    },
-                    ['end'] = {
-                      line = ctx.cursor[1] - 1, -- 0-indexed line
-                      character = cursor_col -- Cursor position
-                    }
-                  }
-                }
-              })
-            end
-          end
+      for _, file_path in ipairs(file_cache) do
+        local matches, score = fuzzy_match(file_path, query)
+        if matches then
+          table.insert(scored_items, { path = file_path, score = score })
         end
       end
 
-      -- Sort: directories first, then files, alphabetically
-      table.sort(items, function(a, b)
-        local a_is_dir = a.label:sub(-1) == '/'
-        local b_is_dir = b.label:sub(-1) == '/'
-        if a_is_dir and not b_is_dir then
-          return true
-        elseif not a_is_dir and b_is_dir then
-          return false
-        else
-          return a.label:lower() < b.label:lower()
-        end
+      -- Sort by score descending
+      table.sort(scored_items, function(a, b)
+        return a.score > b.score
       end)
+
+      -- Limit results
+      local max_results = 50
+      for i = 1, math.min(#scored_items, max_results) do
+        local file_path = scored_items[i].path
+        table.insert(items, {
+          label = file_path,
+          kind = 17, -- File
+          insertText = file_path,
+          textEdit = {
+            newText = file_path,
+            range = {
+              start = {
+                line = ctx.cursor[1] - 1,
+                character = at_pos -- Replace everything after @
+              },
+              ['end'] = {
+                line = ctx.cursor[1] - 1,
+                character = cursor_col
+              }
+            }
+          }
+        })
+      end
 
       callback({
         items = items,
@@ -183,10 +203,7 @@ function files.new(opts)
         is_incomplete_forward = false
       })
 
-      -- Return cancellation function
-      return function()
-        -- Cancel any pending async operations if needed
-      end
+      return function() end
     end
   }
 end
