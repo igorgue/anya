@@ -5,17 +5,17 @@ local M = {}
 
 -- Logo lines (ASCII art)
 M.logo_lines = {
-  "░█▀█░█▀▀░█▀▀░█▀█░▀█▀",
-  "░█▀█░█░█░█▀▀░█░█░░█░",
-  "░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░",
+  "░█▀█░█▀▀░█▀▀░█▀█░▀█▀░░░░█▀█░█░█░▀█▀░█▄█",
+  "░█▀█░█░█░█▀▀░█░█░░█░░░░░█░█░▀▄▀░░█░░█░█",
+  "░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀░░▀░▀░░▀░░▀▀▀░▀░▀",
 }
 
 -- Full welcome message structure
 M.welcome_message = {
   "```",
-  "░█▀█░█▀▀░█▀▀░█▀█░▀█▀",
-  "░█▀█░█░█░█▀▀░█░█░░█░",
-  "░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░",
+  "░█▀█░█▀▀░█▀▀░█▀█░▀█▀░░░░█▀█░█░█░▀█▀░█▄█",
+  "░█▀█░█░█░█▀▀░█░█░░█░░░░░█░█░▀▄▀░░█░░█░█",
+  "░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀░░▀░▀░░▀░░▀▀▀░▀░▀",
   "```",
   "",
   "> Type your request in the prompt below.",
@@ -29,6 +29,9 @@ M.state = {
   direction = 1, -- 1 = right, -1 = left
   animation_complete = false,
   highlight_ns = nil,
+  jiggle_count = 0, -- Remaining jiggle movements
+  jiggle_direction = 1, -- Current jiggle direction
+  paused_at_edge = false, -- Whether we're paused at an edge
 }
 
 -- Get the maximum width of logo lines
@@ -229,6 +232,8 @@ function M.animate_logo_scan(bufnr, on_complete)
   M.state.current_col = 0
   M.state.direction = 1
   M.state.animation_complete = false
+  M.state.jiggle_count = 0
+  M.state.paused_at_edge = false
 
   -- Create highlight namespace for the glow effect
   if not M.state.highlight_ns then
@@ -247,49 +252,33 @@ function M.animate_logo_scan(bufnr, on_complete)
   vim.api.nvim_set_hl(0, "AgentLogoGlow3", { fg = "#888888" })
   vim.api.nvim_set_hl(0, "AgentLogoDim", { fg = "#444444" })
 
-  -- Smoother animation with occasional long pauses
-  local tick_count = 0
-  local pause_until = 0 -- timestamp when pause ends
-
   local function get_next_interval()
-    -- Occasionally pause for 1-3 seconds
-    if math.random() < 0.02 then
-      return math.random(1000, 3000) -- Long pause
+    -- If jiggling, use fast interval
+    if M.state.jiggle_count > 0 then
+      return 30
     end
 
-    -- Otherwise smooth movement with slight variation
-    local rand = math.random()
-    if rand < 0.7 then
-      return 25 -- Smooth normal speed
-    elseif rand < 0.9 then
-      return 35 -- Slightly slower
-    else
-      return 15 -- Quick burst
+    -- If at edge, small chance to pause
+    local at_left_edge = M.state.current_col <= 1
+    local at_right_edge = M.state.current_col >= logo_width - 2
+
+    if at_left_edge or at_right_edge then
+      -- 8% chance to pause at edge for 0.5-1 second
+      if math.random() < 0.08 then
+        M.state.paused_at_edge = true
+        return math.random(500, 1000)
+      end
     end
+
+    M.state.paused_at_edge = false
+
+    -- Smooth consistent movement
+    return 25
   end
 
   M.state.timer = vim.loop.new_timer()
 
-  local function do_tick()
-    if not vim.api.nvim_buf_is_valid(bufnr) then
-      M.stop_animation()
-      return
-    end
-
-    tick_count = tick_count + 1
-
-    -- Move the scanner position
-    M.state.current_col = M.state.current_col + M.state.direction
-
-    -- Bounce at edges
-    if M.state.current_col >= logo_width then
-      M.state.current_col = logo_width - 1
-      M.state.direction = -1
-    elseif M.state.current_col < 0 then
-      M.state.current_col = 0
-      M.state.direction = 1
-    end
-
+  local function update_highlights()
     -- Clear previous highlights
     vim.api.nvim_buf_clear_namespace(bufnr, M.state.highlight_ns, 0, -1)
 
@@ -322,6 +311,51 @@ function M.animate_logo_scan(bufnr, on_complete)
         byte_pos = byte_pos + char_bytes
       end
     end
+  end
+
+  local function do_tick()
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      M.stop_animation()
+      return
+    end
+
+    -- Handle jiggle mode
+    if M.state.jiggle_count > 0 then
+      M.state.jiggle_count = M.state.jiggle_count - 1
+      -- Alternate direction for jiggle effect
+      M.state.current_col = M.state.current_col + M.state.jiggle_direction
+      M.state.jiggle_direction = -M.state.jiggle_direction
+
+      -- Clamp to bounds
+      if M.state.current_col < 0 then
+        M.state.current_col = 0
+      elseif M.state.current_col >= logo_width then
+        M.state.current_col = logo_width - 1
+      end
+
+      update_highlights()
+
+      -- Schedule next jiggle tick
+      if M.state.timer then
+        M.state.timer:stop()
+        M.state.timer:start(30, 0, vim.schedule_wrap(do_tick))
+      end
+      return
+    end
+
+    -- Normal scanning movement
+    M.state.current_col = M.state.current_col + M.state.direction
+
+    -- Bounce at edges
+    if M.state.current_col >= logo_width then
+      M.state.current_col = logo_width - 1
+      M.state.direction = -1
+    elseif M.state.current_col < 0 then
+      M.state.current_col = 0
+      M.state.direction = 1
+    end
+
+    update_highlights()
 
     -- Schedule next tick with potentially different interval
     if M.state.timer then
@@ -333,6 +367,17 @@ function M.animate_logo_scan(bufnr, on_complete)
 
   -- Start the animation loop
   M.state.timer:start(100, 0, vim.schedule_wrap(do_tick))
+end
+
+-- Trigger a jiggle effect (call this when user types)
+function M.jiggle()
+  if not M.is_animating() then
+    return
+  end
+
+  -- Set jiggle count (number of back-and-forth movements)
+  M.state.jiggle_count = math.random(2, 4)
+  M.state.jiggle_direction = (math.random() < 0.5) and 1 or -1
 end
 
 -- Simple typewriter effect (character by character, left to right, top to bottom)

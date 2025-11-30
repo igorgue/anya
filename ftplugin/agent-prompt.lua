@@ -34,11 +34,15 @@ function _G.AgentSetPlaceholder(text, highlight)
   update_placeholder()
 end
 
--- Attach to buffer to update placeholder on text changes
-local bufnr = vim.api.nvim_get_current_buf()
+-- Attach to buffer to update placeholder on text changes and trigger logo jiggle
 vim.api.nvim_buf_attach(bufnr, false, {
   on_lines = function()
     update_placeholder()
+    -- Trigger logo jiggle when user types
+    local ok, logo_animation = pcall(require, "agent_nvim.logo_animation")
+    if ok and logo_animation.is_animating() then
+      logo_animation.jiggle()
+    end
   end,
 })
 

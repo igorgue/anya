@@ -20,9 +20,9 @@ class BufferManager:
 
     WELCOME_MESSAGE = [
         "```",
-        "░█▀█░█▀▀░█▀▀░█▀█░▀█▀",
-        "░█▀█░█░█░█▀▀░█░█░░█░",
-        "░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░",
+        "░█▀█░█▀▀░█▀▀░█▀█░▀█▀░░░░█▀█░█░█░▀█▀░█▄█",
+        "░█▀█░█░█░█▀▀░█░█░░█░░░░░█░█░▀▄▀░░█░░█░█",
+        "░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀░░▀░▀░░▀░░▀▀▀░▀░▀",
         "```",
         "",
         "> Type your request in the prompt below.",
@@ -694,7 +694,7 @@ class BufferManager:
             self.nvim.exec_lua(
                 "agent_nvim_blink_file_completion_callback(...)", [matches, callback_id]
             )
-        except Exception as e:
+        except Exception:
             self.nvim.exec_lua(
                 "agent_nvim_blink_file_completion_callback(...)", [[], callback_id]
             )
@@ -739,8 +739,9 @@ class BufferManager:
         ):
             return
 
-        # Get the line count before appending (this is where new content starts)
-        start_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
+        # Get current lines to determine if buffer is empty
+        current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+        start_line = len(current_lines)
 
         # Save the current window to restore focus later
         try:
@@ -748,8 +749,16 @@ class BufferManager:
         except Exception:
             current_win = None
 
-        # Append lines
-        self.nvim.api.buf_set_lines(self.content_buf, -1, -1, False, processed)
+        # Check if buffer is empty (single empty line)
+        buffer_is_empty = current_lines == [""]
+
+        if buffer_is_empty:
+            # Replace the empty line instead of appending after it
+            self.nvim.api.buf_set_lines(self.content_buf, 0, -1, False, processed)
+            start_line = 0
+        else:
+            # Append lines
+            self.nvim.api.buf_set_lines(self.content_buf, -1, -1, False, processed)
 
         # Get the new line count (end of appended content)
         end_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
@@ -1123,7 +1132,7 @@ class BufferManager:
                     if ok and result == 0 then
                         autoscroll_enabled = 0
                     end
-                    
+
                     if autoscroll_enabled == 1 then
                         for _, win in ipairs(vim.api.nvim_list_wins()) do
                             if vim.api.nvim_win_get_buf(win) == item.bufnr then
@@ -1166,7 +1175,7 @@ class BufferManager:
             if not _G.agent_stream_queue then
                 _G.agent_stream_queue = {{}}
             end
-            
+
             -- Queue the cancel message at the end
             table.insert(_G.agent_stream_queue, {{
                 bufnr = {bufnr},
