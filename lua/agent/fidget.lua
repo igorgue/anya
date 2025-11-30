@@ -48,6 +48,28 @@ function M:init()
   })
 
   vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AgentCancelling",
+    group = group,
+    callback = function(event)
+      local handle = M:get_progress_handle(event.data.id)
+      if handle then
+        handle.message = "cancelling"
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AgentRequestFinished",
+    group = group,
+    callback = function(event)
+      local handle = M:get_progress_handle(event.data.id)
+      if handle then
+        handle.message = "cancelling"
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ "User" }, {
     pattern = "AgentRequestFinished",
     group = group,
     callback = function(event)

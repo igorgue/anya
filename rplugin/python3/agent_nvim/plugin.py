@@ -537,12 +537,20 @@ class AgentPlugin(object):
             # Already cancelled
             return
 
+
         if self._current_request_id:
             self._cancel_requested = True
+            # Emit cancelling event for fidget
+            utils.emit_user_event(
+                self.nvim, "AgentCancelling", {"id": self._current_request_id}
+            )
             # Only add spacing if there's already content in the response
             self.nvim.async_call(self.buffer_manager.append_cancel_message)
         elif hasattr(self, "_compact_cancelled") and not self._compact_cancelled:
-            # Compaction is running (flag is False), signal it to stop (set to True)
+            )
+            # Only add spacing if there's already content in the response
+            self.nvim.async_call(self.buffer_manager.append_cancel_message)
+        elif hasattr(self, "_compact_cancelled") and not self._compact_cancelled:
             self._compact_cancelled = True
             self.nvim.out_write("Cancelling compaction...\\n")
         else:
