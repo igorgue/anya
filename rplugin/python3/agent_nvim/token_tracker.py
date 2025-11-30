@@ -7,42 +7,25 @@ CONTEXT_WINDOW = 128000  # Default GPT-4o context window
 USAGE_THRESHOLD = 0.95  # Force response at 95% usage
 session_tokens_used = 0  # Track tokens across submits in same session
 
+# Default context window fallback
+DEFAULT_CONTEXT_WINDOW = 128000
 
-# Model context windows (tokens)
-MODEL_CONTEXT_WINDOWS = {
-    # GPT-5 family
-    "gpt-5": 400000,
-    "gpt-5-mini": 400000,
-    "gpt-5-nano": 400000,
-    "gpt-5.1": 400000,
-    # GPT-4o family
-    "gpt-4o": 128000,
-    "gpt-4o-mini": 128000,
-    "gpt-4o-2024-05-13": 128000,
-    "gpt-4o-2024-08-06": 128000,
-    "gpt-4o-2024-11-20": 128000,
-    # Older models
-    "gpt-4-turbo": 128000,
-    "gpt-4-turbo-preview": 128000,
-    "gpt-4": 8000,
-    # GLM family (Zhipu)
-    "glm-4.6": 200000,
-    "glm-4.5": 131000,
-    "glm-4.5-air": 131000,
-    # Default fallback
-    "default": 128000,
-}
+# Import OpenRouter models as the source of truth
+try:
+    from .openrouter_models import OPENROUTER_CONTEXT_WINDOWS
+except ImportError:
+    OPENROUTER_CONTEXT_WINDOWS = {}
 
 
 def get_context_window(model: str | None) -> int:
     """Get context window size for a model.
 
     Args:
-        model: Model name (e.g., "gpt-4o" or "gpt-5.1")
+        model: Model name (e.g., "gpt-4o", "gpt-5.1", or "anthropic/claude-opus-4")
 
     Returns:
         Context window size in tokens. Uses AGENT_CONTEXT_WINDOW env var if set,
-        or looks up model in registry, or defaults to 128K.
+        or looks up model in OpenRouter registry, or defaults to 128K.
     """
     # Check environment override first
     override = os.environ.get("AGENT_CONTEXT_WINDOW")
@@ -53,19 +36,21 @@ def get_context_window(model: str | None) -> int:
             pass
 
     if not model:
-        return MODEL_CONTEXT_WINDOWS["default"]
+        return DEFAULT_CONTEXT_WINDOW
 
-    # Exact match
-    if model in MODEL_CONTEXT_WINDOWS:
-        return MODEL_CONTEXT_WINDOWS[model]
+    # Exact match in OpenRouter registry
+    if model in OPENROUTER_CONTEXT_WINDOWS:
+        return OPENROUTER_CONTEXT_WINDOWS[model]
 
-    # Prefix match (e.g., "gpt-4o-2024-11-20" -> "gpt-4o")
-    for key in MODEL_CONTEXT_WINDOWS:
-        if key != "default" and model.startswith(key):
-            return MODEL_CONTEXT_WINDOWS[key]
+    # Try with common provider prefixes (e.g., "gpt-5.1" -> "openai/gpt-5.1")
+    prefixes = ["openai", "anthropic", "google", "meta-llama", "mistralai", "x-ai", "deepseek", "qwen"]
+    for prefix in prefixes:
+        prefixed = f"{prefix}/{model}"
+        if prefixed in OPENROUTER_CONTEXT_WINDOWS:
+            return OPENROUTER_CONTEXT_WINDOWS[prefixed]
 
     # Unknown model, use default
-    return MODEL_CONTEXT_WINDOWS["default"]
+    return DEFAULT_CONTEXT_WINDOW
 
 
 def calculate_usage_percentage(
