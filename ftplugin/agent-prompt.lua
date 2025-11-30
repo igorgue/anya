@@ -3,7 +3,7 @@ local bufnr = vim.api.nvim_get_current_buf()
 local placeholder_ns = vim.api.nvim_create_namespace('agent_prompt_placeholder')
 
 -- Global placeholder text and highlight
-_G.agent_prompt_placeholder = 'type `:qa!` to exit'
+_G.agent_prompt_placeholder = 'type :qa! to exit'
 _G.agent_prompt_highlight = 'Comment'
 _G.placeholder_mark_id = nil
 

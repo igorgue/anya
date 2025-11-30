@@ -161,10 +161,6 @@ def display_tool_result(
         else:
             result_str = str(tool_result)
 
-        # Truncate very long results
-        if len(result_str) > 1000:
-            result_str = result_str[:1000] + "..."
-
         # Get pending tool call if it exists
         tool_info = None
         if hasattr(display_tool_call, "_pending") and display_tool_call._pending:
@@ -254,7 +250,11 @@ def display_tool_result(
 
         output_lines.append("**Result**:")
         output_lines.append("```")
-        output_lines.append(result_str)
+        # Truncate very long results for display (but not for patch which is handled separately)
+        display_result = result_str
+        if len(display_result) > 1000:
+            display_result = display_result[:1000] + "..."
+        output_lines.append(display_result)
         output_lines.append("```")
         output_lines.append("``````")
 

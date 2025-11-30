@@ -14,7 +14,7 @@ local ICON_APPLIED = ""
 local ICON_REJECTED = ""
 
 -- Colors for virtual text
-local HL_ACCEPT = "String"      -- Green
+local HL_ACCEPT = "OkMsg"       -- Green
 local HL_REJECT = "ErrorMsg"    -- Red
 local HL_PENDING = "Comment"    -- Grey
 
@@ -75,7 +75,7 @@ local function get_header_virt_text(state, additions, modifications, deletions)
     local function add_option(opt_state, label, key)
         local hl = "Comment"
         if state == opt_state then
-            if state == STATE_ACCEPT then hl = "String"
+            if state == STATE_ACCEPT then hl = "OkMsg"
             elseif state == STATE_REJECT then hl = "ErrorMsg"
             end
             -- Highlight the active option
