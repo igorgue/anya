@@ -218,7 +218,7 @@ class AgentPlugin(object):
             # Create closures that capture self, cached_cwd, and tool_budget
             # Budget tracking is done inline to preserve function signatures for the SDK
             def read_file(path: str) -> str:
-                """Read file content, supporting line range syntax: path@start-end."""
+                """Read file content."""
                 # Check budget before reading (heavy tool)
                 if tool_budget and not tool_budget.can_use_budget(heavy_tool=True):
                     return tool_budget.get_budget_exceeded_message()
@@ -231,8 +231,28 @@ class AgentPlugin(object):
                     tool_budget.consume(result)
                 
                 # Record file read for conversation history preservation
-                truncated = "FILE TOO LARGE" in result if isinstance(result, str) else False
+                truncated = "FILE TRUNCATED" in result if isinstance(result, str) else False
                 tool_tracker.record_file_read(path, result, truncated)
+                
+                return result
+            
+            def read_many_files(files: list) -> str:
+                """Read multiple files in a single call, with optional line ranges (file@start-end)."""
+                # Check budget before reading (heavy tool)
+                if tool_budget and not tool_budget.can_use_budget(heavy_tool=True):
+                    return tool_budget.get_budget_exceeded_message()
+                
+                cwd = getattr(self, "_cached_cwd", None)
+                result = tools.read_many_files(files, cwd)
+                
+                # Track token usage
+                if tool_budget and isinstance(result, str):
+                    tool_budget.consume(result)
+                
+                # Record multiple file reads for conversation history preservation
+                for file_spec in files:
+                    truncated = "FILE TOO LARGE" in result if isinstance(result, str) else False
+                    tool_tracker.record_file_read(file_spec, result, truncated)
                 
                 return result
             
@@ -286,6 +306,7 @@ class AgentPlugin(object):
             
             return {
                 'read_file': function_tool(read_file),
+                'read_many_files': function_tool(read_many_files),
                 'list_files': function_tool(list_files),
                 'search_repo': function_tool(search_repo),
                 'apply_patch': function_tool(apply_patch),
@@ -851,66 +872,95 @@ class AgentPlugin(object):
         try:
             # Remove /file from the text to get the rest of the prompt
             remaining_text = text.replace("/file", "").strip()
-
+            
             # Get the buffer number while we have it
             prompt_buf_num = self.nvim.current.buffer.number
-
+            
             self.nvim.exec_lua("""
                 local args = {...}
                 local remaining_prompt = args[1]
                 local prompt_buf_num = args[2]
-
-                -- Store for callback
+                
+                -- Store for callback (capture in globals for async access)
                 _G._agent_remaining_prompt = remaining_prompt
                 _G._agent_prompt_buf_num = prompt_buf_num
-
+                
                 local function apply_files_to_prompt(files)
                     if not files or #files == 0 then
+                        -- No files selected, restore prompt without /file
+                        local prompt_buf = _G._agent_prompt_buf_num
+                        if prompt_buf and vim.api.nvim_buf_is_valid(prompt_buf) then
+                            local remaining = _G._agent_remaining_prompt or ''
+                            if remaining ~= '' then
+                                local lines = vim.split(remaining, '\\n', {plain = true})
+                                vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, lines)
+                            else
+                                vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, {''})
+                            end
+                            local win = vim.fn.bufwinid(prompt_buf)
+                            if win > 0 then
+                                vim.api.nvim_set_current_win(win)
+                            end
+                        end
+                        _G._agent_remaining_prompt = nil
+                        _G._agent_prompt_buf_num = nil
                         return
                     end
-
+                    
                     local prompt_buf = _G._agent_prompt_buf_num
-                    if not vim.api.nvim_buf_is_valid(prompt_buf) then
+                    local remaining = _G._agent_remaining_prompt or ''
+                    
+                    if not prompt_buf or not vim.api.nvim_buf_is_valid(prompt_buf) then
                         vim.notify('Prompt buffer is not valid', vim.log.levels.ERROR)
+                        _G._agent_remaining_prompt = nil
+                        _G._agent_prompt_buf_num = nil
                         return
                     end
-
+                    
                     -- Build file references
                     local file_refs = {}
                     for _, file in ipairs(files) do
                         table.insert(file_refs, '@' .. file)
                     end
                     local file_text = table.concat(file_refs, ' ')
-
+                    
                     -- Create new text: files first, then remaining prompt
                     local new_text
-                    local remaining = _G._agent_remaining_prompt
-                    if remaining == '' or remaining == nil then
+                    if remaining == '' then
                         new_text = file_text
                     else
                         new_text = file_text .. '\\n\\n' .. remaining
                     end
-
+                    
                     -- Set buffer content
                     local new_lines = vim.split(new_text, '\\n', {plain = true})
                     vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, new_lines)
-
+                    
                     -- Set cursor to end and focus the window
                     local win = vim.fn.bufwinid(prompt_buf)
                     if win > 0 then
                         vim.api.nvim_set_current_win(win)
                         vim.api.nvim_win_set_cursor(win, {#new_lines, 0})
                     end
-
+                    
                     -- Clean up globals
                     _G._agent_remaining_prompt = nil
                     _G._agent_prompt_buf_num = nil
                 end
-
-                -- Open file picker with fallback = true to get current item if no multi-select
+                
+                -- Open file picker from project root to search all files recursively
+                local root = vim.fn.getcwd()
+                -- Try to find git root for the project
+                local git_root = vim.fn.systemlist('git rev-parse --show-toplevel 2>/dev/null')[1]
+                if git_root and git_root ~= '' and vim.fn.isdirectory(git_root) == 1 then
+                    root = git_root
+                end
+                
                 Snacks.picker.files({
+                    cwd = root,
+                    hidden = false,
                     confirm = function(picker, item)
-                        -- Get multi-selected items, or fall back to current item
+                        -- Get selected items, fallback to current item if none multi-selected
                         local items = picker:selected({fallback = true})
                         local files = {}
                         for _, selected_item in ipairs(items) do
@@ -923,12 +973,13 @@ class AgentPlugin(object):
                         vim.schedule(function()
                             apply_files_to_prompt(files)
                         end)
-                    end
+                    end,
                 })
             """, remaining_text, prompt_buf_num)
         except Exception as e:
             self.logger.error(f"Error in /file command: {e}")
             self.nvim.out_write(f"Error opening file picker: {str(e)}\n")
+    
     def _handle_user_prompt(self, text):
         """Handle user prompt submission."""
         # Reset tool tracker for new request
@@ -987,19 +1038,22 @@ class AgentPlugin(object):
         # Create a reference object for current_request_id
         current_request_id_ref = {'value': self._current_request_id}
         
-        await run_agent(
-            request_id=request_id,
-            nvim=self.nvim,
-            buffer_manager=self.buffer_manager,
-            logger=self.logger,
-            conversation_history=self._conversation_history,
-            cancel_flag_getter=lambda: self._cancel_requested,
-            current_request_id_ref=current_request_id_ref,
-            mcp_manager=self.mcp_manager,
-            tool_wrappers=tool_wrappers,
-            cached_cwd=self._cached_cwd,
-            emit_event_fn=lambda name, data: utils.emit_user_event(self.nvim, name, data)
-        )
+        try:
+            await run_agent(
+                request_id=request_id,
+                nvim=self.nvim,
+                buffer_manager=self.buffer_manager,
+                logger=self.logger,
+                conversation_history=self._conversation_history,
+                cancel_flag_getter=lambda: self._cancel_requested,
+                current_request_id_ref=current_request_id_ref,
+                mcp_manager=self.mcp_manager,
+                tool_wrappers=tool_wrappers,
+                cached_cwd=self._cached_cwd,
+                emit_event_fn=lambda name, data: utils.emit_user_event(self.nvim, name, data)
+            )
+        finally:
+            pass
         
         # Log budget usage after request
         self.logger.info(f"Tool budget usage: {tool_budget.get_status()}")

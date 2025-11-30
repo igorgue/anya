@@ -293,6 +293,21 @@ The `read_file` tool now supports intelligent line-range reading for large files
 - Limited to 64,000 bytes by default (configurable via `AGENT_MAX_READ_BYTES`)
 - Line-based truncation enables efficient exploration of large files
 
+### Reading Multiple Files
+
+The `read_many_files` tool reads multiple files in a single call, supporting the same line-range syntax:
+
+**Usage:**
+```
+read_many_files(["file1.py", "file2.py", "file3.py@50-100", "file4.py@start-end"])
+```
+
+**Benefits:**
+- Batch read multiple files with a single tool call
+- Supports all range specifications for each file independently
+- More token-efficient than multiple `read_file` calls
+- Useful for reading related files together (e.g., interfaces and implementations)
+
 ### Directory Listing
 - Recursive search excluding `.git` directories
 - Limited to 100 files to prevent excessive output

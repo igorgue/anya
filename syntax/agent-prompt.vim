@@ -13,8 +13,8 @@ syntax match AgentFileRef "@[a-zA-Z0-9_./-]\+"
 highlight link AgentFileRef Directory
 
 " Highlight slash commands like /help, /clear, /cancel
-" Use negative lookbehind to NOT match if preceded by @ or path characters
-syntax match AgentSlashCommand "\%(\%^\|[^a-zA-Z0-9_./@-]\)\@<=/[a-z]\+"
+" Match slash only at start of line or preceded by whitespace
+syntax match AgentSlashCommand "\%(\%^\|\s\)\@<=/[a-zA-Z]\+\%($\|\s\)"
 highlight link AgentSlashCommand Special
 
 let b:current_syntax = "agent-prompt"
