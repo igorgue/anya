@@ -7,25 +7,33 @@ from datetime import datetime
 
 
 def resolve_mentions(text: str, read_file_fn) -> str:
-    """Replaces @file mentions with file content.
+    """Replaces @file mentions with file content, supporting line range syntax.
+    
+    Syntax:
+        @filename.py              - Read first 100 lines (default)
+        @filename.py@start-end    - Read entire file
+        @filename.py@32-234       - Read lines 32-234
+        @filename.py@start-100    - Read lines 1-100
+        @filename.py@3202-end     - Read from line 3202 to end
     
     Args:
-        text: Text containing @file mentions
-        read_file_fn: Function to read file content, signature: fn(path) -> str
+        text: Text containing @file mentions (with optional @start-end ranges)
+        read_file_fn: Function to read file content, signature: fn(path_with_range) -> str
         
     Returns:
         Text with @mentions replaced with file contents
     """
     def replace_match(match):
-        path = match.group(1)
-        content = read_file_fn(path)
+        path_spec = match.group(1)
+        content = read_file_fn(path_spec)
         if content.startswith("Error"):
-            return f"[Error reading {path}: {content}]"
-        return f"\n--- Start of {path} ---\n{content}\n--- End of {path} ---\n"
+            return f"[Error reading {path_spec}: {content}]"
+        return f"\n{content}\n"
 
-    # Match @path/to/file or @filename
-    # Simple regex: @ followed by non-whitespace characters
-    return re.sub(r"@([\w./-]+)", replace_match, text)
+    # Match @path/to/file or @filename, optionally followed by @range
+    # Pattern: @ followed by path characters, optionally @start-end
+    # Allows: @file.py, @path/to/file.py, @file.py@32-100, @file.py@start-end, etc.
+    return re.sub(r"@([\w./-]+(?:@[\w-]+)?)", replace_match, text)
 
 
 def load_project_instructions(cwd: str) -> str:

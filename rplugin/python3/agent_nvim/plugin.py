@@ -218,7 +218,7 @@ class AgentPlugin(object):
             # Create closures that capture self, cached_cwd, and tool_budget
             # Budget tracking is done inline to preserve function signatures for the SDK
             def read_file(path: str) -> str:
-                """Read file content."""
+                """Read file content, supporting line range syntax: path@start-end."""
                 # Check budget before reading (heavy tool)
                 if tool_budget and not tool_budget.can_use_budget(heavy_tool=True):
                     return tool_budget.get_budget_exceeded_message()
@@ -231,7 +231,7 @@ class AgentPlugin(object):
                     tool_budget.consume(result)
                 
                 # Record file read for conversation history preservation
-                truncated = "FILE TRUNCATED" in result if isinstance(result, str) else False
+                truncated = "FILE TOO LARGE" in result if isinstance(result, str) else False
                 tool_tracker.record_file_read(path, result, truncated)
                 
                 return result

@@ -269,9 +269,29 @@ The command supports sophisticated natural language instructions for precise con
 ### Tool Details
 
 ### File Reading
+
+The `read_file` tool now supports intelligent line-range reading for large files.
+
+**Syntax:**
+- `@filename.py` - Read first 100 lines (default truncation for large files)
+- `@filename.py@start-end` - Read entire file
+- `@filename.py@32-234` - Read lines 32-234
+- `@filename.py@start-100` - Read lines 1-100
+- `@filename.py@280-end` - Read from line 280 to end
+
+**Behavior:**
+- Files with ≤100 lines: returned in full
+- Files with >100 lines: first 100 lines returned with metadata showing total line count
+- Metadata always includes:
+  - Total line count and file size
+  - Current line range being displayed
+  - Suggestions for reading more (e.g., "@101-200" to continue)
+- LLM receives full context to know file is too large and can request specific ranges
+- This approach saves tokens by avoiding unnecessary full-file reads while keeping LLM informed
+
+**Configuration:**
 - Limited to 64,000 bytes by default (configurable via `AGENT_MAX_READ_BYTES`)
-- Shows truncation notice for large files
-- Prevents repeated reading of large files to save tokens
+- Line-based truncation enables efficient exploration of large files
 
 ### Directory Listing
 - Recursive search excluding `.git` directories
