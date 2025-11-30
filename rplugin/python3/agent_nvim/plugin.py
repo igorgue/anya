@@ -25,6 +25,7 @@ from .tool_budget import ToolBudget
 from .compact_agent import CompactAgent, ContextAnalyzer
 from .compact_preview import CompactPreviewModal
 from . import tool_tracker
+from . import exec_permissions
 
 # Constants
 PLUGIN_NAME = "agent.nvim"
@@ -322,10 +323,44 @@ class AgentPlugin(object):
                 """Execute Lua code inside Neovim."""
                 return await tools.exec_lua(code, nvim=self.nvim, logger=self.logger)
 
-            def exec(command: str, timeout: int = 30) -> str:
-                """Execute a shell command."""
+            async def exec(command: str, timeout: int = 30) -> str:
+                """Execute a shell command with user permission."""
                 cwd = getattr(self, "_cached_cwd", None)
-                return tools.exec(command, cwd=cwd, timeout=timeout)
+
+                self.logger.info(f"exec called with command: {command}")
+
+                # YOLO mode: run without asking
+                if exec_permissions.is_yolo_mode():
+                    self.logger.info("YOLO mode: executing command without prompt")
+                    return tools.exec(command, cwd=cwd, timeout=timeout)
+
+                # Check if command is in allow list
+                allow_list = exec_permissions.load_allow_list()
+                self.logger.info(f"Allow list: {allow_list}")
+                self.logger.info(f"Allow list path: {exec_permissions.ALLOW_LIST_PATH}")
+
+                if exec_permissions.is_command_allowed(command):
+                    self.logger.info("Command in allow list, executing")
+                    return tools.exec(command, cwd=cwd, timeout=timeout)
+
+                self.logger.info("Command NOT in allow list, prompting user")
+
+                # Prompt user for permission
+                choice = await exec_permissions.prompt_exec_permission(
+                    self.nvim, command, self.logger
+                )
+
+                self.logger.info(f"User choice: {choice}")
+
+                if choice == "run":
+                    return tools.exec(command, cwd=cwd, timeout=timeout)
+                elif choice == "always":
+                    self.logger.info(f"Adding command to allow list: {command}")
+                    exec_permissions.add_to_allow_list(command)
+                    self.logger.info(f"Allow list after add: {exec_permissions.load_allow_list()}")
+                    return tools.exec(command, cwd=cwd, timeout=timeout)
+                else:
+                    return "Command execution was declined by user."
 
             return {
                 "read_file": function_tool(read_file),

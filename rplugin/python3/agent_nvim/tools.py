@@ -194,6 +194,13 @@ def list_files(path: str = ".", cwd: str = None) -> str:
             cwd = os.getcwd()
         target_dir = os.path.join(cwd, path)
 
+        # Check if directory exists
+        if not os.path.exists(target_dir):
+            return f"Error: Directory does not exist: {path}"
+
+        if not os.path.isdir(target_dir):
+            return f"Error: Path is not a directory: {path}"
+
         # Use os.walk but limit depth/count
         files = []
         for root, _, filenames in os.walk(target_dir):

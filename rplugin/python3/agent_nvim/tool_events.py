@@ -155,6 +155,40 @@ def display_tool_call(
         logger.error(f"Error storing tool call: {e}")
 
 
+def _detect_tool_error(tool_name, result_str):
+    """Detect if a tool result indicates an error.
+
+    Args:
+        tool_name: Name of the tool
+        result_str: The result string from the tool
+
+    Returns:
+        True if the result indicates an error, False otherwise
+    """
+    # exec command declined by user
+    if "Command execution was declined by user" in result_str:
+        return True
+
+    # exec command with non-zero exit code
+    if "Exit code:" in result_str:
+        # Extract exit code and check if non-zero
+        import re
+
+        match = re.search(r"Exit code:\s*(\d+)", result_str)
+        if match and int(match.group(1)) != 0:
+            return True
+
+    # exec command errors
+    if result_str.startswith("Error:") or result_str.startswith("Error executing"):
+        return True
+
+    # Timeout errors
+    if "Command timed out" in result_str:
+        return True
+
+    return False
+
+
 def display_tool_result(
     tool_result,
     nvim,
@@ -191,6 +225,7 @@ def display_tool_result(
 
         # Build combined output (no leading blank line)
         output_lines = []
+        is_error = False  # Track if this tool result indicates an error
 
         if tool_info:
             tool_name = tool_info["tool_name"]
@@ -294,6 +329,13 @@ def display_tool_result(
 
             args = tool_info["args"]
 
+            # Detect if this is an error result
+            is_error = _detect_tool_error(tool_name, result_str)
+
+            # Use different icons based on success/error
+            #  for success (checkmark),  for error (x mark)
+            icon = "" if is_error else ""
+
             # Extract first parameter for title
             first_param = None
             if args:
@@ -304,9 +346,9 @@ def display_tool_result(
                 param_str = str(first_param)
                 if len(param_str) > 80:
                     param_str = param_str[:77] + "..."
-                tool_title = f"**  {tool_name}** — `{param_str}`"
+                tool_title = f"** {icon}  {tool_name} ** — `{param_str}`"
             else:
-                tool_title = f"**  {tool_name}**"
+                tool_title = f"** {icon}  {tool_name} **"
 
             output_lines.append(tool_title)
             output_lines.append("``````")
@@ -320,6 +362,10 @@ def display_tool_result(
             else:
                 output_lines.append("  (no arguments)")
 
+        # Detect error for cases where tool_info is None
+        if not tool_info:
+            is_error = _detect_tool_error("unknown", result_str)
+
         output_lines.append("**Result**:")
         output_lines.append("```")
         # Truncate very long results for display (but not for patch which is handled separately)
@@ -329,13 +375,12 @@ def display_tool_result(
         output_lines.append(display_result)
         output_lines.append("```")
         output_lines.append("``````")
-
-        fold_summary = f"**  {tool_name}**"
+        output_lines.append("")  # Blank line for separation from next LLM output
 
         # Append content and fold it, then resume streaming
+        # Pass fold_error=True if this is an error result
         def append_and_resume():
-            append_content_fn(output_lines, fold=True)
-            # No blank line needed here - flush_and_pause handles spacing before next content
+            append_content_fn(output_lines, fold=True, fold_error=is_error)
             # Resume streaming after tool output is written
             nvim.exec_lua("_G.agent_stream_paused = false")
             # Emit event to reset fidget back to "thinking"
@@ -526,7 +571,7 @@ def handle_tool_call_event(
                         "AgentToolCall",
                         {
                             "id": request_id,
-                            "message": f"{tool_name}...",
+                            "message": f"{tool_name}",
                             "tool": tool_name,
                         },
                     )

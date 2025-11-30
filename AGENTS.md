@@ -113,9 +113,15 @@ Dependencies are installed to `~/.local/share/agent.nvim/venv` and injected into
 - `AGENT_MAX_READ_BYTES` - Maximum bytes to read from files (default: 64000)
 - `AGENT_CONTEXT_WINDOW` - Override context window size (optional)
 - `AGENT_COMPACT_MODEL` - Custom model for CompactAgent (default: same as AGENT_MODEL)
-- `AGENT_YOLO` - Enable YOLO mode: auto-apply patches without user approval (set to 1, true, or yes)
+- `AGENT_YOLO` - Enable YOLO mode: auto-apply patches and exec commands without user approval (set to 1, true, or yes)
 
 ## Special Considerations
+
+### Exec Command Permissions
+- Shell commands require user approval before execution via `vim.ui.select`
+- Three options: "Run" (one-time), "Do not run" (deny), "Allow always" (permanent)
+- Allowed commands are stored in `~/.config/agent.nvim/exec_allow_list.txt`
+- YOLO mode (`AGENT_YOLO=1`) bypasses all confirmation prompts
 
 ### Path Management
 - The plugin dynamically discovers and injects venv site-packages into sys.path

@@ -741,12 +741,13 @@ class BufferManager:
                 "agent_nvim_blink_file_completion_callback(...)", [[], callback_id]
             )
 
-    def append_content(self, lines, fold=False):
+    def append_content(self, lines, fold=False, fold_error=False):
         """Append one or more lines to the content buffer.
 
         Args:
             lines: List of strings to append
             fold: If True, fold the appended content immediately
+            fold_error: If True, highlight the fold header as an error (red)
         """
         if hasattr(self, "content_buf") and self.content_buf and self.content_buf.valid:
             # Ensure every item is a single line
@@ -760,19 +761,20 @@ class BufferManager:
 
             def wrapped_append():
                 """Append and scroll."""
-                self._append_and_scroll(processed, fold=fold)
+                self._append_and_scroll(processed, fold=fold, fold_error=fold_error)
 
             # Write the processed list to the buffer
             self.nvim.async_call(wrapped_append)
             # Enable render-markdown after content is added
             self.nvim.async_call(self.enable_render_markdown)
 
-    def _append_and_scroll(self, processed, fold=False):
+    def _append_and_scroll(self, processed, fold=False, fold_error=False):
         """Helper to append lines and autoscroll content buffer.
 
         Args:
             processed: List of lines to append
             fold: If True, create a fold for the appended lines
+            fold_error: If True, highlight the fold header as an error (red)
         """
         if (
             not hasattr(self, "content_buf")
@@ -818,7 +820,7 @@ class BufferManager:
             # start_line is 0-indexed count, so +1 for 1-indexed vim line
             fold_start = start_line + 1
             fold_end = end_line
-            self._create_fold(bufnr, fold_start, fold_end)
+            self._create_fold(bufnr, fold_start, fold_end, fold_error=fold_error)
 
         # Autoscroll to bottom only if autoscroll is enabled
         # Do this AFTER folding to ensure cursor is positioned correctly
@@ -856,18 +858,23 @@ class BufferManager:
             except Exception:
                 pass
 
-    def _create_fold(self, bufnr, start_line, end_line):
+    def _create_fold(self, bufnr, start_line, end_line, fold_error=False):
         """Create a fold in the buffer.
 
         Args:
             bufnr: Buffer number
             start_line: Start line (1-indexed)
             end_line: End line (1-indexed)
+            fold_error: If True, highlight the fold header as an error (red)
         """
         try:
-            # Add highlight to the first line (tool output title) using OkMsg
+            # Add highlight to the first line (tool output title)
+            # Use ErrorMsg for errors, OkMsg for success
             # start_line is 1-indexed, nvim_buf_add_highlight uses 0-indexed
-            self.nvim.api.buf_add_highlight(bufnr, -1, "OkMsg", start_line - 1, 0, -1)
+            highlight_group = "ErrorMsg" if fold_error else "OkMsg"
+            self.nvim.api.buf_add_highlight(
+                bufnr, -1, highlight_group, start_line - 1, 0, -1
+            )
 
             self.nvim.exec_lua(
                 "require('agent_nvim.folds').create_fold(...)",
