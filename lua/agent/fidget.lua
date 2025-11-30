@@ -43,13 +43,6 @@ function M:init()
 			local handle = M:get_progress_handle(event.data.id)
 			if handle then
 				handle.message = event.data.message or "processing result"
-				-- Reset back to "thinking" after showing result message briefly
-				vim.defer_fn(function()
-					local current_handle = M:get_progress_handle(event.data.id)
-					if current_handle then
-						current_handle.message = "thinking"
-					end
-				end, 300)
 			end
 		end,
 	})
