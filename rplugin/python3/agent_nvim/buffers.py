@@ -327,7 +327,17 @@ class BufferManager:
         # Highlight user prompts (lower priority so file refs can override)
         self._highlight_user_prompt(start_line, end_line)
 
+        # Create fold if requested BEFORE autoscroll
+        # This ensures the window is positioned correctly after folding
+        if fold and len(processed) > 1:
+            bufnr = self.content_buf.number
+            # start_line is 0-indexed count, so +1 for 1-indexed vim line
+            fold_start = start_line + 1
+            fold_end = end_line
+            self._create_fold(bufnr, fold_start, fold_end)
+
         # Autoscroll to bottom only if autoscroll is enabled
+        # Do this AFTER folding to ensure cursor is positioned correctly
         for win in self.nvim.windows:
             if win.buffer == self.content_buf:
                 try:
@@ -338,9 +348,17 @@ class BufferManager:
                     autoscroll_enabled = 1
                 
                 # Only scroll if autoscroll is enabled and position is valid
-                if autoscroll_enabled and end_line > 0:
+                if autoscroll_enabled:
                     try:
-                        win.cursor = (end_line, 0)
+                        # If we created a fold, scroll to the line containing the fold (first line of folded region)
+                        # Otherwise scroll to the end of the appended content
+                        if fold and len(processed) > 1:
+                            # Scroll to the first line of the fold (where the summary is)
+                            win.cursor = (start_line + 1, 0)
+                        else:
+                            # Scroll to the end of appended content
+                            if end_line > 0:
+                                win.cursor = (end_line, 0)
                     except Exception:
                         # Cursor position invalid, skip scrolling
                         pass
@@ -351,14 +369,6 @@ class BufferManager:
                 self.nvim.current.window = current_win
             except Exception:
                 pass
-        
-        # Create fold if requested
-        if fold and len(processed) > 1:
-            bufnr = self.content_buf.number
-            # start_line is 0-indexed count, so +1 for 1-indexed vim line
-            fold_start = start_line + 1
-            fold_end = end_line
-            self._create_fold(bufnr, fold_start, fold_end)
     
     def _create_fold(self, bufnr, start_line, end_line):
          """Create a fold in the buffer.
