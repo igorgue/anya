@@ -42,5 +42,14 @@ vim.api.nvim_buf_attach(bufnr, false, {
   end
 })
 
+-- Update placeholder on window resize
+vim.api.nvim_create_autocmd('WinResized', {
+  callback = function()
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      update_placeholder()
+    end
+  end
+})
+
 -- Initial placeholder display
 update_placeholder()
