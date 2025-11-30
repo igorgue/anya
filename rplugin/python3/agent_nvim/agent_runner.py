@@ -77,29 +77,33 @@ async def run_agent(
             emit_event_fn("AgentRequestFinished", {"id": request_id, "status": "error"})
             return
 
-        # Configure custom OpenAI client if base URL or API key provided
-        base_url = os.environ.get("AGENT_BASE_URL")
-        api_key = os.environ.get("AGENT_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        # Get custom run config for OpenRouter models with '/' in name
+        from .model_provider import get_custom_run_config
 
-        if base_url or api_key:
-            client_kwargs = {}
-            if base_url:
-                client_kwargs["base_url"] = base_url
-            if api_key:
-                client_kwargs["api_key"] = api_key
+        custom_run_config = get_custom_run_config()
 
-            # Create custom client and set it as default
-            custom_client = AsyncOpenAI(**client_kwargs)
-            set_default_openai_client(custom_client, use_for_tracing=False)
+        # If not using custom provider, configure default client (for responses API)
+        if not custom_run_config:
+            base_url = os.environ.get("AGENT_BASE_URL")
+            api_key = os.environ.get("AGENT_API_KEY") or os.environ.get(
+                "OPENAI_API_KEY"
+            )
 
-            # Allow choosing API type via environment variable
-            # Options: 'responses' (default) or 'chat_completions'
-            api_type = os.environ.get("AGENT_API_TYPE", "responses")
-            set_default_openai_api(api_type)
+            if base_url or api_key:
+                client_kwargs = {}
+                if base_url:
+                    client_kwargs["base_url"] = base_url
+                if api_key:
+                    client_kwargs["api_key"] = api_key
 
-            # Disable tracing for custom providers by default
-            if os.environ.get("AGENT_DISABLE_TRACING", "1") == "1":
-                set_tracing_disabled(True)
+                custom_client = AsyncOpenAI(**client_kwargs)
+                set_default_openai_client(custom_client, use_for_tracing=False)
+
+                api_type = os.environ.get("AGENT_API_TYPE", "responses")
+                set_default_openai_api(api_type)
+
+                if os.environ.get("AGENT_DISABLE_TRACING", "1") == "1":
+                    set_tracing_disabled(True)
 
         # Load instructions
         from .utils import load_project_instructions
@@ -300,10 +304,19 @@ Constraints:
 
         hooks = LimitHooks()
 
+        # Build run kwargs
+        run_kwargs = {
+            "input": input_messages,
+            "max_turns": max_turns,
+            "hooks": hooks,
+        }
+
+        # Use custom model provider if configured (for OpenRouter, etc.)
+        if custom_run_config:
+            run_kwargs["run_config"] = custom_run_config
+
         # Run the agent with streaming and conversation history
-        result_stream = Runner.run_streamed(
-            agent, input=input_messages, max_turns=max_turns, hooks=hooks
-        )
+        result_stream = Runner.run_streamed(agent, **run_kwargs)
 
         # Cache buffer number before async loop
         content_bufnr = (

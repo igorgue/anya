@@ -13,10 +13,33 @@ local ICON_PENDING = "○"
 local ICON_APPLIED = ""
 local ICON_REJECTED = ""
 
--- Colors for virtual text
-local HL_ACCEPT = "OkMsg"       -- Green
-local HL_REJECT = "ErrorMsg"    -- Red
-local HL_PENDING = "Comment"    -- Grey
+-- Highlight groups for virtual text controls (with Visual background)
+local HL_ACCEPT = "AgentDiffAccept"
+local HL_REJECT = "AgentDiffReject"
+local HL_PENDING = "AgentDiffPending"
+
+-- Setup highlight groups on first load
+local function setup_highlights()
+    -- Get colors from existing groups
+    local ok_hl = vim.api.nvim_get_hl(0, { name = "OkMsg", link = false })
+    if not ok_hl.fg then
+        ok_hl = vim.api.nvim_get_hl(0, { name = "DiagnosticOk", link = false })
+    end
+    if not ok_hl.fg then
+        ok_hl = vim.api.nvim_get_hl(0, { name = "String", link = false })
+    end
+    
+    local err_hl = vim.api.nvim_get_hl(0, { name = "ErrorMsg", link = false })
+    local normal_hl = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+    local visual_hl = vim.api.nvim_get_hl(0, { name = "Visual", link = false })
+    
+    -- Set highlight groups with Visual background and Normal foreground for pending
+    vim.api.nvim_set_hl(0, HL_ACCEPT, { fg = ok_hl.fg, bg = visual_hl.bg })
+    vim.api.nvim_set_hl(0, HL_REJECT, { fg = err_hl.fg, bg = visual_hl.bg })
+    vim.api.nvim_set_hl(0, HL_PENDING, { fg = normal_hl.fg, bg = visual_hl.bg })
+end
+
+setup_highlights()
 
 -- Store patch data by extmark id
 local patch_registry = {}
@@ -57,7 +80,7 @@ end
 local function get_header_virt_text(state, additions, modifications, deletions)
     local virt_text = {}
     
-    -- Status Icon
+    -- Determine icon and highlight based on state
     local icon = ICON_PENDING
     local icon_hl = HL_PENDING
     
@@ -69,28 +92,29 @@ local function get_header_virt_text(state, additions, modifications, deletions)
         icon_hl = HL_REJECT
     end
     
-    table.insert(virt_text, { icon .. "  ", icon_hl })
-    
-    -- Controls
+    -- Controls first
     local function add_option(opt_state, label, key)
-        local hl = "Comment"
+        local hl = HL_PENDING
         if state == opt_state then
-            if state == STATE_ACCEPT then hl = "OkMsg"
-            elseif state == STATE_REJECT then hl = "ErrorMsg"
+            if state == STATE_ACCEPT then hl = HL_ACCEPT
+            elseif state == STATE_REJECT then hl = HL_REJECT
             end
             -- Highlight the active option
             table.insert(virt_text, { string.format("[%s: %s]", key, label), hl })
         else
-            table.insert(virt_text, { string.format("%s: %s", key, label), "Comment" })
+            table.insert(virt_text, { string.format("%s: %s", key, label), HL_PENDING })
         end
-        table.insert(virt_text, { " | ", "Comment" })
+        table.insert(virt_text, { " | ", HL_PENDING })
     end
     
     add_option(STATE_ACCEPT, "apply", "1")
     table.remove(virt_text) -- Remove trailing pipe
-    table.insert(virt_text, { " | ", "Comment" })
+    table.insert(virt_text, { " | ", HL_PENDING })
     add_option(STATE_REJECT, "reject", "2")
     table.remove(virt_text) -- Remove last pipe
+    
+    -- Icon at the end
+    table.insert(virt_text, { " " .. icon .. " ", icon_hl })
     
     return virt_text
 end
@@ -263,7 +287,6 @@ function M.render_diff(bufnr, content)
         virt_text = virt_text,
         virt_text_pos = "right_align",
         end_row = end_row,
-        hl_group = "Normal",
     })
     
     patch_registry[id] = {

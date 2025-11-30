@@ -5,7 +5,6 @@ import os
 import logging
 import asyncio
 import uuid
-import re
 
 # Try to import typing, with fallback for older Python versions
 try:
@@ -194,7 +193,7 @@ class AgentPlugin(object):
             self.buffer_manager.append_content(
                 [
                     "> **Context compacted successfully**",
-                    f"Conversation reduced to essential context.",
+                    "Conversation reduced to essential context.",
                     "",
                 ]
             )
@@ -397,14 +396,14 @@ class AgentPlugin(object):
                 if not prompt_text or type(prompt_text) ~= "string" or prompt_text == "" then
                     return false
                 end
-                
+
                 -- Use existing global history instance
                 if not _G.agent_prompt_history then
                     -- Initialize if missing (shouldn't happen if ftplugin loaded)
                     local history = require('agent_nvim.history')
                     _G.agent_prompt_history = history.new()
                 end
-                
+
                 -- Record directly to the history instance
                 local success = _G.agent_prompt_history:record(prompt_text)
                 _G.agent_prompt_history:reset()
@@ -414,7 +413,7 @@ class AgentPlugin(object):
             )
 
             if not result:
-                self.logger.warning(f"Failed to save prompt to history")
+                self.logger.warning("Failed to save prompt to history")
 
         except Exception as e:
             self.logger.error(f"Failed to save prompt to history: {e}")
@@ -510,8 +509,10 @@ class AgentPlugin(object):
                     )
                 )
                 self.nvim.async_call(
-                    self.buffer_manager.append_content, ["", feedback_text, ""]
+                    self.buffer_manager.append_content, ["", feedback_text]
                 )
+
+                self.nvim.async_call(self.buffer_manager.append_content, ["", ""])
 
                 # Continue the agent automatically (without header)
                 self._continue_agent_after_patch(skip_header=True)
@@ -541,7 +542,9 @@ class AgentPlugin(object):
         self._agent_busy = True
 
         # Run agent in background
-        asyncio.create_task(self._run_agent_wrapper(request_id, skip_header=skip_header))
+        asyncio.create_task(
+            self._run_agent_wrapper(request_id, skip_header=skip_header)
+        )
 
     @pynvim.command("AgentHistoryTest", sync=True)
     def agent_history_test(self):
@@ -551,14 +554,14 @@ class AgentPlugin(object):
             if not _G.agent_prompt_history then
                 return {status = "ERROR", message = "History instance not found"}
             end
-            
+
             -- Test saving
             local test_msg = "History test at " .. os.date()
             local save_result = _G.AgentHistorySavePrompt(test_msg)
-            
+
             -- Get diagnostic info
             local diagnostic = _G.agent_prompt_history:diagnostic()
-            
+
             return {
                 status = save_result and "OK" or "SAVE_FAILED",
                 test_message = test_msg,
@@ -569,7 +572,7 @@ class AgentPlugin(object):
             [],
         )
 
-        self.nvim.out_write(f"History Test Results:\n")
+        self.nvim.out_write("History Test Results:\n")
         self.nvim.out_write(f"Status: {result['status']}\n")
         self.nvim.out_write(f"Test Message: {result['test_message']}\n")
         self.nvim.out_write(f"Save Result: {result['save_result']}\n")
@@ -577,11 +580,11 @@ class AgentPlugin(object):
         self.nvim.out_write(f"Entry Count: {result['diagnostic']['entry_count']}\n")
 
         if result["diagnostic"]["issues"] and len(result["diagnostic"]["issues"]) > 0:
-            self.nvim.out_write(f"Issues:\n")
+            self.nvim.out_write("Issues:\n")
             for issue in result["diagnostic"]["issues"]:
                 self.nvim.out_write(f"  - {issue}\n")
         else:
-            self.nvim.out_write(f"No issues found\n")
+            self.nvim.out_write("No issues found\n")
 
     @pynvim.function("AgentComplete", sync=True)
     def agent_complete(self, args):
@@ -685,7 +688,7 @@ class AgentPlugin(object):
                         "... [content compacted] ...",
                         "",
                         f"Original conversation: {len(conversation_history)} messages",
-                        f"Compacted with fallback mode",
+                        "Compacted with fallback mode",
                         "*Install OpenAI agents SDK for advanced AI-powered compaction*",
                     ]
                 )
@@ -984,9 +987,9 @@ class AgentPlugin(object):
                     self.nvim.async_call(
                         self.buffer_manager.append_content,
                         [
-                            f"> **Compaction complete**",
+                            "> **Compaction complete**",
                             f"Tokens reduced from ~{original_tokens:,} to ~{summary_tokens:,} ({reduction:.1f}% reduction)",
-                            f"Conversation context preserved",
+                            "Conversation context preserved",
                             "",
                         ],
                     )
@@ -1072,11 +1075,11 @@ class AgentPlugin(object):
                 local args = {...}
                 local remaining_prompt = args[1]
                 local prompt_buf_num = args[2]
-                
+
                 -- Store for callback (capture in globals for async access)
                 _G._agent_remaining_prompt = remaining_prompt
                 _G._agent_prompt_buf_num = prompt_buf_num
-                
+
                 local function apply_files_to_prompt(files)
                     if not files or #files == 0 then
                         -- No files selected, restore prompt without /file
@@ -1098,24 +1101,24 @@ class AgentPlugin(object):
                         _G._agent_prompt_buf_num = nil
                         return
                     end
-                    
+
                     local prompt_buf = _G._agent_prompt_buf_num
                     local remaining = _G._agent_remaining_prompt or ''
-                    
+
                     if not prompt_buf or not vim.api.nvim_buf_is_valid(prompt_buf) then
                         vim.notify('Prompt buffer is not valid', vim.log.levels.ERROR)
                         _G._agent_remaining_prompt = nil
                         _G._agent_prompt_buf_num = nil
                         return
                     end
-                    
+
                     -- Build file references
                     local file_refs = {}
                     for _, file in ipairs(files) do
                         table.insert(file_refs, '@' .. file)
                     end
                     local file_text = table.concat(file_refs, ' ')
-                    
+
                     -- Create new text: files first, then remaining prompt
                     local new_text
                     if remaining == '' then
@@ -1123,23 +1126,23 @@ class AgentPlugin(object):
                     else
                         new_text = file_text .. '\\n\\n' .. remaining
                     end
-                    
+
                     -- Set buffer content
                     local new_lines = vim.split(new_text, '\\n', {plain = true})
                     vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, new_lines)
-                    
+
                     -- Set cursor to end and focus the window
                     local win = vim.fn.bufwinid(prompt_buf)
                     if win > 0 then
                         vim.api.nvim_set_current_win(win)
                         vim.api.nvim_win_set_cursor(win, {#new_lines, 0})
                     end
-                    
+
                     -- Clean up globals
                     _G._agent_remaining_prompt = nil
                     _G._agent_prompt_buf_num = nil
                 end
-                
+
                 -- Open file picker from project root to search all files recursively
                 local root = vim.fn.getcwd()
                 -- Try to find git root for the project
@@ -1147,7 +1150,7 @@ class AgentPlugin(object):
                 if git_root and git_root ~= '' and vim.fn.isdirectory(git_root) == 1 then
                     root = git_root
                 end
-                
+
                 Snacks.picker.files({
                     cwd = root,
                     hidden = false,

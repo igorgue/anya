@@ -284,10 +284,17 @@ class CompactAgent:
 
             # Run the agent using Runner
             async def run_compact():
-                result = await Runner.run(
-                    self.agent,
-                    f"{target_prompt}\n\nCONVERSATION:\n{conversation_text}\n\nProvide a concise summary that preserves key decisions and context.",
-                )
+                from .model_provider import get_custom_run_config
+
+                run_kwargs = {
+                    "starting_agent": self.agent,
+                    "input": f"{target_prompt}\n\nCONVERSATION:\n{conversation_text}\n\nProvide a concise summary that preserves key decisions and context.",
+                }
+                custom_run_config = get_custom_run_config()
+                if custom_run_config:
+                    run_kwargs["run_config"] = custom_run_config
+
+                result = await Runner.run(**run_kwargs)
                 return (
                     str(result.final_output)
                     if hasattr(result, "final_output")
@@ -441,7 +448,17 @@ class CompactAgent:
             prompt += f"INSTRUCTIONS:\n{instructions}\n\nProvide a concise summary that follows the user's instructions."
 
             async def run_with_instructions():
-                result = await Runner.run(instruction_agent, prompt)
+                from .model_provider import get_custom_run_config
+
+                run_kwargs = {
+                    "starting_agent": instruction_agent,
+                    "input": prompt,
+                }
+                custom_run_config = get_custom_run_config()
+                if custom_run_config:
+                    run_kwargs["run_config"] = custom_run_config
+
+                result = await Runner.run(**run_kwargs)
                 return (
                     str(result.final_output)
                     if hasattr(result, "final_output")
