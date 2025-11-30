@@ -13,7 +13,9 @@ M.logo_lines = {
 -- Full welcome message structure
 M.welcome_message = {
   "```",
-  table.unpack(M.logo_lines),
+  "░█▀█░█▀▀░█▀▀░█▀█░▀█▀",
+  "░█▀█░█░█░█▀▀░█░█░░█░",
+  "░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░",
   "```",
   "",
   "> Type your request in the prompt below.",
@@ -245,23 +247,24 @@ function M.animate_logo_scan(bufnr, on_complete)
   vim.api.nvim_set_hl(0, "AgentLogoGlow3", { fg = "#888888" })
   vim.api.nvim_set_hl(0, "AgentLogoDim", { fg = "#444444" })
 
-  -- Unpredictable speed: randomly vary the interval
-  local base_interval = 40
+  -- Smoother animation with occasional long pauses
   local tick_count = 0
-  local current_interval = base_interval
+  local pause_until = 0 -- timestamp when pause ends
 
   local function get_next_interval()
+    -- Occasionally pause for 1-3 seconds
+    if math.random() < 0.02 then
+      return math.random(1000, 3000) -- Long pause
+    end
+
+    -- Otherwise smooth movement with slight variation
     local rand = math.random()
-    if rand < 0.1 then
-      return 120 -- Very slow pause
-    elseif rand < 0.2 then
-      return 80 -- Slow
-    elseif rand < 0.7 then
-      return 40 -- Normal
+    if rand < 0.7 then
+      return 25 -- Smooth normal speed
     elseif rand < 0.9 then
-      return 20 -- Fast
+      return 35 -- Slightly slower
     else
-      return 10 -- Very fast burst
+      return 15 -- Quick burst
     end
   end
 
