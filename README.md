@@ -1,9 +1,8 @@
 # agent.nvim
 
-An agentic Neovim plugin powered by the OpenAI Agents SDK.
+An AI-proweed Neovim plugin built on te OpenAI Agets SDK.
 
 ## Features
-
 - **Chat Interface**: Split-window layout with streaming responses.
 - **Context Awareness**: Reference files using `@filename` (with autocompletion).
 - **Tools**: The agent can read files, list directories, and search the repository.
@@ -17,9 +16,8 @@ An agentic Neovim plugin powered by the OpenAI Agents SDK.
 ### Prerequisites
 
 - Neovim >= 0.9.0
-- Python 3.10+
+- Python 3.8+
 - `pynvim` (installed globally or in your Neovim provider environment)
-
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
 
 ```lua

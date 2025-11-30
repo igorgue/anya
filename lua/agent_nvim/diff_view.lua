@@ -20,23 +20,23 @@ local HL_PENDING = "AgentDiffPending"
 
 -- Setup highlight groups on first load
 local function setup_highlights()
-    -- Get colors from existing groups
-    local ok_hl = vim.api.nvim_get_hl(0, { name = "OkMsg", link = false })
-    if not ok_hl.fg then
-        ok_hl = vim.api.nvim_get_hl(0, { name = "DiagnosticOk", link = false })
-    end
-    if not ok_hl.fg then
-        ok_hl = vim.api.nvim_get_hl(0, { name = "String", link = false })
-    end
-    
-    local err_hl = vim.api.nvim_get_hl(0, { name = "ErrorMsg", link = false })
-    local normal_hl = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
-    local visual_hl = vim.api.nvim_get_hl(0, { name = "Visual", link = false })
-    
-    -- Set highlight groups with Visual background and Normal foreground for pending
-    vim.api.nvim_set_hl(0, HL_ACCEPT, { fg = ok_hl.fg, bg = visual_hl.bg })
-    vim.api.nvim_set_hl(0, HL_REJECT, { fg = err_hl.fg, bg = visual_hl.bg })
-    vim.api.nvim_set_hl(0, HL_PENDING, { fg = normal_hl.fg, bg = visual_hl.bg })
+	-- Get colors from existing groups
+	local ok_hl = vim.api.nvim_get_hl(0, { name = "OkMsg", link = false })
+	if not ok_hl.fg then
+		ok_hl = vim.api.nvim_get_hl(0, { name = "DiagnosticOk", link = false })
+	end
+	if not ok_hl.fg then
+		ok_hl = vim.api.nvim_get_hl(0, { name = "String", link = false })
+	end
+
+	local err_hl = vim.api.nvim_get_hl(0, { name = "ErrorMsg", link = false })
+	local normal_hl = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+	local visual_hl = vim.api.nvim_get_hl(0, { name = "Visual", link = false })
+
+	-- Set highlight groups with Visual background and Normal foreground for pending
+	vim.api.nvim_set_hl(0, HL_ACCEPT, { fg = ok_hl.fg, bg = visual_hl.bg })
+	vim.api.nvim_set_hl(0, HL_REJECT, { fg = err_hl.fg, bg = visual_hl.bg })
+	vim.api.nvim_set_hl(0, HL_PENDING, { fg = normal_hl.fg, bg = visual_hl.bg })
 end
 
 setup_highlights()
@@ -46,352 +46,386 @@ local patch_registry = {}
 
 --- Parse diff stats from patch content
 local function parse_diff_stats(content)
-    local additions = 0
-    local deletions = 0
-    local modifications = 0
-    
-    for _, line in ipairs(vim.split(content, "\n")) do
-        if line:match("^%+") and not line:match("^%+%+%+") then
-            additions = additions + 1
-        elseif line:match("^%-") and not line:match("^%-%-%-") then
-            deletions = deletions + 1
-        end
-    end
-    
-    return additions, modifications, deletions
+	local additions = 0
+	local deletions = 0
+	local modifications = 0
+
+	for _, line in ipairs(vim.split(content, "\n")) do
+		if line:match("^%+") and not line:match("^%+%+%+") then
+			additions = additions + 1
+		elseif line:match("^%-") and not line:match("^%-%-%-") then
+			deletions = deletions + 1
+		end
+	end
+
+	return additions, modifications, deletions
 end
 
 --- Parse filename from patch content
 local function parse_filename(content)
-    -- Try diff --git header first
-    local name = content:match("diff %-%-git a/([%S]+)")
-    if not name then
-        -- Try +++ header
-        name = content:match("%+%+%+ b/([%S]+)")
-    end
-    if not name then
-        -- Try --- header
-        name = content:match("%-%-%- a/([%S]+)")
-    end
-    return name or "unknown file"
+	-- Try diff --git header first
+	local name = content:match("diff %-%-git a/([%S]+)")
+	if not name then
+		-- Try +++ header
+		name = content:match("%+%+%+ b/([%S]+)")
+	end
+	if not name then
+		-- Try --- header
+		name = content:match("%-%-%- a/([%S]+)")
+	end
+	return name or "unknown file"
 end
 
 --- Get virtual text for the header based on state
 local function get_header_virt_text(state, additions, modifications, deletions)
-    local virt_text = {}
-    
-    -- Determine icon and highlight based on state
-    local icon = ICON_PENDING
-    local icon_hl = HL_PENDING
-    
-    if state == STATE_ACCEPT then
-        icon = ICON_APPLIED
-        icon_hl = HL_ACCEPT
-    elseif state == STATE_REJECT then
-        icon = ICON_REJECTED
-        icon_hl = HL_REJECT
-    end
-    
-    -- Controls first
-    local function add_option(opt_state, label, key)
-        local hl = HL_PENDING
-        if state == opt_state then
-            if state == STATE_ACCEPT then hl = HL_ACCEPT
-            elseif state == STATE_REJECT then hl = HL_REJECT
-            end
-            -- Highlight the active option
-            table.insert(virt_text, { string.format("%s: %s", key, label), hl })
-        else
-            table.insert(virt_text, { string.format("%s: %s", key, label), HL_PENDING })
-        end
-        table.insert(virt_text, { " | ", HL_PENDING })
-    end
-    
-    add_option(STATE_ACCEPT, "apply", "1")
-    table.remove(virt_text) -- Remove trailing pipe
-    table.insert(virt_text, { " | ", HL_PENDING })
-    add_option(STATE_REJECT, "reject", "2")
-    table.remove(virt_text) -- Remove last pipe
-    
-    -- Icon at the end
-    table.insert(virt_text, { " " .. icon .. " ", icon_hl })
-    
-    return virt_text
+	local virt_text = {}
+
+	-- Determine icon and highlight based on state
+	local icon = ICON_PENDING
+	local icon_hl = HL_PENDING
+
+	if state == STATE_ACCEPT then
+		icon = ICON_APPLIED
+		icon_hl = HL_ACCEPT
+	elseif state == STATE_REJECT then
+		icon = ICON_REJECTED
+		icon_hl = HL_REJECT
+	end
+
+	-- Controls first
+	local function add_option(opt_state, label, key)
+		local hl = HL_PENDING
+		if state == opt_state then
+			if state == STATE_ACCEPT then
+				hl = HL_ACCEPT
+			elseif state == STATE_REJECT then
+				hl = HL_REJECT
+			end
+			-- Highlight the active option
+			table.insert(virt_text, { string.format("%s: %s", key, label), hl })
+		else
+			table.insert(virt_text, { string.format("%s: %s", key, label), HL_PENDING })
+		end
+		table.insert(virt_text, { " | ", HL_PENDING })
+	end
+
+	add_option(STATE_ACCEPT, "apply", "1")
+	table.remove(virt_text) -- Remove trailing pipe
+	table.insert(virt_text, { " | ", HL_PENDING })
+	add_option(STATE_REJECT, "reject", "2")
+	table.remove(virt_text) -- Remove last pipe
+
+	-- Icon at the end
+	table.insert(virt_text, { " " .. icon .. " ", icon_hl })
+
+	return virt_text
 end
 
 --- Update the header line text (Stats) and virtual text (Controls)
 local function update_patch_header(bufnr, extmark_id)
-    local patch_data = patch_registry[extmark_id]
-    if not patch_data then return end
-    
-    local extmark = vim.api.nvim_buf_get_extmark_by_id(bufnr, ns_id, extmark_id, { details = true })
-    if not extmark or #extmark == 0 then return end
-    
-    local row = extmark[1]
-    
-    local adds, mods, dels = parse_diff_stats(patch_data.content)
-    local filename = parse_filename(patch_data.content)
-    
-    -- Update the header line text with stats and filename
-    local stats_line = string.format("+%d ~%d -%d | %s", adds, mods, dels, filename)
-    
-    -- Optimization: Only update line if it changed (prevents fold flickering)
-    local current_line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
-    if current_line ~= stats_line then
-        vim.api.nvim_buf_set_lines(bufnr, row, row + 1, false, { stats_line })
-    end
-    
-    -- Update virtual text (Controls)
-    local virt_text = get_header_virt_text(patch_data.state, adds, mods, dels)
-    
-    -- Calculate current end_row based on original height
-    -- This ensures the range is correct even if the block moved
-    local height = patch_data.end_row - patch_data.header_row
-    local current_end_row = row + height
-    
-    vim.api.nvim_buf_set_extmark(bufnr, ns_id, row, 0, {
-        id = extmark_id,
-        virt_text = virt_text,
-        virt_text_pos = "right_align",
-        end_row = current_end_row,
-    })
-    
-    -- Always re-apply highlights after extmark update (extmarks can override inline highlights)
-    local line = stats_line
-    local s_add, e_add = line:find("%+%d+")
-    if s_add then vim.api.nvim_buf_add_highlight(bufnr, ns_id, "OkMsg", row, s_add - 1, e_add) end
-    
-    local s_mod, e_mod = line:find("~%d+")
-    if s_mod then vim.api.nvim_buf_add_highlight(bufnr, ns_id, "WarningMsg", row, s_mod - 1, e_mod) end
-    
-    local s_del, e_del = line:find("%-%d+")
-    if s_del then vim.api.nvim_buf_add_highlight(bufnr, ns_id, "ErrorMsg", row, s_del - 1, e_del) end
-    
-    -- Highlight filename
-    local s_file = line:find("| (.+)")
-    if s_file then
-         vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Directory", row, s_file + 1, -1)
-    end
+	local patch_data = patch_registry[extmark_id]
+	if not patch_data then
+		return
+	end
+
+	local extmark = vim.api.nvim_buf_get_extmark_by_id(bufnr, ns_id, extmark_id, { details = true })
+	if not extmark or #extmark == 0 then
+		return
+	end
+
+	local row = extmark[1]
+
+	local adds, mods, dels = parse_diff_stats(patch_data.content)
+	local filename = parse_filename(patch_data.content)
+
+	-- Update the header line text with stats and filename
+	local stats_line = string.format("+%d ~%d -%d | %s", adds, mods, dels, filename)
+
+	-- Optimization: Only update line if it changed (prevents fold flickering)
+	local current_line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+	if current_line ~= stats_line then
+		vim.api.nvim_buf_set_lines(bufnr, row, row + 1, false, { stats_line })
+	end
+
+	-- Update virtual text (Controls)
+	local virt_text = get_header_virt_text(patch_data.state, adds, mods, dels)
+
+	-- Calculate current end_row based on original height
+	-- This ensures the range is correct even if the block moved
+	local height = patch_data.end_row - patch_data.header_row
+	local current_end_row = row + height
+
+	vim.api.nvim_buf_set_extmark(bufnr, ns_id, row, 0, {
+		id = extmark_id,
+		virt_text = virt_text,
+		virt_text_pos = "right_align",
+		end_row = current_end_row,
+	})
+
+	-- Always re-apply highlights after extmark update (extmarks can override inline highlights)
+	local line = stats_line
+	local s_add, e_add = line:find("%+%d+")
+	if s_add then
+		vim.api.nvim_buf_add_highlight(bufnr, ns_id, "OkMsg", row, s_add - 1, e_add)
+	end
+
+	local s_mod, e_mod = line:find("~%d+")
+	if s_mod then
+		vim.api.nvim_buf_add_highlight(bufnr, ns_id, "WarningMsg", row, s_mod - 1, e_mod)
+	end
+
+	local s_del, e_del = line:find("%-%d+")
+	if s_del then
+		vim.api.nvim_buf_add_highlight(bufnr, ns_id, "ErrorMsg", row, s_del - 1, e_del)
+	end
+
+	-- Highlight filename
+	local s_file = line:find("| (.+)")
+	if s_file then
+		vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Directory", row, s_file + 1, -1)
+	end
 end
 
 --- Toggle state for the patch under cursor
 function M.handle_keypress(bufnr, key)
-    local cursor = vim.api.nvim_win_get_cursor(0)
-    local row = cursor[1] - 1
-    
-    local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns_id, 0, -1, { details = true })
-    
-    for _, mark in ipairs(extmarks) do
-        local id = mark[1]
-        
-        -- Only process extmarks that are in our registry (headers)
-        -- This filters out highlight extmarks which might cause nil errors
-        if patch_registry[id] then
-            local start_row = mark[2]
-            local end_row = mark[4].end_row
-            
-            if end_row and row >= start_row and row <= end_row then
-            local current_state = patch_registry[id].state
-            local new_state
-            if key == "1" then new_state = STATE_ACCEPT
-            elseif key == "2" then new_state = STATE_REJECT
-            else return end
-            
-            -- If state hasn't changed, do nothing
-            if current_state == new_state then
-                return
-            end
-            
-            -- Update state in registry and UI
-            patch_registry[id].state = new_state
-            update_patch_header(bufnr, id)
-            
-            -- Handle actions based on transition
-            -- Pass current_state so Python knows if this is first decision (PENDING) or undo
-            if new_state == STATE_ACCEPT then
-                -- Moving TO accept: Always apply
-                -- (If we were PENDING or REJECT, we need to apply)
-                vim.fn.AgentPatchAction("apply", patch_registry[id].content, current_state)
-            elseif new_state == STATE_REJECT then
-                -- Moving TO reject:
-                -- Only reverse if we were previously ACCEPTED
-                if current_state == STATE_ACCEPT then
-                    vim.fn.AgentPatchAction("reject", patch_registry[id].content, current_state)
-                elseif current_state == STATE_PENDING then
-                    -- First decision to reject - notify agent
-                    vim.fn.AgentPatchAction("reject_pending", patch_registry[id].content, current_state)
-                end
-            end
-            return
-            end
-        end
-    end
+	local cursor = vim.api.nvim_win_get_cursor(0)
+	local row = cursor[1] - 1
+
+	local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns_id, 0, -1, { details = true })
+
+	for _, mark in ipairs(extmarks) do
+		local id = mark[1]
+
+		-- Only process extmarks that are in our registry (headers)
+		-- This filters out highlight extmarks which might cause nil errors
+		if patch_registry[id] then
+			local start_row = mark[2]
+			local end_row = mark[4].end_row
+
+			if end_row and row >= start_row and row <= end_row then
+				local current_state = patch_registry[id].state
+				local new_state
+				if key == "1" then
+					new_state = STATE_ACCEPT
+				elseif key == "2" then
+					new_state = STATE_REJECT
+				else
+					return
+				end
+
+				-- If state hasn't changed, do nothing
+				if current_state == new_state then
+					return
+				end
+
+				-- Update state in registry and UI
+				patch_registry[id].state = new_state
+				update_patch_header(bufnr, id)
+
+				-- Handle actions based on transition
+				-- Pass current_state so Python knows if this is first decision (PENDING) or undo
+				if new_state == STATE_ACCEPT then
+					-- Moving TO accept: Always apply
+					-- (If we were PENDING or REJECT, we need to apply)
+					vim.fn.AgentPatchAction("apply", patch_registry[id].content, current_state)
+				elseif new_state == STATE_REJECT then
+					-- Moving TO reject:
+					-- Only reverse if we were previously ACCEPTED
+					if current_state == STATE_ACCEPT then
+						vim.fn.AgentPatchAction("reject", patch_registry[id].content, current_state)
+					elseif current_state == STATE_PENDING then
+						-- First decision to reject - notify agent
+						vim.fn.AgentPatchAction("reject_pending", patch_registry[id].content, current_state)
+					end
+				end
+				return
+			end
+		end
+	end
 end
 
 --- Render a diff block in the buffer
 function M.render_diff(bufnr, content)
-    if not content:match("\n$") then content = content .. "\n" end
-    local lines = vim.split(content, "\n")
-    if lines[#lines] == "" then table.remove(lines) end
-    
-    local line_count = vim.api.nvim_buf_line_count(bufnr)
-    local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1] or ""
-    
-    -- Ensure there's exactly one blank line before the patch
-    local start_line
-    if last_line == "" then
-        -- Check if second-to-last line is also empty (would mean two blank lines)
-        local second_last = ""
-        if line_count >= 2 then
-            second_last = vim.api.nvim_buf_get_lines(bufnr, line_count - 2, line_count - 1, false)[1] or ""
-        end
-        if second_last == "" then
-            -- Two blank lines - replace the last one
-            start_line = line_count - 1
-        else
-            -- One blank line - keep it, append after
-            start_line = line_count
-        end
-    else
-        -- Last line has content, add a blank line for separation
-        vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {""})
-        start_line = line_count + 1
-    end
-    
-    -- Calculate stats for header
-    local adds, mods, dels = parse_diff_stats(content)
-    local filename = parse_filename(content)
-    local header_text = string.format("+%d ~%d -%d | %s", adds, mods, dels, filename)
-    
-    local block_lines = {}
-    table.insert(block_lines, header_text)
-    table.insert(block_lines, "```diff")
-    for _, line in ipairs(lines) do
-        table.insert(block_lines, line)
-    end
-    table.insert(block_lines, "```")
-    table.insert(block_lines, "")
-    
-    vim.api.nvim_buf_set_lines(bufnr, start_line, -1, false, block_lines)
-    
-    -- Apply diff highlighting to the code block lines manually
-    -- Treesitter injection doesn't always work for dynamically added content
-    local diff_start = start_line + 2  -- After header and ```diff
-    local diff_end = start_line + #block_lines - 2  -- Before closing ```
-    
-    for i = diff_start, diff_end do
-        local line = vim.api.nvim_buf_get_lines(bufnr, i, i + 1, false)[1] or ""
-        if line:match("^diff %-%-git") then
-            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Statement", i, 0, -1)
-        elseif line:match("^index ") then
-            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Comment", i, 0, -1)
-        elseif line:match("^%-%-%- ") then
-            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffDelete", i, 0, -1)
-        elseif line:match("^%+%+%+ ") then
-            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffAdd", i, 0, -1)
-        elseif line:match("^@@") then
-            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Function", i, 0, -1)
-        elseif line:match("^%+") then
-            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffAdd", i, 0, -1)
-        elseif line:match("^%-") then
-            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffDelete", i, 0, -1)
-        end
-    end
-    
-    local header_row = start_line
-    local end_row = start_line + #block_lines - 1
-    
-    -- Create extmark
-    local initial_state = STATE_PENDING -- Default to pending (gray)
-    local virt_text = get_header_virt_text(initial_state, adds, mods, dels)
-    
-    local id = vim.api.nvim_buf_set_extmark(bufnr, ns_id, header_row, 0, {
-        virt_text = virt_text,
-        virt_text_pos = "right_align",
-        end_row = end_row,
-    })
-    
-    patch_registry[id] = {
-        state = initial_state,
-        content = content,
-        header_row = header_row,
-        end_row = end_row
-    }
-    
-    -- Initial highlight for stats
-    local line = header_text
-    local s_add, e_add = line:find("%+%d+")
-    if s_add then vim.api.nvim_buf_add_highlight(bufnr, ns_id, "OkMsg", header_row, s_add - 1, e_add) end
-    local s_mod, e_mod = line:find("~%d+")
-    if s_mod then vim.api.nvim_buf_add_highlight(bufnr, ns_id, "WarningMsg", header_row, s_mod - 1, e_mod) end
-    local s_del, e_del = line:find("%-%d+")
-    if s_del then vim.api.nvim_buf_add_highlight(bufnr, ns_id, "ErrorMsg", header_row, s_del - 1, e_del) end
-    
-    -- Highlight filename
-    local s_file = line:find("| (.+)")
-    if s_file then
-         -- Highlight the filename part (after the pipe)
-         vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Directory", header_row, s_file + 1, -1)
-    end
-    
-    pcall(function()
-        require('agent_nvim.folds').create_fold(bufnr, start_line + 1, end_row + 1)
-    end)
-    
-    M.setup_keymaps(bufnr)
-    return id
+	if not content:match("\n$") then
+		content = content .. "\n"
+	end
+	local lines = vim.split(content, "\n")
+	if lines[#lines] == "" then
+		table.remove(lines)
+	end
+
+	local line_count = vim.api.nvim_buf_line_count(bufnr)
+	local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1] or ""
+
+	-- Ensure there's exactly one blank line before the patch
+	local start_line
+	if last_line == "" then
+		-- Check if second-to-last line is also empty (would mean two blank lines)
+		local second_last = ""
+		if line_count >= 2 then
+			second_last = vim.api.nvim_buf_get_lines(bufnr, line_count - 2, line_count - 1, false)[1] or ""
+		end
+		if second_last == "" then
+			-- Two blank lines - replace the last one
+			start_line = line_count - 1
+		else
+			-- One blank line - keep it, append after
+			start_line = line_count
+		end
+	else
+		-- Last line has content, add a blank line for separation
+		vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { "" })
+		start_line = line_count + 1
+	end
+
+	-- Calculate stats for header
+	local adds, mods, dels = parse_diff_stats(content)
+	local filename = parse_filename(content)
+	local header_text = string.format("+%d ~%d -%d | %s", adds, mods, dels, filename)
+
+	local block_lines = {}
+	table.insert(block_lines, header_text)
+	table.insert(block_lines, "```diff")
+	for _, line in ipairs(lines) do
+		table.insert(block_lines, line)
+	end
+	table.insert(block_lines, "```")
+	table.insert(block_lines, "")
+
+	vim.api.nvim_buf_set_lines(bufnr, start_line, -1, false, block_lines)
+
+	-- Apply diff highlighting to the code block lines manually
+	-- Treesitter injection doesn't always work for dynamically added content
+	local diff_start = start_line + 2 -- After header and ```diff
+	local diff_end = start_line + #block_lines - 2 -- Before closing ```
+
+	for i = diff_start, diff_end do
+		local line = vim.api.nvim_buf_get_lines(bufnr, i, i + 1, false)[1] or ""
+		if line:match("^diff %-%-git") then
+			vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Statement", i, 0, -1)
+		elseif line:match("^index ") then
+			vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Comment", i, 0, -1)
+		elseif line:match("^%-%-%- ") then
+			vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffDelete", i, 0, -1)
+		elseif line:match("^%+%+%+ ") then
+			vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffAdd", i, 0, -1)
+		elseif line:match("^@@") then
+			vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Function", i, 0, -1)
+		elseif line:match("^%+") then
+			vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffAdd", i, 0, -1)
+		elseif line:match("^%-") then
+			vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffDelete", i, 0, -1)
+		end
+	end
+
+	local header_row = start_line
+	local end_row = start_line + #block_lines - 1
+
+	-- Create extmark
+	local initial_state = STATE_PENDING -- Default to pending (gray)
+	local virt_text = get_header_virt_text(initial_state, adds, mods, dels)
+
+	local id = vim.api.nvim_buf_set_extmark(bufnr, ns_id, header_row, 0, {
+		virt_text = virt_text,
+		virt_text_pos = "right_align",
+		end_row = end_row,
+	})
+
+	patch_registry[id] = {
+		state = initial_state,
+		content = content,
+		header_row = header_row,
+		end_row = end_row,
+	}
+
+	-- Initial highlight for stats
+	local line = header_text
+	local s_add, e_add = line:find("%+%d+")
+	if s_add then
+		vim.api.nvim_buf_add_highlight(bufnr, ns_id, "OkMsg", header_row, s_add - 1, e_add)
+	end
+	local s_mod, e_mod = line:find("~%d+")
+	if s_mod then
+		vim.api.nvim_buf_add_highlight(bufnr, ns_id, "WarningMsg", header_row, s_mod - 1, e_mod)
+	end
+	local s_del, e_del = line:find("%-%d+")
+	if s_del then
+		vim.api.nvim_buf_add_highlight(bufnr, ns_id, "ErrorMsg", header_row, s_del - 1, e_del)
+	end
+
+	-- Highlight filename
+	local s_file = line:find("| (.+)")
+	if s_file then
+		-- Highlight the filename part (after the pipe)
+		vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Directory", header_row, s_file + 1, -1)
+	end
+
+	pcall(function()
+		require("agent_nvim.folds").create_fold(bufnr, start_line + 1, end_row + 1)
+	end)
+
+	M.setup_keymaps(bufnr)
+	return id
 end
 
 function M.setup_keymaps(bufnr)
-    local opts = { noremap = true, silent = true, buffer = bufnr }
-    vim.keymap.set("n", "1", function() M.handle_keypress(bufnr, "1") end, opts)
-    vim.keymap.set("n", "2", function() M.handle_keypress(bufnr, "2") end, opts)
+	local opts = { noremap = true, silent = true, buffer = bufnr }
+	vim.keymap.set("n", "1", function()
+		M.handle_keypress(bufnr, "1")
+	end, opts)
+	vim.keymap.set("n", "2", function()
+		M.handle_keypress(bufnr, "2")
+	end, opts)
 end
 
 function M.get_patches(bufnr)
-    local patches = {}
-    local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns_id, 0, -1, { details = true })
-    
-    for _, mark in ipairs(extmarks) do
-        local id = mark[1]
-        local data = patch_registry[id]
-        if data then
-            local current_row = mark[2]
-            local end_row = mark[4].end_row
-            local content_start = current_row + 2
-            local content_end = end_row - 1
-            
-            if content_start <= content_end then
-                local lines = vim.api.nvim_buf_get_lines(bufnr, content_start, content_end, false)
-                local content = table.concat(lines, "\n")
-                table.insert(patches, { content = content, state = data.state })
-            end
-        end
-    end
-    return patches
+	local patches = {}
+	local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns_id, 0, -1, { details = true })
+
+	for _, mark in ipairs(extmarks) do
+		local id = mark[1]
+		local data = patch_registry[id]
+		if data then
+			local current_row = mark[2]
+			local end_row = mark[4].end_row
+			local content_start = current_row + 2
+			local content_end = end_row - 1
+
+			if content_start <= content_end then
+				local lines = vim.api.nvim_buf_get_lines(bufnr, content_start, content_end, false)
+				local content = table.concat(lines, "\n")
+				table.insert(patches, { content = content, state = data.state })
+			end
+		end
+	end
+	return patches
 end
 
 --- Mark the latest patch as applied (for YOLO mode)
 --- This updates the UI state without triggering the apply action
 function M.mark_latest_as_applied(bufnr)
-    local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns_id, 0, -1, { details = true })
-    if #extmarks == 0 then return false end
-    
-    -- Find the last patch in the registry
-    local last_id = nil
-    for _, mark in ipairs(extmarks) do
-        local id = mark[1]
-        if patch_registry[id] then
-            last_id = id
-        end
-    end
-    
-    if not last_id or not patch_registry[last_id] then return false end
-    
-    -- Update state directly without triggering actions
-    patch_registry[last_id].state = STATE_ACCEPT
-    update_patch_header(bufnr, last_id)
-    return true
+	local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns_id, 0, -1, { details = true })
+	if #extmarks == 0 then
+		return false
+	end
+
+	-- Find the last patch in the registry
+	local last_id = nil
+	for _, mark in ipairs(extmarks) do
+		local id = mark[1]
+		if patch_registry[id] then
+			last_id = id
+		end
+	end
+
+	if not last_id or not patch_registry[last_id] then
+		return false
+	end
+
+	-- Update state directly without triggering actions
+	patch_registry[last_id].state = STATE_ACCEPT
+	update_patch_header(bufnr, last_id)
+	return true
 end
 
 return M

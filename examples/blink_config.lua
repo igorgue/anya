@@ -5,7 +5,7 @@ return {
 	"saghen/blink.cmp",
 	opts = {
 		-- Your regular blink.cmp configuration
-    -- ...
+		-- ...
 
 		-- Sources configuration
 		sources = {

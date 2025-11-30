@@ -7,10 +7,14 @@ function print_formatter {
   echo
 }
 
-print_formatter ruff
-
 if [[ "$1" == "--check" ]]; then
+  print_formatter ruff
   ruff format . --check
+  print_formatter stylua
+  stylua --check .
 else
+  print_formatter ruff
   ruff format .
+  print_formatter stylua
+  stylua .
 fi
