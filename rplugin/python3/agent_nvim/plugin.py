@@ -851,85 +851,84 @@ class AgentPlugin(object):
         try:
             # Remove /file from the text to get the rest of the prompt
             remaining_text = text.replace("/file", "").strip()
-            
+
             # Get the buffer number while we have it
             prompt_buf_num = self.nvim.current.buffer.number
-            
+
             self.nvim.exec_lua("""
                 local args = {...}
                 local remaining_prompt = args[1]
                 local prompt_buf_num = args[2]
-                
+
                 -- Store for callback
                 _G._agent_remaining_prompt = remaining_prompt
                 _G._agent_prompt_buf_num = prompt_buf_num
-                
+
                 local function apply_files_to_prompt(files)
                     if not files or #files == 0 then
                         return
                     end
-                    
+
                     local prompt_buf = _G._agent_prompt_buf_num
                     if not vim.api.nvim_buf_is_valid(prompt_buf) then
                         vim.notify('Prompt buffer is not valid', vim.log.levels.ERROR)
                         return
                     end
-                    
+
                     -- Build file references
                     local file_refs = {}
                     for _, file in ipairs(files) do
                         table.insert(file_refs, '@' .. file)
                     end
                     local file_text = table.concat(file_refs, ' ')
-                    
+
                     -- Create new text: files first, then remaining prompt
                     local new_text
-                    if remaining_prompt == '' or remaining_prompt == nil then
+                    local remaining = _G._agent_remaining_prompt
+                    if remaining == '' or remaining == nil then
                         new_text = file_text
                     else
-                        new_text = file_text .. '\\n\\n' .. remaining_prompt
+                        new_text = file_text .. '\\n\\n' .. remaining
                     end
-                    
+
                     -- Set buffer content
                     local new_lines = vim.split(new_text, '\\n', {plain = true})
                     vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, new_lines)
-                    
+
                     -- Set cursor to end and focus the window
                     local win = vim.fn.bufwinid(prompt_buf)
                     if win > 0 then
                         vim.api.nvim_set_current_win(win)
                         vim.api.nvim_win_set_cursor(win, {#new_lines, 0})
                     end
-                    
+
                     -- Clean up globals
                     _G._agent_remaining_prompt = nil
                     _G._agent_prompt_buf_num = nil
                 end
-                
-                -- Open file picker
+
+                -- Open file picker with fallback = true to get current item if no multi-select
                 Snacks.picker.files({
-                    actions = {
-                        confirm = function(picker, item)
-                            local items = picker:selected({fallback = false})
-                            local files = {}
-                            for _, selected_item in ipairs(items) do
-                                local file_path = selected_item.file or selected_item.text
-                                if file_path then
-                                    table.insert(files, file_path)
-                                end
+                    confirm = function(picker, item)
+                        -- Get multi-selected items, or fall back to current item
+                        local items = picker:selected({fallback = true})
+                        local files = {}
+                        for _, selected_item in ipairs(items) do
+                            local file_path = selected_item.file or selected_item.text
+                            if file_path then
+                                table.insert(files, file_path)
                             end
-                            picker:close()
-                            vim.schedule(function()
-                                apply_files_to_prompt(files)
-                            end)
                         end
-                    }
+                        picker:close()
+                        vim.schedule(function()
+                            apply_files_to_prompt(files)
+                        end)
+                    end
                 })
             """, remaining_text, prompt_buf_num)
         except Exception as e:
             self.logger.error(f"Error in /file command: {e}")
             self.nvim.out_write(f"Error opening file picker: {str(e)}\n")
-    
     def _handle_user_prompt(self, text):
         """Handle user prompt submission."""
         # Reset tool tracker for new request
