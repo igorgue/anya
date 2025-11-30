@@ -15,7 +15,6 @@ except ImportError:
     Any = object
 
 
-
 def _get_plugin_root():
     """Get the plugin root directory."""
     # __file__ = .../rplugin/python3/agent_nvim/buffers.py
@@ -29,6 +28,7 @@ def _get_plugin_root():
 def _load_logo():
     """Load logo from res/logo.txt file."""
     import logging
+
     logger = logging.getLogger("agent.nvim")
 
     plugin_dir = _get_plugin_root()
@@ -57,6 +57,7 @@ def _build_welcome_message():
     msg.extend(["```", "", "> Type your request in the prompt below."])
     return msg
 
+
 class BufferManager:
     """Manages Neovim buffers for agent.nvim plugin."""
 
@@ -67,7 +68,9 @@ class BufferManager:
         """Lazy-load welcome message on first access."""
         if BufferManager._welcome_message_cache is None:
             BufferManager._welcome_message_cache = _build_welcome_message()
-            self.logger.info(f"Welcome message loaded, logo has {len(BufferManager._welcome_message_cache) - 4} lines")
+            self.logger.info(
+                f"Welcome message loaded, logo has {len(BufferManager._welcome_message_cache) - 4} lines"
+            )
         return BufferManager._welcome_message_cache
 
     def __init__(self, nvim, logger):

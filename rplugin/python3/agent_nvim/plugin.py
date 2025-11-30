@@ -357,7 +357,9 @@ class AgentPlugin(object):
                 elif choice == "always":
                     self.logger.info(f"Adding command to allow list: {command}")
                     exec_permissions.add_to_allow_list(command)
-                    self.logger.info(f"Allow list after add: {exec_permissions.load_allow_list()}")
+                    self.logger.info(
+                        f"Allow list after add: {exec_permissions.load_allow_list()}"
+                    )
                     return tools.exec(command, cwd=cwd, timeout=timeout)
                 else:
                     return "Command execution was declined by user."

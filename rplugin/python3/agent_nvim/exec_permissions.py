@@ -50,7 +50,9 @@ def split_chained_commands(command: str) -> list:
     e.g., 'git status && git commit' -> ['git status', 'git commit']
           'ls || echo failed' -> ['ls', 'echo failed']
     """
-    return [cmd.strip() for cmd in COMMAND_SEPARATOR_PATTERN.split(command) if cmd.strip()]
+    return [
+        cmd.strip() for cmd in COMMAND_SEPARATOR_PATTERN.split(command) if cmd.strip()
+    ]
 
 
 def add_to_allow_list(command: str) -> None:
@@ -111,9 +113,7 @@ async def prompt_exec_permission(nvim, command: str, logger=None) -> str:
         "always" - User chose to always allow this command
     """
     # Use temp file to communicate result since vim.ui.select is async
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         temp_result = f.name
 
     # Escape command for JSON encoding
