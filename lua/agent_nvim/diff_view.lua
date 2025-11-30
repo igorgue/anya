@@ -234,7 +234,29 @@ function M.render_diff(bufnr, content)
     local lines = vim.split(content, "\n")
     if lines[#lines] == "" then table.remove(lines) end
     
-    local start_line = vim.api.nvim_buf_line_count(bufnr)
+    local line_count = vim.api.nvim_buf_line_count(bufnr)
+    local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1] or ""
+    
+    -- Ensure there's exactly one blank line before the patch
+    local start_line
+    if last_line == "" then
+        -- Check if second-to-last line is also empty (would mean two blank lines)
+        local second_last = ""
+        if line_count >= 2 then
+            second_last = vim.api.nvim_buf_get_lines(bufnr, line_count - 2, line_count - 1, false)[1] or ""
+        end
+        if second_last == "" then
+            -- Two blank lines - replace the last one
+            start_line = line_count - 1
+        else
+            -- One blank line - keep it, append after
+            start_line = line_count
+        end
+    else
+        -- Last line has content, add a blank line for separation
+        vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, {""})
+        start_line = line_count + 1
+    end
     
     -- Calculate stats for header
     local adds, mods, dels = parse_diff_stats(content)

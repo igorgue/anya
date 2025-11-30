@@ -43,7 +43,16 @@ def get_context_window(model: str | None) -> int:
         return OPENROUTER_CONTEXT_WINDOWS[model]
 
     # Try with common provider prefixes (e.g., "gpt-5.1" -> "openai/gpt-5.1")
-    prefixes = ["openai", "anthropic", "google", "meta-llama", "mistralai", "x-ai", "deepseek", "qwen"]
+    prefixes = [
+        "openai",
+        "anthropic",
+        "google",
+        "meta-llama",
+        "mistralai",
+        "x-ai",
+        "deepseek",
+        "qwen",
+    ]
     for prefix in prefixes:
         prefixed = f"{prefix}/{model}"
         if prefixed in OPENROUTER_CONTEXT_WINDOWS:

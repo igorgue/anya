@@ -512,7 +512,7 @@ class AgentPlugin(object):
                     self.buffer_manager.append_content, ["", feedback_text]
                 )
 
-                self.nvim.async_call(self.buffer_manager.append_content, ["", ""])
+                self.nvim.async_call(self.buffer_manager.append_content, [""])
 
                 # Continue the agent automatically (without header)
                 self._continue_agent_after_patch(skip_header=True)

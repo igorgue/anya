@@ -346,9 +346,7 @@ class BufferManager:
                     hunks.append(current_hunk)
 
                 # Parse @@ -old_start,old_count +new_start,new_count @@
-                match = re.match(
-                    r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line
-                )
+                match = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line)
                 if match:
                     current_hunk = {
                         "old_start": int(match.group(1)),
@@ -744,10 +742,10 @@ class BufferManager:
 
         # Get the current buffer lines
         current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
-        
+
         # Check if buffer is empty (single empty line - Neovim always has at least one line)
         is_empty_buffer = len(current_lines) == 1 and current_lines[0] == ""
-        
+
         # Get the line count before appending (this is where new content starts)
         start_line = 0 if is_empty_buffer else len(current_lines)
 
@@ -1097,15 +1095,22 @@ class BufferManager:
                     local text_starts_with_newline = item.text:sub(1, 1) == "\\n"
                     -- Check if last line is empty (blank line already exists)
                     local has_blank_line = last_content == ""
-                    -- If text doesn't start with newline, prepend one for separation
-                    -- This ensures blank line isn't overwritten by set_text
-                    if not text_starts_with_newline then
-                        item.text = "\\n" .. item.text
-                    elseif not has_blank_line then
-                        -- Text starts with newline but there's no blank line
-                        -- (blank line was removed because model provided spacing)
-                        -- Prepend extra newline to restore the blank line
-                        item.text = "\\n" .. item.text
+                    -- Ensure proper blank line separation
+                    if has_blank_line then
+                        -- Already have a blank line, just add one newline if text doesnt start with one
+                        if not text_starts_with_newline then
+                            item.text = "\\n" .. item.text
+                        end
+                    else
+                        -- No blank line exists, need to add blank line separation
+                        -- Use \\n\\n: first moves to new line, second creates blank line
+                        if text_starts_with_newline then
+                            -- Model provides one newline, add one more for blank line
+                            item.text = "\\n" .. item.text
+                        else
+                            -- Model provides no newlines, add two for blank line separation
+                            item.text = "\\n\\n" .. item.text
+                        end
                     end
                 end
 
@@ -1215,7 +1220,7 @@ class BufferManager:
 
     def clear_welcome_message(self):
         """Remove the welcome message if it's the only content in the buffer.
-        
+
         Returns:
             True if welcome message was cleared (first message), False otherwise
         """
@@ -1223,11 +1228,13 @@ class BufferManager:
             return False
 
         lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
-        
+
         # Check if buffer contains only the welcome message
         if lines == self.WELCOME_MESSAGE:
             # Remove all the welcome message lines
-            self.nvim.api.buf_set_lines(self.content_buf, 0, len(self.WELCOME_MESSAGE), False, [])
+            self.nvim.api.buf_set_lines(
+                self.content_buf, 0, len(self.WELCOME_MESSAGE), False, []
+            )
             return True
         return False
 
