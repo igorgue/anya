@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+function print_formatter {
+  echo -e "\033[1m* $1 *\033[0m"
+  echo
+}
+
+print_formatter ruff
+
+if [[ "$1" == "--check" ]]; then
+  ruff format . --check
+else
+  ruff format .
+fi
