@@ -241,7 +241,7 @@ def search_repo(query: str, cwd: str = None) -> str:
         return f"Error searching repo: {e}"
 
 
-def apply_patch_proposal(patch_str: str) -> str:
+def patch(patch_str: str) -> str:
     """Proposes a patch to be applied.
 
     Args:

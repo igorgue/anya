@@ -180,11 +180,11 @@ def display_tool_result(
         if tool_info:
             tool_name = tool_info["tool_name"]
 
-            # Special handling for apply_patch
+            # Special handling for patch
             # Debug logging to diagnose why interception might fail
-            if tool_name == "apply_patch":
+            if tool_name == "patch":
                 logger.info(
-                    f"Attempting to intercept apply_patch. append_content_fn type: {type(append_content_fn)}"
+                    f"Attempting to intercept patch. append_content_fn type: {type(append_content_fn)}"
                 )
                 if hasattr(append_content_fn, "__self__"):
                     logger.info(
@@ -196,9 +196,9 @@ def display_tool_result(
                         # Use the buffer manager's render_diff_block method
                         buffer_manager = append_content_fn.__self__
 
-                        # Show a small header
-                        header = f"**  {tool_name}**"
-                        nvim.async_call(lambda: append_content_fn([header]))
+                        # Show a small header - SUPPRESSED per user request
+                        # header = f"**  {tool_name}**"
+                        # nvim.async_call(lambda: append_content_fn([header]))
 
                         # Render the diff block
                         nvim.async_call(

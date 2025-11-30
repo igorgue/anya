@@ -53,7 +53,8 @@ class BufferManager:
         if not content_buf or not content_buf.valid:
             content_buf = self.nvim.api.create_buf(False, True)
             self.nvim.api.buf_set_name(content_buf, "AgentContent")
-            self.nvim.api.buf_set_option(content_buf, "filetype", "agent-content")
+            # Use markdown.agent-content to inherit markdown behavior
+            self.nvim.api.buf_set_option(content_buf, "filetype", "markdown.agent-content")
             self.nvim.api.buf_set_option(content_buf, "buftype", "nofile")
             self.nvim.api.buf_set_option(content_buf, "swapfile", False)
             # Set buffer variable to identify this as agent content
@@ -211,6 +212,7 @@ class BufferManager:
             reverse: If True, apply in reverse (undo/reject)
         """
         try:
+            self.logger.info(f"Applying patch content (len={len(patch_content)}):\n{patch_content}")
             with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
                 tmp.write(patch_content)
                 tmp_path = tmp.name
@@ -235,10 +237,14 @@ class BufferManager:
                 return True
             else:
                 self.logger.error(f"Failed to apply patch: {proc.stderr}")
-                self.nvim.err_write(f"Failed to apply patch: {proc.stderr}\n")
+                # Show first few lines of patch in error to help debug
+                lines = patch_content.split('\n')
+                preview = "\n".join(lines[:5])
+                self.nvim.err_write(f"Failed to apply patch: {proc.stderr.strip()}\nPatch preview:\n{preview}\n")
                 return False
         except Exception as e:
             self.logger.error(f"Exception applying patch: {e}")
+            self.nvim.err_write(f"Exception applying patch: {e}\n")
             return False
 
     def _scroll_to_bottom(self):

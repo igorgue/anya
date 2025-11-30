@@ -315,9 +315,9 @@ class AgentPlugin(object):
 
                 return result
 
-            def apply_patch(patch_str: str) -> str:
-                """Apply patch proposal."""
-                return tools.apply_patch_proposal(patch_str)
+            def patch(patch_str: str) -> str:
+                """Apply patch proposal. MUST include full git diff headers (diff --git ...)."""
+                return tools.patch(patch_str)
 
             async def exec_lua(code: str) -> str:
                 """Execute Lua code inside Neovim."""
@@ -333,7 +333,7 @@ class AgentPlugin(object):
                 "read_many_files": function_tool(read_many_files),
                 "list_files": function_tool(list_files),
                 "search_repo": function_tool(search_repo),
-                "apply_patch": function_tool(apply_patch),
+                "patch": function_tool(patch),
                 "exec_lua": function_tool(exec_lua),
                 "exec": function_tool(exec),
             }
@@ -457,13 +457,14 @@ class AgentPlugin(object):
         try:
             action, patch_content = args
             if action == "apply":
-                self.buffer_manager._apply_single_patch(patch_content)
-                self.nvim.out_write("Patch applied.\n")
+                if self.buffer_manager._apply_single_patch(patch_content):
+                    self.logger.info("Patch applied!")
+                # Error is already printed by _apply_single_patch
             elif action == "reject":
                 # To reject, we reverse the patch
                 # git apply -R
-                self.buffer_manager._apply_single_patch(patch_content, reverse=True)
-                self.nvim.out_write("Patch reverted.\n")
+                if self.buffer_manager._apply_single_patch(patch_content, reverse=True):
+                    self.logger.info("Patch reverted!")
         except Exception as e:
             self.logger.error(f"Error in AgentPatchAction: {e}")
             self.nvim.err_write(f"Error applying/reverting patch: {e}\n")

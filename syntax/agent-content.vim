@@ -1,12 +1,11 @@
 " Syntax highlighting for agent content buffer
+" Runs after markdown syntax (due to filetype=markdown.agent-content)
 
-" Mark the buffer as using syntax highlighting
-if exists("b:current_syntax")
-    finish
-endif
+" No need to check b:current_syntax or load markdown manually
 
-" Clear any existing syntax to avoid conflicts
-syntax clear
+" Explicitly highlight diff blocks (in case markdown syntax misses it)
+syntax include @Diff syntax/diff.vim
+syntax region AgentDiffBlock start="^```diff.*$" end="^```$" contains=@Diff keepend
 
 " Highlight file references like @filename or @path/to/file
 " Define this LAST so it takes priority (later definitions win in Vim)

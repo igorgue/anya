@@ -2,6 +2,7 @@
 setlocal wrap
 setlocal linebreak
 setlocal nolist
+let b:markdown_fenced_languages = ['diff']
 
 " Enable manual folding for tool calls
 setlocal foldmethod=manual
