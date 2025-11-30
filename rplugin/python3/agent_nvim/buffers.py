@@ -1062,16 +1062,17 @@ class BufferManager:
             bufnr: Buffer number (must be passed in, can't access from async context)
         """
         # Handle initial spacing for agent responses
-        # Check if this is the first chunk and if we need to remove the extra blank line
-        should_remove_last_line = False
-        if not self._agent_response_started:
+        # The header ends with a blank line. We need to preserve it by ensuring
+        # content starts on a NEW line (after the blank line).
+        if not self._agent_response_started and text:
+            # Strip leading newlines - we'll add exactly one to ensure proper spacing
+            text = text.lstrip("\n")
+            # If stripping leaves empty text, skip this chunk (don't set flag yet)
+            if not text:
+                return
+            # Prepend newline so content starts AFTER the blank line, not ON it
+            text = "\n" + text
             self._agent_response_started = True
-            # Ensure the text starts with a non-empty character to maintain spacing
-            # This works for both chat_completions and responses APIs
-            if text and text.startswith("\n"):
-                # If text starts with newlines, remove the extra blank line
-                # since the model is providing its own spacing
-                should_remove_last_line = True
 
         # Escape text for Lua string
         escaped_text = (
@@ -1082,22 +1083,19 @@ class BufferManager:
         )
 
         # Use a timer to animate character-by-character
-        # The should_remove_last_line flag is handled atomically on first write
         lua_code = f"""
         local bufnr = {bufnr}
         local text = "{escaped_text}"
-        local should_remove_last_line = {str(should_remove_last_line).lower()}
 
         -- Initialize animation queue if it doesn't exist
         if not _G.agent_stream_queue then
             _G.agent_stream_queue = {{}}
             _G.agent_stream_timer = nil
             _G.agent_stream_paused = false
-            _G.agent_stream_spacing_checked = false
         end
 
         -- Add text to queue
-        table.insert(_G.agent_stream_queue, {{bufnr = bufnr, text = text, remove_last_line = should_remove_last_line}})
+        table.insert(_G.agent_stream_queue, {{bufnr = bufnr, text = text}})
 
         -- Start timer if not already running
         if not _G.agent_stream_timer then
@@ -1119,34 +1117,6 @@ class BufferManager:
                 if not vim.api.nvim_buf_is_valid(item.bufnr) then
                     table.remove(_G.agent_stream_queue, 1)
                     return
-                end
-
-                -- Handle blank line removal on first write atomically
-                if item.remove_last_line then
-                    local line_count = vim.api.nvim_buf_line_count(item.bufnr)
-                    local last_line_idx = line_count - 1
-                    local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
-                    if (last_line[1] or "") == "" then
-                        vim.api.nvim_buf_set_lines(item.bufnr, last_line_idx, last_line_idx + 1, false, {{}})
-                    end
-                    item.remove_last_line = false
-                end
-
-                -- Ensure blank line separation once per streaming session
-                -- This handles spacing after tool output when streaming resumes
-                if not _G.agent_stream_spacing_checked then
-                    _G.agent_stream_spacing_checked = true
-                    local line_count = vim.api.nvim_buf_line_count(item.bufnr)
-                    local last_line_idx = line_count - 1
-                    local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
-                    local last_content = last_line[1] or ""
-                    -- Check if text starts with newline (model provides its own spacing)
-                    local text_starts_with_newline = item.text:sub(1, 1) == "\\n"
-                    -- If text doesn't start with newline, prepend one for separation
-                    -- This ensures blank line isn't overwritten by set_text
-                    if not text_starts_with_newline then
-                        item.text = "\\n" .. item.text
-                    end
                 end
 
                 -- Vary characters written: more natural variation

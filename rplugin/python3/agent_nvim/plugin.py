@@ -396,10 +396,33 @@ class AgentPlugin(object):
     @pynvim.command("AgentOpen", sync=False)
     def agent_open(self):
         """Open the agent interface."""
-        from .token_tracker import reset_session_tokens
+        from .token_tracker import reset_session_tokens, get_context_window
 
         reset_session_tokens()
-        self.nvim.async_call(self.buffer_manager.create_layout)
+
+        # Get model and context window for placeholder
+        model = os.environ.get("AGENT_MODEL", "gpt-5.1")
+        context_window = get_context_window(model)
+
+        # Format context window size
+        if context_window >= 1000000:
+            ctx_str = f"{context_window / 1000000:.0f}M"
+        elif context_window >= 1000:
+            ctx_str = f"{context_window / 1000:.0f}K"
+        else:
+            ctx_str = str(context_window)
+
+        placeholder_text = f"0% of {ctx_str}"
+
+        # Create layout and set placeholder
+        def _open_with_placeholder():
+            self.buffer_manager.create_layout()
+            # Set placeholder after layout is created
+            self.nvim.exec_lua(
+                f'_G.AgentSetPlaceholder("{placeholder_text}", "Comment")'
+            )
+
+        self.nvim.async_call(_open_with_placeholder)
 
     @pynvim.command("AgentSubmit", sync=False)
     def agent_submit(self):
