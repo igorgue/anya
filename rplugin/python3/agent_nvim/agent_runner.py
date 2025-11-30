@@ -43,7 +43,7 @@ async def run_agent(
     model = os.environ.get("AGENT_MODEL", "gpt-5.1")
 
     # Emit fidget start event
-    emit_event_fn("AgentRequestStarted", {"id": request_id, "model": model, "message": "thinking..."})
+    emit_event_fn("AgentRequestStarted", {"id": request_id, "model": model, "message": "thinking"})
 
     status = "error"  # Default to error, will be set to success if completion succeeds
 

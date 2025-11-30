@@ -217,7 +217,7 @@ def display_tool_result(
             if emit_event_fn and request_id:
                 emit_event_fn("AgentThinking", {
                     "id": request_id,
-                    "message": "thinking...",
+                    "message": "thinking",
                 })
         
         nvim.async_call(append_and_resume)
