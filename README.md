@@ -17,7 +17,7 @@ An agentic Neovim plugin powered by the OpenAI Agents SDK.
 ### Prerequisites
 
 - Neovim >= 0.9.0
-- Python 3.10+
+- Python 3.8+
 - `pynvim` (installed globally or in your Neovim provider environment)
 
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim)

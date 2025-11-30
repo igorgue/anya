@@ -60,6 +60,7 @@ async def run_agent(
                 set_default_openai_api,
                 set_tracing_disabled,
             )
+            from agents.agent import StopAtTools
             from agents.exceptions import MaxTurnsExceeded
             from openai import AsyncOpenAI
         except ImportError as e:
@@ -110,6 +111,14 @@ CRITICAL - read_file tool behavior:
 - The @start-end syntax ALWAYS works to read the entire file, regardless of size
 - Do NOT make multiple calls to read_file with the same path without changing the range - you'll get the same truncated output
 
+CRITICAL - patch tool behavior:
+- When you call the patch tool, the agent STOPS and waits for user to apply (1) or reject (2) the patch
+- After the user decides, you will receive one of these messages:
+  - PATCH_APPLIED: The patch was successfully applied - continue with next steps
+  - PATCH_REJECTED: The user rejected - ask what they want changed
+  - PATCH_FAILED: The patch could not be applied - re-read the file and regenerate with correct context lines
+- Do NOT use alternative approaches (like exec with sed) - always use the patch tool for code changes
+
 Constraints:
 - You have a limited token budget for reading files per request. If a tool tells you that the file-read budget is reached, you MUST stop using tools and instead summarize your findings and provide the best answer you can from the information available.
 - When exploring a project, prefer breadth-first sampling of key files (README, main entry points, configs, top-level modules) instead of trying to read every file."""
@@ -153,6 +162,8 @@ Constraints:
             "name": "Neovim Agent",
             "instructions": full_instructions,
             "tools": tools,
+            # Stop agent when patch tool is called - user must approve/reject before continuing
+            "tool_use_behavior": StopAtTools(stop_at_tool_names=["patch"]),
         }
 
         # Add MCP servers if available
@@ -482,9 +493,16 @@ Constraints:
 
         # Get the final output and add it to conversation history
         if hasattr(result_stream, "final_output") and result_stream.final_output:
-            conversation_history.append(
-                {"role": "assistant", "content": str(result_stream.final_output)}
-            )
+            final_output = str(result_stream.final_output)
+            conversation_history.append({"role": "assistant", "content": final_output})
+
+            # If agent stopped due to patch tool (StopAtTools), show hint
+            # The patch is displayed as a diff block - user presses 1 to apply, 2 to reject
+            if "diff --git" in final_output or final_output.startswith("---"):
+                nvim.async_call(
+                    buffer_manager.append_content,
+                    ["> Press **1** to apply, **2** to reject, and `za` to open the diff."],
+                )
 
         # Track and display token usage
         try:

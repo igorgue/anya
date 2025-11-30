@@ -316,7 +316,7 @@ class AgentPlugin(object):
                 return result
 
             def patch(patch_str: str) -> str:
-                """Apply patch proposal. MUST include full git diff headers (diff --git ...)."""
+                """Propose a patch. Agent stops and waits for user to apply (1) or reject (2)."""
                 return tools.patch(patch_str)
 
             async def exec_lua(code: str) -> str:
@@ -453,21 +453,73 @@ class AgentPlugin(object):
 
     @pynvim.function("AgentPatchAction", sync=False)
     def agent_patch_action(self, args):
-        """Handle patch actions from Lua (apply/reject)."""
+        """Handle patch actions from Lua (apply/reject) and continue conversation."""
         try:
             action, patch_content = args
+            success = False
+            message = ""
+
             if action == "apply":
-                if self.buffer_manager._apply_single_patch(patch_content):
+                success = self.buffer_manager._apply_single_patch(patch_content)
+                if success:
                     self.logger.info("Patch applied!")
-                # Error is already printed by _apply_single_patch
+                    message = "PATCH_APPLIED: The patch was successfully applied."
+                else:
+                    # Get the error from the last apply attempt
+                    message = "PATCH_FAILED: The patch could not be applied. Please read the target file again and regenerate the patch with correct context lines."
             elif action == "reject":
-                # To reject, we reverse the patch
-                # git apply -R
-                if self.buffer_manager._apply_single_patch(patch_content, reverse=True):
-                    self.logger.info("Patch reverted!")
+                # For reject, we don't actually apply anything (patch was never applied)
+                # Just mark as rejected and continue
+                success = True
+                message = "PATCH_REJECTED: The user rejected the patch. Ask if they want changes or a different approach."
+
+            # Add the result to conversation history and continue the agent
+            if message:
+                self._conversation_history.append({"role": "user", "content": message})
+
+                # Show feedback in content buffer
+                feedback_text = (
+                    "✓ Patch applied successfully."
+                    if action == "apply" and success
+                    else (
+                        "✗ Patch rejected by user."
+                        if action == "reject"
+                        else "✗ Patch failed to apply."
+                    )
+                )
+                self.nvim.async_call(
+                    self.buffer_manager.append_content, [f"> {feedback_text}"]
+                )
+
+                # Continue the agent automatically
+                self._continue_agent_after_patch()
+
         except Exception as e:
             self.logger.error(f"Error in AgentPatchAction: {e}")
             self.nvim.err_write(f"Error applying/reverting patch: {e}\n")
+
+    def _continue_agent_after_patch(self):
+        """Continue the agent after a patch action."""
+        import uuid
+
+        # Don't run if already busy
+        if self._agent_busy:
+            self.logger.info("Agent already busy, skipping continuation")
+            return
+
+        # Cache cwd before async operations
+        self._cached_cwd = self.nvim.call("getcwd")
+
+        # Generate unique request ID
+        request_id = str(uuid.uuid4())
+
+        # Reset cancellation flag and set current request ID
+        self._cancel_requested = False
+        self._current_request_id = request_id
+        self._agent_busy = True
+
+        # Run agent in background
+        asyncio.create_task(self._run_agent_wrapper(request_id))
 
     @pynvim.command("AgentHistoryTest", sync=True)
     def agent_history_test(self):

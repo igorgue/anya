@@ -244,12 +244,31 @@ def search_repo(query: str, cwd: str = None) -> str:
 def patch(patch_str: str) -> str:
     """Proposes a patch to be applied.
 
+    The agent stops after calling this tool, waiting for user to apply (1) or reject (2).
+    The conversation will continue automatically with the result.
+
     Args:
         patch_str: The patch content as a string
 
     Returns:
         The patch content (to be rendered by the UI)
     """
+    # Clean up patch string - remove markdown code fences if present
+    patch_str = patch_str.strip()
+    if patch_str.startswith("```"):
+        # Remove opening fence (```diff, ```patch, or just ```)
+        lines = patch_str.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        # Remove closing fence
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        patch_str = "\n".join(lines)
+
+    # Ensure patch ends with newline (required by git apply)
+    if not patch_str.endswith("\n"):
+        patch_str += "\n"
+
     return patch_str
 
 

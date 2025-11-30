@@ -115,23 +115,6 @@ local function update_patch_header(bufnr, extmark_id)
     local current_line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
     if current_line ~= stats_line then
         vim.api.nvim_buf_set_lines(bufnr, row, row + 1, false, { stats_line })
-        
-        -- Re-apply highlights if line changed
-        local line = stats_line
-        local s_add, e_add = line:find("%+%d+")
-        if s_add then vim.api.nvim_buf_add_highlight(bufnr, ns_id, "OkMsg", row, s_add - 1, e_add) end
-        
-        local s_mod, e_mod = line:find("~%d+")
-        if s_mod then vim.api.nvim_buf_add_highlight(bufnr, ns_id, "WarningMsg", row, s_mod - 1, e_mod) end
-        
-        local s_del, e_del = line:find("%-%d+")
-        if s_del then vim.api.nvim_buf_add_highlight(bufnr, ns_id, "ErrorMsg", row, s_del - 1, e_del) end
-        
-        -- Highlight filename
-        local s_file = line:find("| (.+)")
-        if s_file then
-             vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Directory", row, s_file + 1, -1)
-        end
     end
     
     -- Update virtual text (Controls)
@@ -147,8 +130,24 @@ local function update_patch_header(bufnr, extmark_id)
         virt_text = virt_text,
         virt_text_pos = "right_align",
         end_row = current_end_row,
-        hl_group = "Normal",
     })
+    
+    -- Always re-apply highlights after extmark update (extmarks can override inline highlights)
+    local line = stats_line
+    local s_add, e_add = line:find("%+%d+")
+    if s_add then vim.api.nvim_buf_add_highlight(bufnr, ns_id, "OkMsg", row, s_add - 1, e_add) end
+    
+    local s_mod, e_mod = line:find("~%d+")
+    if s_mod then vim.api.nvim_buf_add_highlight(bufnr, ns_id, "WarningMsg", row, s_mod - 1, e_mod) end
+    
+    local s_del, e_del = line:find("%-%d+")
+    if s_del then vim.api.nvim_buf_add_highlight(bufnr, ns_id, "ErrorMsg", row, s_del - 1, e_del) end
+    
+    -- Highlight filename
+    local s_file = line:find("| (.+)")
+    if s_file then
+         vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Directory", row, s_file + 1, -1)
+    end
 end
 
 --- Toggle state for the patch under cursor
@@ -233,14 +232,20 @@ function M.render_diff(bufnr, content)
     
     for i = diff_start, diff_end do
         local line = vim.api.nvim_buf_get_lines(bufnr, i, i + 1, false)[1] or ""
-        if line:match("^%+") and not line:match("^%+%+%+") then
-            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffAdd", i, 0, -1)
-        elseif line:match("^%-") and not line:match("^%-%-%-") then
+        if line:match("^diff %-%-git") then
+            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Statement", i, 0, -1)
+        elseif line:match("^index ") then
+            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Comment", i, 0, -1)
+        elseif line:match("^%-%-%- ") then
             vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffDelete", i, 0, -1)
+        elseif line:match("^%+%+%+ ") then
+            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffAdd", i, 0, -1)
         elseif line:match("^@@") then
-            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffChange", i, 0, -1)
-        elseif line:match("^diff %-%-git") or line:match("^index ") or line:match("^%-%-%- ") or line:match("^%+%+%+ ") then
-            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffText", i, 0, -1)
+            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "Function", i, 0, -1)
+        elseif line:match("^%+") then
+            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffAdd", i, 0, -1)
+        elseif line:match("^%-") then
+            vim.api.nvim_buf_add_highlight(bufnr, ns_id, "DiffDelete", i, 0, -1)
         end
     end
     

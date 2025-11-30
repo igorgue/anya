@@ -180,12 +180,12 @@ def display_tool_result(
         if tool_info:
             tool_name = tool_info["tool_name"]
 
-            # Special handling for patch
-            # Debug logging to diagnose why interception might fail
+            # Special handling for patch - render as diff block
             if tool_name == "patch":
                 logger.info(
                     f"Attempting to intercept patch. append_content_fn type: {type(append_content_fn)}"
                 )
+
                 if hasattr(append_content_fn, "__self__"):
                     logger.info(
                         f"append_content_fn has __self__: {type(append_content_fn.__self__)}"
@@ -205,8 +205,8 @@ def display_tool_result(
                             lambda: buffer_manager.render_diff_block(result_str)
                         )
 
-                        # Add blank lines after the diff block to prevent LLM response from merging
-                        nvim.async_call(lambda: append_content_fn(["", ""]))
+                        # Add single blank line after the diff block
+                        nvim.async_call(lambda: append_content_fn([""]))
 
                         # Resume streaming
                         nvim.exec_lua("_G.agent_stream_paused = false")
