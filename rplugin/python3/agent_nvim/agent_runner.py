@@ -501,7 +501,7 @@ Constraints:
             if "diff --git" in final_output or final_output.startswith("---"):
                 nvim.async_call(
                     buffer_manager.append_content,
-                    ["> Press **1** to apply, **2** to reject, and **za** to open the diff."],
+                    ["> Press **1** to apply, **2** to reject, and **za** to open the diff on top of the fold."],
                 )
 
         # Track and display token usage
