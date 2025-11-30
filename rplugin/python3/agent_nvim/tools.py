@@ -11,7 +11,7 @@ MAX_READ_BYTES = int(os.environ.get("AGENT_MAX_READ_BYTES", 64000))  # ~16k toke
 
 
 def read_file(path_with_range: str, cwd: str = None) -> str:
-    """Reads file content with optional line range specifications.
+    """Reads file content with optional line range specifications, if not read 100 lines at the time.
     
     Syntax:
         filename.py              - Read first 100 lines (default truncation)
@@ -232,18 +232,18 @@ def search_repo(query: str, cwd: str = None) -> str:
 
 
 def apply_patch_proposal(patch_str: str, create_diff_buffer_callback) -> str:
-    """Proposes a patch to be applied. Creates a diff buffer for review.
+    """Proposes a patch to be applied. Creates a diff block for review.
     
     Args:
         patch_str: The patch content as a string
-        create_diff_buffer_callback: Callback function to create the diff buffer
+        create_diff_buffer_callback: Callback function to create the diff block
         
     Returns:
         Message indicating patch was proposed
     """
     try:
         create_diff_buffer_callback(patch_str)
-        return "Patch proposed. Please review the 'AgentDiff' buffer and run :AgentApply to apply it."
+        return "Patch proposed. Please review the diff block above. You can toggle 'Accept'/'Reject' with 1/2. Submit your next message to apply accepted patches."
     except Exception as e:
         return f"Error proposing patch: {e}"
 

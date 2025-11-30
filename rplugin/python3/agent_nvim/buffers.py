@@ -140,28 +140,62 @@ class BufferManager:
             self.nvim.api.win_set_buf(0, diff_buf)
             self.nvim.out_write("Patch proposed in AgentDiff buffer.\n")
     
-    def apply_patch(self):
-        """Apply the patch from the AgentDiff buffer."""
-        # Find AgentDiff buffer
-        diff_buf = None
-        for buf in self.nvim.buffers:
-            if buf.name.endswith("AgentDiff"):
-                diff_buf = buf
-                break
-
-        if not diff_buf or not diff_buf.valid:
-            self.nvim.err_write("No AgentDiff buffer found.\n")
+    def render_diff_block(self, patch_str):
+        """Render a diff block in the content buffer using Lua.
+        
+        Args:
+            patch_str: Patch content as string
+        """
+        if not hasattr(self, "content_buf") or not self.content_buf or not self.content_buf.valid:
             return
 
-        # Get content
-        lines = diff_buf[:]
-        patch_content = "\n".join(lines)
+        try:
+            self.nvim.exec_lua(
+                "require('agent_nvim.diff_view').render_diff(..., ...)",
+                self.content_buf.number,
+                patch_str
+            )
+            # Scroll to bottom to show new content
+            self._scroll_to_bottom()
+        except Exception as e:
+            self.logger.error(f"Error rendering diff block: {e}")
+            # Fallback to simple append
+            self.append_content(["```diff", patch_str, "```"])
 
-        if not patch_content.strip():
-            self.nvim.err_write("AgentDiff buffer is empty.\n")
+    def apply_pending_patches(self):
+        """Apply all pending patches in the content buffer that are marked as ACCEPT."""
+        if not hasattr(self, "content_buf") or not self.content_buf or not self.content_buf.valid:
             return
 
-        # Apply patch using git apply
+        try:
+            # Get patches from Lua
+            patches = self.nvim.exec_lua(
+                "return require('agent_nvim.diff_view').get_patches(...)",
+                self.content_buf.number
+            )
+            
+            if not patches:
+                return
+
+            applied_count = 0
+            for patch in patches:
+                state = patch.get('state', 1) # Default to ACCEPT (1)
+                content = patch.get('content', '')
+                
+                # STATE_ALWAYS_ACCEPT = 0, STATE_ACCEPT = 1
+                if state == 0 or state == 1:
+                    if self._apply_single_patch(content):
+                        applied_count += 1
+            
+            if applied_count > 0:
+                self.append_content([f"> **Applied {applied_count} patch(es)**", ""])
+                
+        except Exception as e:
+            self.logger.error(f"Error applying pending patches: {e}")
+            self.nvim.err_write(f"Error applying patches: {e}\n")
+
+    def _apply_single_patch(self, patch_content):
+        """Apply a single patch content string."""
         try:
             with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
                 tmp.write(patch_content)
@@ -177,17 +211,27 @@ class BufferManager:
             ]
 
             proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+            os.remove(tmp_path)
 
             if proc.returncode == 0:
-                self.nvim.out_write("Patch applied successfully!\n")
-                # Close diff buffer/window? Maybe keep it for reference.
-                self.nvim.command("checktime")  # Reload buffers
+                return True
             else:
+                self.logger.error(f"Failed to apply patch: {proc.stderr}")
                 self.nvim.err_write(f"Failed to apply patch: {proc.stderr}\n")
-
-            os.remove(tmp_path)
+                return False
         except Exception as e:
-            self.nvim.err_write(f"Exception applying patch: {e}\n")
+            self.logger.error(f"Exception applying patch: {e}")
+            return False
+
+    def _scroll_to_bottom(self):
+        """Scroll content buffer to bottom."""
+        for win in self.nvim.windows:
+            if win.buffer == self.content_buf:
+                try:
+                    line_count = len(self.content_buf)
+                    win.cursor = (line_count, 0)
+                except Exception:
+                    pass
     
     def get_completions(self, findstart, base):
         """Provide file path completions for @mentions.

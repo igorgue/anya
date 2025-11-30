@@ -236,7 +236,7 @@ class AgentPlugin(object):
                 
                 return result
             
-            def read_many_files(files: list) -> str:
+            def read_many_files(files: List[str]) -> str:
                 """Read multiple files in a single call, with optional line ranges (file@start-end)."""
                 # Check budget before reading (heavy tool)
                 if tool_budget and not tool_budget.can_use_budget(heavy_tool=True):
