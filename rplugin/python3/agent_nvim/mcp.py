@@ -1,6 +1,7 @@
 """MCP server management for agent.nvim plugin."""
 
 import os
+import re
 import json
 
 # Global MCP tool call timeout in seconds (configurable)
@@ -18,12 +19,40 @@ class MCPManager:
         """
         self.logger = logger
         self._mcp_hosted_tools = []
+        self._mcp_hosted_tools = []
         self._active_servers = []
+
+    def _expand_env_vars(self, value):
+        """Expand environment variables in a string value.
+
+        Supports $VAR and ${VAR} syntax.
+
+        Args:
+            value: The value to expand (can be string, dict, list, or other)
+
+        Returns:
+            The value with environment variables expanded
+        """
+        if isinstance(value, str):
+            # Match $VAR or ${VAR} patterns
+            def replace_var(match):
+                var_name = match.group(1) or match.group(2)
+                return os.environ.get(var_name, match.group(0))
+
+            # Pattern matches ${VAR} or $VAR (word characters only)
+            pattern = r'\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)'
+            return re.sub(pattern, replace_var, value)
+        elif isinstance(value, dict):
+            return {k: self._expand_env_vars(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [self._expand_env_vars(item) for item in value]
+        else:
+            # For non-string/dict/list types (int, bool, None, etc.), return as-is
+            return value
 
     def load_servers(self, config_path=None):
         """Load MCP servers from configuration file.
 
-        Args:
             config_path: Path to MCP servers.json config file
                         (defaults to ~/.config/agent.nvim/mcp/servers.json)
 
@@ -40,9 +69,9 @@ class MCPManager:
             self.logger.info("MCP classes not available in agents SDK")
             return [], []
 
-        # Return active servers if already loaded
-        if self._active_servers:
-            return self._active_servers, self._mcp_hosted_tools
+        # Don't return cached servers - reload on each call to support env var changes
+        # if self._active_servers:
+        #     return self._active_servers, self._mcp_hosted_tools
 
         # Path to MCP servers configuration
         if config_path is None:
@@ -61,6 +90,8 @@ class MCPManager:
             hosted_tools = []
 
             for server_config in servers:
+                # Expand environment variables in all config values
+                server_config = self._expand_env_vars(server_config)
                 try:
                     server_type = server_config.get("type")
                     server_name = server_config.get("name", f"server_{len(servers)}")
