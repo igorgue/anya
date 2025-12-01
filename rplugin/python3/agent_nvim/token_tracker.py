@@ -52,6 +52,7 @@ def get_context_window(model: str | None) -> int:
         "x-ai",
         "deepseek",
         "qwen",
+        "z-ai",
     ]
     for prefix in prefixes:
         prefixed = f"{prefix}/{model}"
