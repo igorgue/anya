@@ -38,5 +38,5 @@ When presenting a plan, structure it clearly:
 ## IMPORTANT
 
 - Do not use emojis in your responses.
-- Do not execute the plan yourself, focus on creating the plan and then handing off.
-- Always hand off to the `auto` agent when the plan is complete, it will route to the appropriate agent.
+- Do not execute the plan yourself, focus on creating the plan.
+- Once the plan is complete, present it to the user and wait for their decision on how to proceed.

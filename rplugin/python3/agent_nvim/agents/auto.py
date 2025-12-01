@@ -29,11 +29,13 @@ class AutoAgent:
         self,
         model: str,
         logger: logging.Logger,
+        tools: Optional[List] = None,
         mcp_servers: Optional[List] = None,
         project_instructions: Optional[str] = None,
     ):
         self.model = model
         self.logger = logger
+        self.tools = tools or []
         self.mcp_servers = mcp_servers or []
         self.project_instructions = project_instructions or ""
         self.agent = None
@@ -71,7 +73,7 @@ class AutoAgent:
             "name": "Auto Agent",
             "instructions": instructions,
             "handoffs": handoffs,
-            "tools": [],  # Auto agent has no tools, only handoffs
+            "tools": self.tools,  # Pass tools to auto agent for fallback support
         }
 
         if self.mcp_servers:

@@ -2,6 +2,14 @@
 
 This module provides fuzzy matching and indentation-aware code replacement,
 inspired by Aider's editblock implementation.
+
+Features:
+- Exact match replacement
+- Whitespace-tolerant matching (handles indentation differences)
+- Anchor-based line-level matching (finds regions by first/last line)
+- Fuzzy block matching with adaptive thresholds
+- In-memory sequential application for atomic mode (later blocks see earlier changes)
+- Rich diagnostics for near-miss failures
 """
 
 import difflib
@@ -11,7 +19,27 @@ import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
+
+# Configurable fuzzy matching thresholds
+FUZZY_STRICT = 0.75  # "confident match, auto-apply"
+FUZZY_LOOSE = 0.60  # "near miss, warn LLM but don't apply"
+MIN_BLOCK_LINES_FOR_FUZZY = 2  # Only allow fuzzy on blocks with at least this many lines
+
+
+def compute_adaptive_threshold(num_lines: int) -> float:
+    """Compute an adaptive fuzzy threshold based on block size.
+
+    Larger blocks naturally have more variance, so we lower the threshold.
+    Smaller blocks need to be more precise to avoid wrong matches.
+    """
+    if num_lines >= 20:
+        return max(FUZZY_LOOSE, FUZZY_STRICT - 0.12)
+    if num_lines >= 10:
+        return max(FUZZY_LOOSE, FUZZY_STRICT - 0.08)
+    if num_lines >= 5:
+        return max(FUZZY_LOOSE, FUZZY_STRICT - 0.05)
+    return FUZZY_STRICT
 
 
 @dataclass
@@ -33,7 +61,9 @@ class EditResult:
     message: str
     original_content: Optional[str] = None
     new_content: Optional[str] = None
-    match_type: Optional[str] = None  # "exact", "whitespace", "fuzzy"
+    match_type: Optional[str] = None  # "exact", "whitespace", "fuzzy", "anchor", "create"
+    similarity: Optional[float] = None  # For fuzzy matches, the similarity ratio
+    near_match_snippet: Optional[str] = None  # For failures, show what we found
 
 
 # Regex patterns for SEARCH/REPLACE blocks (Aider-compatible)
@@ -316,19 +346,108 @@ def reindent_lines(
     return result
 
 
+def find_anchor_match(
+    whole_lines: List[str], part_lines: List[str]
+) -> Optional[Tuple[int, int, float]]:
+    """Find a region in whole_lines using anchor-based matching.
+
+    This looks for the first and last non-empty lines of part_lines
+    as anchors, then finds candidate regions and scores them.
+
+    Returns:
+        Tuple of (start_index, end_index, similarity) or None if no match.
+    """
+    # Get anchor lines (first and last non-empty stripped lines)
+    stripped_part = [line.strip() for line in part_lines if line.strip()]
+    if len(stripped_part) < 2:
+        return None
+
+    anchor_start = stripped_part[0]
+    anchor_end = stripped_part[-1]
+
+    # Find all positions where anchor_start matches
+    candidates = []
+    stripped_whole = [line.strip() for line in whole_lines]
+
+    for i, line in enumerate(stripped_whole):
+        if line == anchor_start:
+            # Search forward for anchor_end
+            max_search = min(len(whole_lines), i + len(part_lines) * 2)  # Cap search range
+            for j in range(i + 1, max_search):
+                if stripped_whole[j] == anchor_end:
+                    candidates.append((i, j + 1))
+
+    if not candidates:
+        return None
+
+    # Score each candidate region
+    best_score = 0.0
+    best_match = None
+
+    for start, end in candidates:
+        chunk = whole_lines[start:end]
+        chunk_str = "".join(chunk)
+        part_str = "".join(part_lines)
+        score = SequenceMatcher(None, chunk_str, part_str).ratio()
+
+        if score > best_score:
+            best_score = score
+            best_match = (start, end, score)
+
+    return best_match
+
+
+def replace_with_anchor_match(
+    whole_lines: List[str], part_lines: List[str], replace_lines: List[str]
+) -> Optional[Tuple[str, float]]:
+    """Try anchor-based matching to find and replace a region.
+
+    Returns:
+        Tuple of (new_content, similarity) or None if no suitable match.
+    """
+    match = find_anchor_match(whole_lines, part_lines)
+    if match is None:
+        return None
+
+    start, end, similarity = match
+
+    # Use adaptive threshold based on block size
+    threshold = compute_adaptive_threshold(len(part_lines))
+    if similarity < threshold:
+        return None
+
+    # Detect indentation and adjust replacement
+    matched_chunk = whole_lines[start:end]
+    chunk_indent = detect_indent_prefix(matched_chunk)
+    part_indent = detect_indent_prefix(part_lines)
+
+    if chunk_indent != part_indent:
+        replace_lines = reindent_lines(replace_lines, chunk_indent, part_indent)
+
+    modified = whole_lines[:start] + replace_lines + whole_lines[end:]
+    return "".join(modified), similarity
+
+
 def replace_closest_edit_distance(
     whole_lines: List[str], part: str, part_lines: List[str], replace_lines: List[str]
-) -> Optional[str]:
-    """Fuzzy matching using edit distance with indentation preservation."""
-    similarity_thresh = 0.8
+) -> Optional[Tuple[str, float]]:
+    """Fuzzy matching using edit distance with indentation preservation.
 
-    max_similarity = 0
+    Returns:
+        Tuple of (new_content, similarity) or None if no match above threshold.
+    """
+    # Use adaptive threshold based on block size
+    num_lines = len(part_lines)
+    similarity_thresh = compute_adaptive_threshold(num_lines)
+
+    max_similarity = 0.0
     most_similar_chunk_start = -1
     most_similar_chunk_end = -1
 
-    scale = 0.1
-    min_len = math.floor(len(part_lines) * (1 - scale))
-    max_len = math.ceil(len(part_lines) * (1 + scale))
+    # Allow more variance in chunk size for better matching
+    scale = 0.15
+    min_len = max(1, math.floor(num_lines * (1 - scale)))
+    max_len = math.ceil(num_lines * (1 + scale))
 
     for length in range(min_len, max_len + 1):
         for i in range(len(whole_lines) - length + 1):
@@ -359,7 +478,7 @@ def replace_closest_edit_distance(
         + replace_lines
         + whole_lines[most_similar_chunk_end:]
     )
-    return "".join(modified_whole)
+    return "".join(modified_whole), max_similarity
 
 
 def try_dotdotdots(whole: str, part: str, replace: str) -> Optional[str]:
@@ -410,12 +529,14 @@ def try_dotdotdots(whole: str, part: str, replace: str) -> Optional[str]:
 
 def replace_most_similar_chunk(
     whole: str, part: str, replace: str
-) -> Tuple[Optional[str], str]:
+) -> Tuple[Optional[str], str, Optional[float], Optional[str]]:
     """Best efforts to find the `part` lines in `whole` and replace them with `replace`.
 
     Returns:
-        Tuple of (new_content or None, match_type)
-        match_type is one of: "exact", "whitespace", "dotdotdot", "fuzzy", "none"
+        Tuple of (new_content or None, match_type, similarity, near_match_snippet)
+        match_type is one of: "exact", "whitespace", "dotdotdot", "anchor", "fuzzy", "near_miss", "none"
+        similarity is the match ratio for fuzzy/anchor matches
+        near_match_snippet shows the closest match for failures
     """
     whole, whole_lines = prep(whole)
     part, part_lines = prep(part)
@@ -424,51 +545,78 @@ def replace_most_similar_chunk(
     # Try exact match first
     res = perfect_replace(whole_lines, part_lines, replace_lines)
     if res:
-        return res, "exact"
+        return res, "exact", 1.0, None
 
     # Try being flexible about leading whitespace
     res = replace_part_with_missing_leading_whitespace(
         whole_lines, part_lines, replace_lines
     )
     if res:
-        return res, "whitespace"
+        return res, "whitespace", 1.0, None
 
     # Drop leading empty line (LLMs sometimes add them spuriously)
     if len(part_lines) > 2 and not part_lines[0].strip():
         skip_blank_line_part_lines = part_lines[1:]
         res = perfect_replace(whole_lines, skip_blank_line_part_lines, replace_lines)
         if res:
-            return res, "exact"
+            return res, "exact", 1.0, None
         res = replace_part_with_missing_leading_whitespace(
             whole_lines, skip_blank_line_part_lines, replace_lines
         )
         if res:
-            return res, "whitespace"
+            return res, "whitespace", 1.0, None
 
     # Try to handle ... ellipsis
     try:
         res = try_dotdotdots(whole, part, replace)
         if res:
-            return res, "dotdotdot"
+            return res, "dotdotdot", 1.0, None
     except Exception:
         pass
 
-    # Try fuzzy matching as last resort
-    res = replace_closest_edit_distance(whole_lines, part, part_lines, replace_lines)
-    if res:
-        return res, "fuzzy"
+    # Try anchor-based matching (good for when code has shifted)
+    if len(part_lines) >= MIN_BLOCK_LINES_FOR_FUZZY:
+        result = replace_with_anchor_match(whole_lines, part_lines, replace_lines)
+        if result:
+            new_content, similarity = result
+            return new_content, "anchor", similarity, None
 
-    return None, "none"
+    # Try fuzzy matching as last resort
+    if len(part_lines) >= MIN_BLOCK_LINES_FOR_FUZZY:
+        result = replace_closest_edit_distance(whole_lines, part, part_lines, replace_lines)
+        if result:
+            new_content, similarity = result
+            return new_content, "fuzzy", similarity, None
+
+    # No match found - try to find a near-miss for diagnostics
+    near_match = find_similar_lines(part, whole, threshold=FUZZY_LOOSE)
+    if near_match:
+        # Check if this is a "near miss" (between loose and strict thresholds)
+        snippet, start, end, ratio = near_match
+        if ratio >= FUZZY_LOOSE:
+            return None, "near_miss", ratio, snippet
+
+    return None, "none", 0.0, None
 
 
 def find_similar_lines(
     search_lines: str, content_lines: str, threshold: float = 0.6
-) -> str:
-    """Find lines in content that are similar to search_lines."""
+) -> Optional[Tuple[str, int, int, float]]:
+    """Find lines in content that are similar to search_lines.
+
+    Returns:
+        Tuple of (snippet, start_line, end_line, similarity_ratio) or None if below threshold.
+    """
     search_list = search_lines.splitlines()
     content_list = content_lines.splitlines()
 
-    best_ratio = 0
+    if not search_list or not content_list:
+        return None
+
+    if len(search_list) > len(content_list):
+        return None
+
+    best_ratio = 0.0
     best_match = None
     best_match_i = 0
 
@@ -481,22 +629,24 @@ def find_similar_lines(
             best_match_i = i
 
     if best_ratio < threshold:
-        return ""
+        return None
 
+    # If we have an exact first/last line match, return just the matched chunk
     if (
         best_match
         and best_match[0] == search_list[0]
         and best_match[-1] == search_list[-1]
     ):
-        return "\n".join(best_match)
+        end_line = best_match_i + len(search_list)
+        return "\n".join(best_match), best_match_i, end_line, best_ratio
 
-    # Extend context around match
-    N = 5
-    best_match_end = min(len(content_list), best_match_i + len(search_list) + N)
-    best_match_i = max(0, best_match_i - N)
+    # Extend context around match for better diagnostics
+    N = 3
+    start = max(0, best_match_i - N)
+    end = min(len(content_list), best_match_i + len(search_list) + N)
 
-    best = content_list[best_match_i:best_match_end]
-    return "\n".join(best)
+    snippet = "\n".join(content_list[start:end])
+    return snippet, best_match_i, best_match_i + len(search_list), best_ratio
 
 
 def apply_edit_block(block: EditBlock, cwd: str) -> EditResult:
@@ -562,22 +712,36 @@ def apply_edit_block(block: EditBlock, cwd: str) -> EditResult:
         with open(full_path, "r", encoding="utf-8", errors="replace") as f:
             original_content = f.read()
 
-        new_content, match_type = replace_most_similar_chunk(
+        new_content, match_type, similarity, near_match = replace_most_similar_chunk(
             original_content, block.search, block.replace
         )
 
         if new_content is None:
-            # Find similar lines to help with error message
-            similar = find_similar_lines(block.search, original_content)
-            hint = ""
-            if similar:
-                hint = f"\n\nDid you mean:\n```\n{similar}\n```"
+            # Build a helpful error message
+            if match_type == "near_miss" and near_match:
+                hint = (
+                    f"\n\nClosest match (similarity: {similarity:.0%}):\n"
+                    f"```\n{near_match}\n```\n\n"
+                    "The file likely changed since your SEARCH block was generated. "
+                    "Please re-read the file and regenerate your edit."
+                )
+            else:
+                # Try to find similar lines for diagnostics
+                similar_result = find_similar_lines(block.search, original_content)
+                if similar_result:
+                    snippet, _, _, ratio = similar_result
+                    hint = f"\n\nDid you mean (similarity: {ratio:.0%}):\n```\n{snippet}\n```"
+                else:
+                    hint = ""
 
             return EditResult(
                 success=False,
                 path=block.path,
                 message=f"SEARCH block did not match any content in {block.path}{hint}",
                 original_content=original_content,
+                match_type=match_type,
+                similarity=similarity,
+                near_match_snippet=near_match,
             )
 
         with open(full_path, "w", encoding="utf-8") as f:
@@ -590,6 +754,7 @@ def apply_edit_block(block: EditBlock, cwd: str) -> EditResult:
             original_content=original_content,
             new_content=new_content,
             match_type=match_type,
+            similarity=similarity,
         )
 
     except Exception as e:
@@ -603,7 +768,12 @@ def apply_edit_block(block: EditBlock, cwd: str) -> EditResult:
 def apply_edit_blocks(
     blocks: List[EditBlock], cwd: str, atomic: bool = True
 ) -> List[EditResult]:
-    """Apply multiple edit blocks.
+    """Apply multiple edit blocks with in-memory sequential application.
+
+    In atomic mode, edits to the same file see each other's changes during
+    validation, so later blocks can match against content modified by earlier
+    blocks. This fixes the common failure mode where an LLM generates multiple
+    sequential edits to the same file.
 
     Args:
         blocks: List of EditBlock objects to apply
@@ -616,10 +786,11 @@ def apply_edit_blocks(
     if not atomic:
         return [apply_edit_block(block, cwd) for block in blocks]
 
-    # Atomic mode: validate all first, then apply
-    # First pass: read all files and compute results in memory
-    pending_writes = []
-    results = []
+    # Atomic mode with in-memory sequential application
+    # working_contents tracks the current state of each file as we apply edits
+    working_contents: Dict[str, str] = {}  # full_path -> current in-memory content
+    original_contents: Dict[str, Optional[str]] = {}  # full_path -> original content (for backup)
+    results: List[EditResult] = []
 
     for block in blocks:
         if not os.path.isabs(block.path):
@@ -627,31 +798,37 @@ def apply_edit_blocks(
         else:
             full_path = block.path
 
-        # Handle new file creation
-        if not block.search.strip():
-            original = None
+        # Get current content (from working copy or disk)
+        if full_path not in working_contents:
             if os.path.exists(full_path):
                 with open(full_path, "r", encoding="utf-8", errors="replace") as f:
-                    original = f.read()
-                new_content = original + block.replace
+                    content = f.read()
+                working_contents[full_path] = content
+                original_contents[full_path] = content
             else:
-                new_content = block.replace
+                working_contents[full_path] = ""
+                original_contents[full_path] = None
 
-            pending_writes.append((full_path, new_content, original))
+        current_content = working_contents[full_path]
+
+        # Handle new file creation / append (empty SEARCH section)
+        if not block.search.strip():
+            new_content = current_content + block.replace
+            working_contents[full_path] = new_content
             results.append(
                 EditResult(
                     success=True,
                     path=block.path,
                     message=f"Will create/append to {block.path}",
-                    original_content=original,
+                    original_content=original_contents[full_path],
                     new_content=new_content,
                     match_type="create",
                 )
             )
             continue
 
-        # Handle modification
-        if not os.path.exists(full_path):
+        # Handle modification - match against current working content
+        if not current_content and not os.path.exists(full_path):
             return [
                 EditResult(
                     success=False,
@@ -660,46 +837,62 @@ def apply_edit_blocks(
                 )
             ]
 
-        with open(full_path, "r", encoding="utf-8", errors="replace") as f:
-            original_content = f.read()
-
-        new_content, match_type = replace_most_similar_chunk(
-            original_content, block.search, block.replace
+        new_content, match_type, similarity, near_match = replace_most_similar_chunk(
+            current_content, block.search, block.replace
         )
 
         if new_content is None:
-            similar = find_similar_lines(block.search, original_content)
-            hint = ""
-            if similar:
-                hint = f"\n\nDid you mean:\n```\n{similar}\n```"
+            # Build helpful error message
+            if match_type == "near_miss" and near_match:
+                hint = (
+                    f"\n\nClosest match (similarity: {similarity:.0%}):\n"
+                    f"```\n{near_match}\n```\n\n"
+                    "The file content has changed. Please re-read and regenerate your edit."
+                )
+            else:
+                similar_result = find_similar_lines(block.search, current_content)
+                if similar_result:
+                    snippet, _, _, ratio = similar_result
+                    hint = f"\n\nDid you mean (similarity: {ratio:.0%}):\n```\n{snippet}\n```"
+                else:
+                    hint = ""
+
             return [
                 EditResult(
                     success=False,
                     path=block.path,
                     message=f"SEARCH block did not match: {block.path}{hint}",
-                    original_content=original_content,
+                    original_content=original_contents[full_path],
+                    match_type=match_type,
+                    similarity=similarity,
+                    near_match_snippet=near_match,
                 )
             ]
 
-        pending_writes.append((full_path, new_content, original_content))
+        # Update working content so subsequent blocks see this change
+        working_contents[full_path] = new_content
         results.append(
             EditResult(
                 success=True,
                 path=block.path,
                 message=f"Applied edit to {block.path} ({match_type} match)",
-                original_content=original_content,
+                original_content=original_contents[full_path],
                 new_content=new_content,
                 match_type=match_type,
+                similarity=similarity,
             )
         )
 
-    # All validations passed, write files
-    for full_path, new_content, _ in pending_writes:
-        parent_dir = os.path.dirname(full_path)
-        if parent_dir and not os.path.exists(parent_dir):
-            os.makedirs(parent_dir)
-        with open(full_path, "w", encoding="utf-8") as f:
-            f.write(new_content)
+    # All validations passed - write final content for each file
+    for full_path, final_content in working_contents.items():
+        # Only write if content actually changed
+        original = original_contents.get(full_path)
+        if final_content != original:
+            parent_dir = os.path.dirname(full_path)
+            if parent_dir and not os.path.exists(parent_dir):
+                os.makedirs(parent_dir)
+            with open(full_path, "w", encoding="utf-8") as f:
+                f.write(final_content)
 
     return results
 

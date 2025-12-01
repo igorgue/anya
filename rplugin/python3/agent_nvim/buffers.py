@@ -42,9 +42,7 @@ def _load_logo():
         logger.warning(f"Could not load logo from {logo_path}: {e}, using fallback")
         # Fallback to hardcoded logo if file not found
         lines = [
-            "░█▀█░█▀▀░█▀▀░█▀█░▀█▀░░░░█▀█░█░█░▀█▀░█▄█",
-            "░█▀█░█░█░█▀▀░█░█░░█░░░░░█░█░▀▄▀░░█░░█░█",
-            "░▀░▀░▀▀▀░▀▀▀░▀░▀░░▀░░▀░░▀░▀░░▀░░▀▀▀░▀░▀",
+            "agent.nvim",
         ]
     return lines
 
@@ -268,14 +266,16 @@ class BufferManager:
             # Fallback to simple append
             self.append_content(["```", edit_str, "```"])
 
-    def apply_edit_blocks(self, edit_str):
+    def apply_edit_blocks(self, edit_str, return_details=False):
         """Apply SEARCH/REPLACE edit blocks to files.
 
         Args:
             edit_str: String containing one or more SEARCH/REPLACE blocks
+            return_details: If True, return (success, message) tuple for LLM feedback
 
         Returns:
-            True if all edits applied successfully, False otherwise
+            If return_details is False: True if all edits applied successfully, False otherwise
+            If return_details is True: (success, message) tuple with detailed feedback
         """
         try:
             from . import search_replace
@@ -287,6 +287,9 @@ class BufferManager:
 
             if not blocks:
                 self.logger.warning("No valid SEARCH/REPLACE blocks to apply")
+                msg = "No valid SEARCH/REPLACE blocks found in the edit content."
+                if return_details:
+                    return False, msg
                 return False
 
             # Apply all blocks atomically
@@ -306,18 +309,30 @@ class BufferManager:
                 self.nvim.command("checktime")
 
                 self.logger.info(f"Applied {len(results)} edit(s) successfully")
+                msg = f"Successfully applied {len(results)} edit(s)."
+                if return_details:
+                    return True, msg
+                return True
             else:
-                # Log failures
+                # Build detailed failure message for LLM
+                failure_messages = []
                 for result in results:
                     if not result.success:
                         self.logger.error(f"Edit failed: {result.message}")
                         self.nvim.err_write(f"Edit failed: {result.message}\n")
+                        failure_messages.append(result.message)
 
-            return all_success
+                msg = "EDIT_FAILED: " + " | ".join(failure_messages)
+                if return_details:
+                    return False, msg
+                return False
 
         except Exception as e:
             self.logger.error(f"Error applying edit blocks: {e}")
             self.nvim.err_write(f"Error applying edits: {e}\n")
+            msg = f"EDIT_FAILED: Error applying edits: {e}"
+            if return_details:
+                return False, msg
             return False
 
     def apply_pending_patches(self):

@@ -180,6 +180,7 @@ async def run_agent(
         auto_agent = AutoAgent(
             model=model,
             logger=logger,
+            tools=tools,  # Pass tools to auto agent so it can handle requests and hand off
             mcp_servers=mcp_servers if mcp_servers else None,
             project_instructions=project_instructions,
         )
