@@ -5,7 +5,7 @@ import re
 import json
 
 # Global MCP tool call timeout in seconds (configurable)
-MCP_TOOL_TIMEOUT = 45
+MCP_TOOL_TIMEOUT = 60
 
 
 class MCPManager:
