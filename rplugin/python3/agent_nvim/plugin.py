@@ -63,6 +63,7 @@ class AgentPlugin(object):
         
         # Flag to track if agents have been eagerly initialized
         self._agents_initialized = False
+        self._cached_agents = None  # Cache initialized agents for fast reuse
 
         # Initialize Lua module (history will be initialized by ftplugin when buffer opens)
         try:
@@ -331,30 +332,11 @@ class AgentPlugin(object):
                 # Load project instructions
                 project_instructions = load_project_instructions(cwd)
 
-                # Load MCP servers
-                mcp_servers, _ = self.mcp_manager.load_servers()
-                
-                # Initialize MCP if available (non-blocking)
-                if mcp_servers:
-                    # MCP connection is async, but we start it here for early setup
-                    import asyncio
-                    
-                    async def connect_mcp():
-                        try:
-                            await self.mcp_manager.connect_servers(mcp_servers)
-                        except Exception as e:
-                            self.logger.debug(f"MCP initialization in background: {e}")
-                    
-                    try:
-                        asyncio.create_task(connect_mcp())
-                    except Exception as e:
-                        self.logger.debug(f"Could not schedule MCP connection: {e}")
+                # MCP servers are now loaded and connected fresh for each request (no caching)
 
-                # Skip eager agent initialization
-                # Agents MUST be created fresh for each request with tools attached
-                # Otherwise handoffs won't have access to tools
+                # Mark initialization complete - agents will be created fresh each request
                 self._agents_initialized = True
-                self.logger.info("Agent initialization deferred to request time (ensures tools are properly attached)")
+                self.logger.info("MCP servers pre-connected on startup. Agents will be created fresh per request.")
 
             except ImportError as e:
                 self.logger.debug(
@@ -1672,6 +1654,8 @@ class AgentPlugin(object):
                 mcp_manager=self.mcp_manager,
                 tool_wrappers=tool_wrappers,
                 cached_cwd=self._cached_cwd,
+                cached_agents=self._cached_agents,  # Use pre-initialized agents if available
+                cached_mcp_servers=None,  # Always load fresh MCP servers for each request
                 emit_event_fn=lambda name, data: utils.emit_user_event(
                     self.nvim, name, data
                 ),

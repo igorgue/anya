@@ -25,6 +25,8 @@ async def run_agent(
     tool_wrappers,
     cached_cwd,
     emit_event_fn,
+    cached_agents=None,
+    cached_mcp_servers=None,
     skip_header=False,
 ):
     """Run the agent with streaming output.
@@ -148,7 +150,9 @@ async def run_agent(
         # 3. Create auto agent with handoffs to specialized agents
         # 4. The SDK handles the handoff chain internally
 
-        # Create specialized agents first
+        # Always create agents fresh each request (don't reuse cached agents - SDK limitation)
+        logger.info("Creating agents fresh per request to maintain MCP tool access")
+        
         code_agent = CodeAgent(
             model=model,
             logger=logger,
@@ -168,22 +172,6 @@ async def run_agent(
 
         code_sdk_agent = code_agent.create_agent()
         plan_sdk_agent = plan_agent.create_agent()
-        
-        # Verify tools are present on handoff agents
-        code_tools = code_sdk_agent.tools if code_sdk_agent and hasattr(code_sdk_agent, 'tools') else []
-        plan_tools = plan_sdk_agent.tools if plan_sdk_agent and hasattr(plan_sdk_agent, 'tools') else []
-        
-        logger.info(f"CodeAgent SDK agent created with {len(code_tools)} tools")
-        if code_tools:
-            for tool in code_tools:
-                tool_name = getattr(tool, 'name', 'unknown')
-                logger.info(f"  - CodeAgent tool: {tool_name}")
-        
-        logger.info(f"PlanAgent SDK agent created with {len(plan_tools)} tools")
-        if plan_tools:
-            for tool in plan_tools:
-                tool_name = getattr(tool, 'name', 'unknown')
-                logger.info(f"  - PlanAgent tool: {tool_name}")
 
         if not code_sdk_agent or not plan_sdk_agent:
             nvim.async_call(
@@ -194,7 +182,6 @@ async def run_agent(
             return
 
         # Create AutoAgent with handoffs to both agents
-        # AUTO agent is a pure router - no tools, no MCP servers
         auto_agent = AutoAgent(
             model=model,
             logger=logger,
@@ -243,9 +230,9 @@ async def run_agent(
         # Create hooks to manage max turns and context limits
         from agents import RunHooks
 
-        max_turns = 25
+        max_turns = 10000
         turn_warning_threshold = (
-            10  # Start forcing responses early to ensure we get output
+            9000  # Start forcing responses early to ensure we get output
         )
         context_limit_threshold = (
             0.70  # 70% context usage triggers limit (be conservative)
@@ -361,7 +348,16 @@ async def run_agent(
             else buffer_manager.content_buf.number
         )
 
+        # Track if we've seen a handoff to continue streaming after handoff completes
+        handoff_occurred = False
+        event_count = 0
+        max_events = 50000  # Safety limit to prevent infinite loops
+        
         async for event in result_stream.stream_events():
+            event_count += 1
+            if event_count > max_events:
+                logger.warning(f"Exceeded max events ({max_events}), breaking from event loop")
+                break
             # Check for cancellation
             if cancel_flag_getter():
                 logger.info(f"Agent request {request_id} cancelled by user")
@@ -410,6 +406,7 @@ async def run_agent(
             
             # Log agent updates to see handoffs
             if event_type == "AgentUpdatedStreamEvent":
+                handoff_occurred = True
                 if hasattr(event, 'new_agent'):
                     agent_name = getattr(event.new_agent, 'name', 'unknown')
                     agent_tools = len(event.new_agent.tools) if hasattr(event.new_agent, 'tools') and event.new_agent.tools else 0
@@ -558,7 +555,9 @@ async def run_agent(
                 # Log other event types for debugging
                 logger.debug(f"Other event type: {event_type}")
 
-            if result_stream.is_complete:
+            # Only break on completion if no handoff occurred
+            # If a handoff occurred, continue streaming to get the delegated agent's response
+            if result_stream.is_complete and not handoff_occurred:
                 break
 
         # Get the final output and add it to conversation history
