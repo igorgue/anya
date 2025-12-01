@@ -195,10 +195,10 @@ def list_files(path: str = ".", cwd: str = None) -> str:
     try:
         # Expand ~ to home directory
         path = os.path.expanduser(path)
-        
+
         if cwd is None:
             cwd = os.getcwd()
-        
+
         if not os.path.isabs(path):
             target_dir = os.path.join(cwd, path)
         else:
@@ -239,7 +239,7 @@ def search_repo(query: str, cwd: str = None) -> str:
     try:
         if cwd is None:
             cwd = os.getcwd()
-        
+
         # Expand ~ to home directory
         cwd = os.path.expanduser(cwd)
 

@@ -231,6 +231,7 @@ class AgentPlugin(object):
 
             # Sync YOLO mode to environment variable so is_yolo_mode() works
             import os
+
             os.environ["AGENT_YOLO"] = "1" if mode == "YOLO" else ""
 
             # Set global Lua state for toolbar
@@ -261,12 +262,13 @@ class AgentPlugin(object):
         """
         try:
             self.config_manager.set(key, value)
-            
+
             # Sync YOLO mode to environment variable so is_yolo_mode() works
             if key == "mode":
                 import os
+
                 os.environ["AGENT_YOLO"] = "1" if value == "YOLO" else ""
-            
+
             self.logger.debug(f"Updated config: {key} = {value}")
         except Exception as e:
             self.logger.error(f"Failed to update config: {e}")
@@ -307,8 +309,7 @@ class AgentPlugin(object):
 
                 try:
                     result = await asyncio.wait_for(
-                        asyncio.to_thread(tools.read_file, path, cwd),
-                        timeout=timeout
+                        asyncio.to_thread(tools.read_file, path, cwd), timeout=timeout
                     )
 
                     # Track token usage
@@ -340,7 +341,7 @@ class AgentPlugin(object):
                 try:
                     result = await asyncio.wait_for(
                         asyncio.to_thread(tools.read_many_files, files, cwd),
-                        timeout=timeout
+                        timeout=timeout,
                     )
 
                     # Track token usage
@@ -368,8 +369,7 @@ class AgentPlugin(object):
 
                 try:
                     result = await asyncio.wait_for(
-                        asyncio.to_thread(tools.list_files, path, cwd),
-                        timeout=timeout
+                        asyncio.to_thread(tools.list_files, path, cwd), timeout=timeout
                     )
 
                     # Track token usage (light tool, no budget check)
@@ -398,7 +398,7 @@ class AgentPlugin(object):
                 try:
                     result = await asyncio.wait_for(
                         asyncio.to_thread(tools.search_repo, query, cwd),
-                        timeout=timeout
+                        timeout=timeout,
                     )
 
                     # Track token usage
@@ -612,7 +612,6 @@ class AgentPlugin(object):
         if self._cancel_requested:
             # Already cancelled
             return
-
 
         if self._current_request_id:
             self._cancel_requested = True
@@ -1312,6 +1311,17 @@ class AgentPlugin(object):
                     False,
                     [],
                 )
+                # Clear all extmarks from the buffer
+                try:
+                    self.nvim.async_call(
+                        self.nvim.api.buf_clear_namespace,
+                        self.buffer_manager.content_buf,
+                        -1,
+                        0,
+                        -1,
+                    )
+                except Exception:
+                    pass
             # Clear conversation history
             self._conversation_history = []
         elif cmd == "/cancel":

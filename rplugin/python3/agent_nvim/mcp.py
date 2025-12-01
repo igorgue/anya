@@ -40,7 +40,7 @@ class MCPManager:
                 return os.environ.get(var_name, match.group(0))
 
             # Pattern matches ${VAR} or $VAR (word characters only)
-            pattern = r'\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)'
+            pattern = r"\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)"
             return re.sub(pattern, replace_var, value)
         elif isinstance(value, dict):
             return {k: self._expand_env_vars(v) for k, v in value.items()}

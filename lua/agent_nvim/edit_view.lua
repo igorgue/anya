@@ -13,8 +13,8 @@ local STATE_REJECT = 2
 
 -- Icons
 local ICON_PENDING = "○"
-local ICON_APPLIED = ""
-local ICON_REJECTED = ""
+local ICON_APPLIED = ""
+local ICON_REJECTED = ""
 
 -- Highlight group names
 local HL_ACCEPT = "AgentEditAccept"

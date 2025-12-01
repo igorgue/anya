@@ -81,7 +81,9 @@ def strip_filename(filename: str) -> Optional[str]:
     return filename if filename else None
 
 
-def find_filename(lines: List[str], valid_fnames: Optional[List[str]] = None) -> Optional[str]:
+def find_filename(
+    lines: List[str], valid_fnames: Optional[List[str]] = None
+) -> Optional[str]:
     """Find filename from preceding lines before SEARCH block."""
     if valid_fnames is None:
         valid_fnames = []
@@ -283,7 +285,9 @@ def replace_part_with_missing_leading_whitespace(
         replace_lines = [
             add_leading + rline if rline.strip() else rline for rline in replace_lines
         ]
-        whole_lines = whole_lines[:i] + replace_lines + whole_lines[i + num_part_lines :]
+        whole_lines = (
+            whole_lines[:i] + replace_lines + whole_lines[i + num_part_lines :]
+        )
         return "".join(whole_lines)
 
     return None
@@ -297,7 +301,9 @@ def detect_indent_prefix(lines: List[str]) -> str:
     return ""
 
 
-def reindent_lines(lines: List[str], target_indent: str, source_indent: str) -> List[str]:
+def reindent_lines(
+    lines: List[str], target_indent: str, source_indent: str
+) -> List[str]:
     """Reindent lines from source_indent to target_indent."""
     result = []
     for line in lines:
@@ -402,7 +408,9 @@ def try_dotdotdots(whole: str, part: str, replace: str) -> Optional[str]:
     return whole
 
 
-def replace_most_similar_chunk(whole: str, part: str, replace: str) -> Tuple[Optional[str], str]:
+def replace_most_similar_chunk(
+    whole: str, part: str, replace: str
+) -> Tuple[Optional[str], str]:
     """Best efforts to find the `part` lines in `whole` and replace them with `replace`.
 
     Returns:
@@ -419,7 +427,9 @@ def replace_most_similar_chunk(whole: str, part: str, replace: str) -> Tuple[Opt
         return res, "exact"
 
     # Try being flexible about leading whitespace
-    res = replace_part_with_missing_leading_whitespace(whole_lines, part_lines, replace_lines)
+    res = replace_part_with_missing_leading_whitespace(
+        whole_lines, part_lines, replace_lines
+    )
     if res:
         return res, "whitespace"
 
@@ -451,7 +461,9 @@ def replace_most_similar_chunk(whole: str, part: str, replace: str) -> Tuple[Opt
     return None, "none"
 
 
-def find_similar_lines(search_lines: str, content_lines: str, threshold: float = 0.6) -> str:
+def find_similar_lines(
+    search_lines: str, content_lines: str, threshold: float = 0.6
+) -> str:
     """Find lines in content that are similar to search_lines."""
     search_list = search_lines.splitlines()
     content_list = content_lines.splitlines()
@@ -471,7 +483,11 @@ def find_similar_lines(search_lines: str, content_lines: str, threshold: float =
     if best_ratio < threshold:
         return ""
 
-    if best_match and best_match[0] == search_list[0] and best_match[-1] == search_list[-1]:
+    if (
+        best_match
+        and best_match[0] == search_list[0]
+        and best_match[-1] == search_list[-1]
+    ):
         return "\n".join(best_match)
 
     # Extend context around match

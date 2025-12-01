@@ -3,6 +3,7 @@ setlocal nonumber
 setlocal norelativenumber
 setlocal signcolumn=no
 setlocal wrap
+setlocal scrolloff=1
 syntax enable
 
 " Map Ctrl+C to cancel
