@@ -96,10 +96,27 @@ The agent can make precise code edits using Aider-style SEARCH/REPLACE blocks. W
 - Fuzzy matching handles minor whitespace differences automatically
 
 **Edit Block Format:**
+The agent uses SEARCH/REPLACE blocks to propose edits. You review the changes in the chat and can accept or reject each edit before it's applied to your files.
+
+Example:
 ```
-path/to/file.py
+src/utils.py
 <<<<<<< SEARCH
-exact code to find
+def calculate_total(items):
+    total = 0
+    for item in items:
+        total += item['price']
+    return total
+=======
+def calculate_total(items):
+    total = 0
+    for item in items:
+        total += item['price'] * item['quantity']
+    return total
+>>>>>>> REPLACE
+```
+
+The SEARCH block contains the exact code to find (with proper indentation), and the REPLACE block contains the new code. The agent uses fuzzy matching to handle minor whitespace differences.
 
 ### Context Compaction
 
