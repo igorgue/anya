@@ -230,6 +230,83 @@ def display_tool_result(
         if tool_info:
             tool_name = tool_info["tool_name"]
 
+            # Special handling for edit - render as SEARCH/REPLACE blocks
+            if tool_name == "edit":
+                logger.info("Handling edit tool with SEARCH/REPLACE blocks")
+
+                if hasattr(append_content_fn, "__self__"):
+                    if hasattr(append_content_fn.__self__, "render_edit_blocks"):
+                        buffer_manager = append_content_fn.__self__
+
+                        # Check for YOLO mode - auto-apply edits
+                        yolo_mode = os.environ.get("AGENT_YOLO", "").lower() in (
+                            "1",
+                            "true",
+                            "yes",
+                        )
+
+                        # Render the edit blocks
+                        nvim.async_call(
+                            lambda: buffer_manager.render_edit_blocks(result_str)
+                        )
+
+                        # In YOLO mode, auto-apply the edits
+                        if yolo_mode:
+                            logger.info("YOLO mode: auto-applying edits")
+                            edit_content = result_str
+
+                            def apply_yolo_edits():
+                                success = buffer_manager.apply_edit_blocks(edit_content)
+                                if success:
+                                    append_content_fn(
+                                        [
+                                            "",
+                                            "> Edits auto-applied (press **2** to undo)",
+                                            "",
+                                        ]
+                                    )
+                                    logger.info("YOLO: Edits applied successfully")
+                                    try:
+                                        nvim.exec_lua(
+                                            """
+                                            local edit_view = require('agent_nvim.edit_view')
+                                            local bufnr = vim.fn.bufnr('chat')
+                                            if bufnr ~= -1 then
+                                                edit_view.mark_latest_as_applied(bufnr)
+                                            end
+                                            """
+                                        )
+                                    except Exception as e:
+                                        logger.debug(
+                                            f"Could not update edit view state: {e}"
+                                        )
+                                else:
+                                    append_content_fn(
+                                        [
+                                            "",
+                                            ">   Edits failed to apply",
+                                        ]
+                                    )
+                                    logger.warning("YOLO: Edits failed to apply")
+
+                            nvim.async_call(apply_yolo_edits)
+
+                        # Resume streaming
+                        nvim.exec_lua("_G.agent_stream_paused = false")
+                        if emit_event_fn and request_id:
+                            emit_event_fn(
+                                "AgentToolCall",
+                                {
+                                    "id": request_id,
+                                    "message": "thinking",
+                                },
+                            )
+                        return
+                    else:
+                        logger.warning("render_edit_blocks not found on buffer_manager")
+                else:
+                    logger.warning("append_content_fn does not have __self__")
+
             # Special handling for patch - render as diff block
             if tool_name == "patch":
                 logger.info(

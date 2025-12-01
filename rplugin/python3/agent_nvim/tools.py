@@ -61,6 +61,9 @@ def read_file(path_with_range: str, cwd: str = None) -> str:
                 else:
                     return f"Error: Invalid range specification '{range_spec}'. Use 'start-end', 'start-100', '32-234', or '3202-end'"
 
+        # Expand ~ to home directory
+        path = os.path.expanduser(path)
+
         if not os.path.isabs(path):
             if cwd is None:
                 cwd = os.getcwd()
@@ -190,9 +193,16 @@ def list_files(path: str = ".", cwd: str = None) -> str:
         Newline-separated list of file paths, or error message
     """
     try:
+        # Expand ~ to home directory
+        path = os.path.expanduser(path)
+        
         if cwd is None:
             cwd = os.getcwd()
-        target_dir = os.path.join(cwd, path)
+        
+        if not os.path.isabs(path):
+            target_dir = os.path.join(cwd, path)
+        else:
+            target_dir = path
 
         # Check if directory exists
         if not os.path.exists(target_dir):
@@ -229,6 +239,9 @@ def search_repo(query: str, cwd: str = None) -> str:
     try:
         if cwd is None:
             cwd = os.getcwd()
+        
+        # Expand ~ to home directory
+        cwd = os.path.expanduser(cwd)
 
         # Try ripgrep first
         cmd = ["rg", "--line-number", "--no-heading", "--smart-case", query, cwd]
@@ -250,6 +263,9 @@ def search_repo(query: str, cwd: str = None) -> str:
 
 def patch(patch_str: str) -> str:
     """Proposes a patch to be applied.
+
+    DEPRECATED: Use the `edit` tool with SEARCH/REPLACE blocks instead.
+    This tool is kept for backwards compatibility.
 
     The agent stops after calling this tool, waiting for user to apply (1) or reject (2).
     The conversation will continue automatically with the result.
@@ -277,6 +293,54 @@ def patch(patch_str: str) -> str:
         patch_str += "\n"
 
     return patch_str
+
+
+def edit(edit_blocks: str) -> str:
+    """Propose code edits using SEARCH/REPLACE blocks.
+
+    Use this tool to make precise code modifications. Each edit block specifies:
+    - The file path
+    - A SEARCH section with the exact code to find
+    - A REPLACE section with the new code
+
+    Format:
+    ```
+    path/to/file.py
+    <<<<<<< SEARCH
+    exact code to find
+    =======
+    replacement code
+    >>>>>>> REPLACE
+    ```
+
+    Rules:
+    - The SEARCH section must EXACTLY match existing code (including whitespace)
+    - Include enough context lines to uniquely identify the location
+    - Keep blocks small and focused on specific changes
+    - Use multiple blocks for multiple changes
+    - For new files: use empty SEARCH section
+
+    Args:
+        edit_blocks: String containing one or more SEARCH/REPLACE blocks
+
+    Returns:
+        The edit blocks content (to be rendered and applied by the UI)
+    """
+    # Clean up - remove outer markdown code fences if present
+    edit_blocks = edit_blocks.strip()
+    if edit_blocks.startswith("```") and not edit_blocks.startswith("<<<"):
+        lines = edit_blocks.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        edit_blocks = "\n".join(lines)
+
+    # Ensure trailing newline
+    if not edit_blocks.endswith("\n"):
+        edit_blocks += "\n"
+
+    return edit_blocks
 
 
 def exec(command: str, cwd: str = None, timeout: int = 30) -> str:

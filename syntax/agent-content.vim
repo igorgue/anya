@@ -7,6 +7,17 @@
 syntax include @Diff syntax/diff.vim
 syntax region AgentDiffBlock start="^```diff.*$" end="^```$" contains=@Diff keepend
 
+" SEARCH/REPLACE block highlighting (Aider-style)
+" Match the markers
+syntax match AgentSearchMarker "^<\{5,9} SEARCH>*\s*$"
+syntax match AgentDividerMarker "^=\{5,9}\s*$"
+syntax match AgentReplaceMarker "^>\{5,9} REPLACE\s*$"
+
+" Link to highlight groups (will be overridden by Lua for dynamic highlighting)
+highlight link AgentSearchMarker Comment
+highlight link AgentDividerMarker Comment
+highlight link AgentReplaceMarker Comment
+
 " Highlight file references like @filename or @path/to/file
 " Define this LAST so it takes priority (later definitions win in Vim)
 " The file ref pattern includes slashes, so it will match the whole path

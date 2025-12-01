@@ -219,6 +219,107 @@ class BufferManager:
             # Fallback to simple append
             self.append_content(["```diff", patch_str, "```"])
 
+    def render_edit_blocks(self, edit_str):
+        """Render SEARCH/REPLACE edit blocks in the content buffer using Lua.
+
+        Args:
+            edit_str: String containing one or more SEARCH/REPLACE blocks
+        """
+        if (
+            not hasattr(self, "content_buf")
+            or not self.content_buf
+            or not self.content_buf.valid
+        ):
+            return
+
+        try:
+            from . import search_replace
+
+            # Parse the edit blocks
+            blocks = search_replace.parse_search_replace_blocks(edit_str)
+
+            if not blocks:
+                self.logger.warning("No valid SEARCH/REPLACE blocks found")
+                self.append_content(["", "> No valid SEARCH/REPLACE blocks found", ""])
+                return
+
+            # Render each block
+            for block in blocks:
+                self.nvim.exec_lua(
+                    """
+                    local args = {...}
+                    require('agent_nvim.edit_view').render_edit(
+                        args[1], args[2], args[3], args[4], args[5]
+                    )
+                    """,
+                    self.content_buf.number,
+                    block.path,
+                    block.search,
+                    block.replace,
+                    block.raw_block,
+                )
+
+            # Scroll to bottom to show new content
+            self._scroll_to_bottom()
+
+        except Exception as e:
+            self.logger.error(f"Error rendering edit blocks: {e}")
+            self.nvim.out_write(f"Edit block render error: {e}\n")
+            # Fallback to simple append
+            self.append_content(["```", edit_str, "```"])
+
+    def apply_edit_blocks(self, edit_str):
+        """Apply SEARCH/REPLACE edit blocks to files.
+
+        Args:
+            edit_str: String containing one or more SEARCH/REPLACE blocks
+
+        Returns:
+            True if all edits applied successfully, False otherwise
+        """
+        try:
+            from . import search_replace
+
+            cwd = self.nvim.call("getcwd")
+
+            # Parse the edit blocks
+            blocks = search_replace.parse_search_replace_blocks(edit_str)
+
+            if not blocks:
+                self.logger.warning("No valid SEARCH/REPLACE blocks to apply")
+                return False
+
+            # Apply all blocks atomically
+            results = search_replace.apply_edit_blocks(blocks, cwd, atomic=True)
+
+            # Check if all succeeded
+            all_success = all(r.success for r in results)
+
+            if all_success:
+                # Store backups for undo
+                for result in results:
+                    if result.original_content is not None:
+                        full_path = os.path.join(cwd, result.path)
+                        self._file_backups[full_path] = result.original_content
+
+                # Reload modified buffers
+                self.nvim.command("checktime")
+
+                self.logger.info(f"Applied {len(results)} edit(s) successfully")
+            else:
+                # Log failures
+                for result in results:
+                    if not result.success:
+                        self.logger.error(f"Edit failed: {result.message}")
+                        self.nvim.err_write(f"Edit failed: {result.message}\n")
+
+            return all_success
+
+        except Exception as e:
+            self.logger.error(f"Error applying edit blocks: {e}")
+            self.nvim.err_write(f"Error applying edits: {e}\n")
+            return False
+
     def apply_pending_patches(self):
         """Apply all pending patches in the content buffer that are marked as ACCEPT."""
         if (

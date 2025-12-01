@@ -6,6 +6,7 @@ An AI-proweed Neovim plugin built on te OpenAI Agets SDK.
 - **Chat Interface**: Split-window layout with streaming responses.
 - **Context Awareness**: Reference files using `@filename` (with autocompletion).
 - **Tools**: The agent can read files, list directories, and search the repository.
+- **Edit Tool**: Make precise code edits using Aider-style SEARCH/REPLACE blocks with interactive approval.
 - **Tool Folding**: Tool calls and results are automatically folded to reduce clutter. Use `za` to toggle folds.
 - **Patching**: The agent can propose patches, which you can review and apply.
 - **Project Instructions**: Customize the agent's behavior with `AGENTS.md`.
@@ -84,9 +85,21 @@ When the agent uses tools (like reading files or searching the repository), the 
 - Press `zR` to open all folds
 - Press `zM` to close all folds
 
-### Patching
+### Edit Tool
 
-If you ask the agent to modify code, it may propose a patch. The patch will be shown in a separate `AgentDiff` buffer. Review the changes and run `:AgentApply` to apply them to your files.
+The agent can make precise code edits using Aider-style SEARCH/REPLACE blocks. When the agent proposes edits:
+
+- Edits are displayed directly in the chat with clear visual indicators
+- Each edit block shows the file path, search content, and replacement content
+- Interactive approval buttons (○) allow you to accept or reject individual edits
+- Syntax highlighting distinguishes between removed (red) and added (green) content
+- Fuzzy matching handles minor whitespace differences automatically
+
+**Edit Block Format:**
+```
+path/to/file.py
+<<<<<<< SEARCH
+exact code to find
 
 ### Context Compaction
 

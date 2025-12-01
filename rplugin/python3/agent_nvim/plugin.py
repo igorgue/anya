@@ -413,8 +413,29 @@ class AgentPlugin(object):
                 return result
 
             def patch(patch_str: str) -> str:
-                """Propose a patch. Agent stops and waits for user to apply (1) or reject (2)."""
+                """Propose a patch. Agent stops and waits for user to apply (1) or reject (2).
+                DEPRECATED: Use the `edit` tool with SEARCH/REPLACE blocks instead."""
                 return tools.patch(patch_str)
+
+            def edit(edit_blocks: str) -> str:
+                """Make code edits using SEARCH/REPLACE blocks.
+
+                Format for each edit:
+                ```
+                path/to/file.py
+                <<<<<<< SEARCH
+                exact code to find (must match exactly including whitespace)
+                =======
+                replacement code
+                >>>>>>> REPLACE
+                ```
+
+                Rules:
+                - SEARCH must EXACTLY match existing code
+                - Use multiple blocks for multiple changes
+                - For new files: use empty SEARCH section
+                """
+                return tools.edit(edit_blocks)
 
             async def exec_lua(code: str) -> str:
                 """Execute Lua code inside Neovim."""
@@ -467,65 +488,7 @@ class AgentPlugin(object):
                 "list_files": function_tool(list_files),
                 "search_repo": function_tool(search_repo),
                 "patch": function_tool(patch),
-                "exec_lua": function_tool(exec_lua),
-                "exec": function_tool(exec),
-            }
-
-            def patch(patch_str: str) -> str:
-                """Propose a patch. Agent stops and waits for user to apply (1) or reject (2)."""
-                return tools.patch(patch_str)
-
-            async def exec_lua(code: str) -> str:
-                """Execute Lua code inside Neovim."""
-                return await tools.exec_lua(code, nvim=self.nvim, logger=self.logger)
-
-            async def exec(command: str, timeout: int = 30) -> str:
-                """Execute a shell command with user permission."""
-                cwd = getattr(self, "_cached_cwd", None)
-
-                self.logger.info(f"exec called with command: {command}")
-
-                # YOLO mode: run without asking
-                if exec_permissions.is_yolo_mode():
-                    self.logger.info("YOLO mode: executing command without prompt")
-                    return tools.exec(command, cwd=cwd, timeout=timeout)
-
-                # Check if command is in allow list
-                allow_list = exec_permissions.load_allow_list()
-                self.logger.info(f"Allow list: {allow_list}")
-                self.logger.info(f"Allow list path: {exec_permissions.ALLOW_LIST_PATH}")
-
-                if exec_permissions.is_command_allowed(command):
-                    self.logger.info("Command in allow list, executing")
-                    return tools.exec(command, cwd=cwd, timeout=timeout)
-
-                self.logger.info("Command NOT in allow list, prompting user")
-
-                # Prompt user for permission
-                choice = await exec_permissions.prompt_exec_permission(
-                    self.nvim, command, self.logger
-                )
-
-                self.logger.info(f"User choice: {choice}")
-
-                if choice == "run":
-                    return tools.exec(command, cwd=cwd, timeout=timeout)
-                elif choice == "always":
-                    self.logger.info(f"Adding command to allow list: {command}")
-                    exec_permissions.add_to_allow_list(command)
-                    self.logger.info(
-                        f"Allow list after add: {exec_permissions.load_allow_list()}"
-                    )
-                    return tools.exec(command, cwd=cwd, timeout=timeout)
-                else:
-                    return "Command execution was declined by user."
-
-            return {
-                "read_file": function_tool(read_file),
-                "read_many_files": function_tool(read_many_files),
-                "list_files": function_tool(list_files),
-                "search_repo": function_tool(search_repo),
-                "patch": function_tool(patch),
+                "edit": function_tool(edit),
                 "exec_lua": function_tool(exec_lua),
                 "exec": function_tool(exec),
             }
@@ -740,6 +703,71 @@ class AgentPlugin(object):
         except Exception as e:
             self.logger.error(f"Error in AgentPatchAction: {e}")
             self.nvim.err_write(f"Error applying/reverting patch: {e}\n")
+
+    @pynvim.function("AgentEditAction", sync=False)
+    def agent_edit_action(self, args):
+        """Handle edit actions from Lua (apply/reject) and continue conversation."""
+        try:
+            # Args: action, edit_content, previous_state
+            # previous_state: 0=PENDING (first decision), 1=ACCEPT, 2=REJECT
+            action = args[0]
+            edit_content = args[1]
+            previous_state = args[2] if len(args) > 2 else 0
+
+            success = False
+            message = ""
+            is_first_decision = previous_state == 0  # PENDING state
+
+            if action == "apply":
+                success = self.buffer_manager.apply_edit_blocks(edit_content)
+                if success:
+                    self.logger.info("Edit blocks applied!")
+                    if is_first_decision:
+                        message = "EDIT_APPLIED: The SEARCH/REPLACE edits were successfully applied."
+                else:
+                    if is_first_decision:
+                        message = "EDIT_FAILED: The edits could not be applied. The SEARCH content did not match the file. Please read the target file again and regenerate the edit with correct content."
+            elif action == "reject":
+                # Undo - restore from backups
+                success = self.buffer_manager._restore_backups()
+                if success:
+                    self.logger.info("Edit blocks reversed (rejected)!")
+                else:
+                    self.logger.warning(
+                        "Failed to reverse edits - may not have been applied"
+                    )
+                return
+            elif action == "reject_pending":
+                # First decision to reject - no edits to reverse
+                success = True
+                message = "EDIT_REJECTED: The user rejected the edits. Ask if they want changes or a different approach."
+
+            # Only continue agent on first decision
+            if message and is_first_decision:
+                self._conversation_history.append({"role": "user", "content": message})
+
+                # Show feedback in content buffer
+                feedback_text = (
+                    "> Edits applied successfully."
+                    if action == "apply" and success
+                    else (
+                        ">   Edits rejected by user."
+                        if action == "reject_pending"
+                        else ">   Edits failed to apply."
+                    )
+                )
+                self.nvim.async_call(
+                    self.buffer_manager.append_content, ["", feedback_text]
+                )
+
+                self.nvim.async_call(self.buffer_manager.append_content, ["", ""])
+
+                # Continue the agent automatically
+                self._continue_agent_after_patch(skip_header=True)
+
+        except Exception as e:
+            self.logger.error(f"Error in AgentEditAction: {e}")
+            self.nvim.err_write(f"Error applying/reverting edits: {e}\n")
 
     def _continue_agent_after_patch(self, skip_header=False):
         """Continue the agent after a patch action."""
