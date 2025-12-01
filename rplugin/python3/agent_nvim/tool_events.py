@@ -245,35 +245,21 @@ def display_tool_result(
                             "yes",
                         )
 
-                        # In YOLO mode, edits are already applied by the edit tool
-                        # Just render them and mark as applied
+                        # In YOLO mode, apply edits automatically
                         if yolo_mode:
-                            logger.info("YOLO mode: edits already applied by tool")
+                            logger.info("YOLO mode: auto-applying edits")
 
-                            # Check if the result indicates success or failure
-                            edit_applied = result_str.startswith("EDIT_APPLIED:")
-                            edit_failed = "EDIT_FAILED:" in result_str
+                            # Capture result_str in closure
+                            edit_content = result_str
 
-                            # Extract the actual edit content for rendering
-                            # The edit content comes after the status message
-                            if edit_applied:
-                                # Find the edit blocks after the status line
-                                lines = result_str.split("\n", 2)
-                                if len(lines) > 2:
-                                    edit_content_for_render = lines[2]
-                                else:
-                                    edit_content_for_render = result_str
-                            else:
-                                edit_content_for_render = result_str
-
+                            # Render the edit blocks first
                             nvim.async_call(
-                                lambda: buffer_manager.render_edit_blocks(
-                                    edit_content_for_render
-                                )
+                                lambda: buffer_manager.render_edit_blocks(edit_content)
                             )
 
-                            def update_yolo_state():
-                                if edit_applied:
+                            def apply_yolo_edits():
+                                success = buffer_manager.apply_edit_blocks(edit_content)
+                                if success:
                                     append_content_fn(
                                         [
                                             "",
@@ -281,6 +267,7 @@ def display_tool_result(
                                             "",
                                         ]
                                     )
+                                    logger.info("YOLO: Edits applied successfully")
                                     try:
                                         nvim.exec_lua(
                                             """
@@ -295,7 +282,7 @@ def display_tool_result(
                                         logger.debug(
                                             f"Could not update edit view state: {e}"
                                         )
-                                elif edit_failed:
+                                else:
                                     append_content_fn(
                                         [
                                             "",
@@ -303,8 +290,9 @@ def display_tool_result(
                                             "",
                                         ]
                                     )
+                                    logger.warning("YOLO: Edits failed to apply")
 
-                            nvim.async_call(update_yolo_state)
+                            nvim.async_call(apply_yolo_edits)
                         else:
                             # Non-YOLO mode: just render for user review
                             nvim.async_call(

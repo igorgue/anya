@@ -70,18 +70,28 @@ class CodeAgent:
             agent_kwargs["model"] = self.model
 
         self.agent = Agent(**agent_kwargs)
-        
+
         # Verify agent has both tool lists after creation
-        agent_tools = len(self.agent.tools) if hasattr(self.agent, 'tools') and self.agent.tools else 0
-        agent_mcp = len(self.agent.mcp_servers) if hasattr(self.agent, 'mcp_servers') and self.agent.mcp_servers else 0
-        self.logger.info(f"Agent '{self.agent.name}' created with {agent_tools} tools and {agent_mcp} MCP servers")
-        
+        agent_tools = (
+            len(self.agent.tools)
+            if hasattr(self.agent, "tools") and self.agent.tools
+            else 0
+        )
+        agent_mcp = (
+            len(self.agent.mcp_servers)
+            if hasattr(self.agent, "mcp_servers") and self.agent.mcp_servers
+            else 0
+        )
+        self.logger.info(
+            f"Agent '{self.agent.name}' created with {agent_tools} tools and {agent_mcp} MCP servers"
+        )
+
         # Log tools for debugging handoff issues
         self.logger.info(f"CodeAgent created with {len(self.tools)} tools")
         for tool in self.tools:
-            tool_name = getattr(tool, 'name', str(tool))
+            tool_name = getattr(tool, "name", str(tool))
             self.logger.info(f"  - {tool_name}")
-        
+
         return self.agent
 
     def _build_instructions(self) -> str:
@@ -96,7 +106,9 @@ class CodeAgent:
 
         # Add project-specific instructions
         if self.project_instructions:
-            full_instructions += "\n\nProject Instructions:\n" + self.project_instructions
+            full_instructions += (
+                "\n\nProject Instructions:\n" + self.project_instructions
+            )
 
         # Add MCP servers info
         if self.mcp_servers:

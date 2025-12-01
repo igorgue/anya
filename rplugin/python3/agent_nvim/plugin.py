@@ -60,7 +60,7 @@ class AgentPlugin(object):
 
         # Tool wrappers will be created lazily
         self._tool_wrappers = None
-        
+
         # Flag to track if agents have been eagerly initialized
         self._agents_initialized = False
         self._cached_agents = None  # Cache initialized agents for fast reuse
@@ -71,7 +71,7 @@ class AgentPlugin(object):
             self._sync_config_to_lua()
         except Exception as e:
             self.logger.debug(f"Failed to initialize Lua module: {e}")
-        
+
         # Eagerly initialize agents on startup
         self._initialize_agents_on_startup()
 
@@ -288,7 +288,7 @@ class AgentPlugin(object):
             cwd = self.nvim.call("getcwd")
         except Exception:
             cwd = None
-        
+
         def init_agents_thread(cwd):
             try:
                 from agents import Agent
@@ -336,12 +336,12 @@ class AgentPlugin(object):
 
                 # Mark initialization complete - agents will be created fresh each request
                 self._agents_initialized = True
-                self.logger.info("MCP servers pre-connected on startup. Agents will be created fresh per request.")
+                self.logger.info(
+                    "MCP servers pre-connected on startup. Agents will be created fresh per request."
+                )
 
             except ImportError as e:
-                self.logger.debug(
-                    f"Agents SDK not yet available for eager init: {e}"
-                )
+                self.logger.debug(f"Agents SDK not yet available for eager init: {e}")
             except Exception as e:
                 self.logger.warning(f"Error during eager agent initialization: {e}")
 

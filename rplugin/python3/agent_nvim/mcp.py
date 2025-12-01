@@ -19,6 +19,8 @@ class MCPManager:
         """
         self.logger = logger
         self._mcp_hosted_tools = []
+        self._active_servers = []
+        self._servers_loaded = False
 
     def _expand_env_vars(self, value):
         """Expand environment variables in a string value.
@@ -67,7 +69,12 @@ class MCPManager:
             self.logger.info("MCP classes not available in agents SDK")
             return [], []
 
-
+        # Return cached servers if already loaded to avoid CPU spike from re-instantiation
+        if self._servers_loaded and self._active_servers:
+            self.logger.debug(
+                f"Returning {len(self._active_servers)} cached MCP servers"
+            )
+            return self._active_servers, self._mcp_hosted_tools
 
         # Path to MCP servers configuration
         if config_path is None:
@@ -222,6 +229,13 @@ class MCPManager:
             List of successfully connected servers
         """
 
+        # If servers are already loaded and active, return them directly
+        if self._servers_loaded and self._active_servers:
+            self.logger.debug(
+                f"Returning {len(self._active_servers)} already connected MCP servers"
+            )
+            return self._active_servers
+
         connected_servers = []
         try:
             # Connect all MCP servers
@@ -265,6 +279,9 @@ class MCPManager:
                 self.logger.info(
                     f"Successfully connected to {len(connected_servers)} MCP servers"
                 )
+                # Update active servers list and mark as loaded for caching
+                self._active_servers = connected_servers
+                self._servers_loaded = True
             else:
                 self.logger.warning("No MCP servers could be connected")
 
@@ -276,8 +293,15 @@ class MCPManager:
 
     async def shutdown(self):
         """Shutdown all active MCP servers."""
-        # Shutdown is now handled per-request, no persistent state to clean up
-        pass
+        # Clear active servers list and reset loaded flag
+        self._active_servers = []
+        self._servers_loaded = False
+
+    def reset_cache(self):
+        """Reset the server cache to force re-connection on next request."""
+        self._active_servers = []
+        self._servers_loaded = False
+        self.logger.debug("MCP server cache reset")
 
     def get_hosted_tools(self):
         """Get list of hosted MCP tools.

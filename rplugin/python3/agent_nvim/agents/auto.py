@@ -57,9 +57,13 @@ class AutoAgent:
         for name, agent in self._handoff_agents.items():
             if agent is not None:
                 # Verify agent has tools before creating handoff
-                agent_tool_count = len(agent.tools) if hasattr(agent, 'tools') and agent.tools else 0
-                self.logger.info(f"Handoff to {name} agent has {agent_tool_count} tools")
-                
+                agent_tool_count = (
+                    len(agent.tools) if hasattr(agent, "tools") and agent.tools else 0
+                )
+                self.logger.info(
+                    f"Handoff to {name} agent has {agent_tool_count} tools"
+                )
+
                 handoffs.append(
                     handoff(
                         agent=agent,
@@ -104,7 +108,9 @@ Analyze the user's request and hand off to the appropriate agent. Do not answer 
 
         # Add project-specific instructions
         if self.project_instructions:
-            full_instructions += "\n\nProject Instructions:\n" + self.project_instructions
+            full_instructions += (
+                "\n\nProject Instructions:\n" + self.project_instructions
+            )
 
         return full_instructions
 

@@ -24,7 +24,9 @@ from typing import List, Optional, Tuple, Dict
 # Configurable fuzzy matching thresholds
 FUZZY_STRICT = 0.75  # "confident match, auto-apply"
 FUZZY_LOOSE = 0.60  # "near miss, warn LLM but don't apply"
-MIN_BLOCK_LINES_FOR_FUZZY = 2  # Only allow fuzzy on blocks with at least this many lines
+MIN_BLOCK_LINES_FOR_FUZZY = (
+    2  # Only allow fuzzy on blocks with at least this many lines
+)
 
 
 def compute_adaptive_threshold(num_lines: int) -> float:
@@ -61,7 +63,9 @@ class EditResult:
     message: str
     original_content: Optional[str] = None
     new_content: Optional[str] = None
-    match_type: Optional[str] = None  # "exact", "whitespace", "fuzzy", "anchor", "create"
+    match_type: Optional[str] = (
+        None  # "exact", "whitespace", "fuzzy", "anchor", "create"
+    )
     similarity: Optional[float] = None  # For fuzzy matches, the similarity ratio
     near_match_snippet: Optional[str] = None  # For failures, show what we found
 
@@ -372,7 +376,9 @@ def find_anchor_match(
     for i, line in enumerate(stripped_whole):
         if line == anchor_start:
             # Search forward for anchor_end
-            max_search = min(len(whole_lines), i + len(part_lines) * 2)  # Cap search range
+            max_search = min(
+                len(whole_lines), i + len(part_lines) * 2
+            )  # Cap search range
             for j in range(i + 1, max_search):
                 if stripped_whole[j] == anchor_end:
                     candidates.append((i, j + 1))
@@ -583,7 +589,9 @@ def replace_most_similar_chunk(
 
     # Try fuzzy matching as last resort
     if len(part_lines) >= MIN_BLOCK_LINES_FOR_FUZZY:
-        result = replace_closest_edit_distance(whole_lines, part, part_lines, replace_lines)
+        result = replace_closest_edit_distance(
+            whole_lines, part, part_lines, replace_lines
+        )
         if result:
             new_content, similarity = result
             return new_content, "fuzzy", similarity, None
@@ -789,7 +797,9 @@ def apply_edit_blocks(
     # Atomic mode with in-memory sequential application
     # working_contents tracks the current state of each file as we apply edits
     working_contents: Dict[str, str] = {}  # full_path -> current in-memory content
-    original_contents: Dict[str, Optional[str]] = {}  # full_path -> original content (for backup)
+    original_contents: Dict[
+        str, Optional[str]
+    ] = {}  # full_path -> original content (for backup)
     results: List[EditResult] = []
 
     for block in blocks:

@@ -125,9 +125,11 @@ async def run_agent(
         logger.info(f"Registered tools: {list(tool_wrappers.keys())}")
         for tool_name, tool in tool_wrappers.items():
             logger.info(f"  Tool '{tool_name}': {type(tool).__name__}")
-        
+
         if not tools:
-            logger.warning("WARNING: No tools registered! Agents will not have tool access.")
+            logger.warning(
+                "WARNING: No tools registered! Agents will not have tool access."
+            )
 
         # Add MCP hosted tools if available
         if hosted_tools:
@@ -152,7 +154,7 @@ async def run_agent(
 
         # Always create agents fresh each request (don't reuse cached agents - SDK limitation)
         logger.info("Creating agents fresh per request to maintain MCP tool access")
-        
+
         code_agent = CodeAgent(
             model=model,
             logger=logger,
@@ -352,11 +354,13 @@ async def run_agent(
         handoff_occurred = False
         event_count = 0
         max_events = 50000  # Safety limit to prevent infinite loops
-        
+
         async for event in result_stream.stream_events():
             event_count += 1
             if event_count > max_events:
-                logger.warning(f"Exceeded max events ({max_events}), breaking from event loop")
+                logger.warning(
+                    f"Exceeded max events ({max_events}), breaking from event loop"
+                )
                 break
             # Check for cancellation
             if cancel_flag_getter():
@@ -403,14 +407,20 @@ async def run_agent(
 
             # Debug: Log all event types
             logger.info(f"Event type: {event_type}")
-            
+
             # Log agent updates to see handoffs
             if event_type == "AgentUpdatedStreamEvent":
                 handoff_occurred = True
-                if hasattr(event, 'new_agent'):
-                    agent_name = getattr(event.new_agent, 'name', 'unknown')
-                    agent_tools = len(event.new_agent.tools) if hasattr(event.new_agent, 'tools') and event.new_agent.tools else 0
-                    logger.info(f">>> HANDOFF: Agent updated to '{agent_name}' with {agent_tools} tools")
+                if hasattr(event, "new_agent"):
+                    agent_name = getattr(event.new_agent, "name", "unknown")
+                    agent_tools = (
+                        len(event.new_agent.tools)
+                        if hasattr(event.new_agent, "tools") and event.new_agent.tools
+                        else 0
+                    )
+                    logger.info(
+                        f">>> HANDOFF: Agent updated to '{agent_name}' with {agent_tools} tools"
+                    )
 
             if event_type == "RawResponsesStreamEvent":
                 data = event.data

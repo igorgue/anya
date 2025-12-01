@@ -70,7 +70,9 @@ Analyze requests, create actionable plans, and present them clearly."""
 
         # Add project-specific instructions
         if self.project_instructions:
-            full_instructions += "\n\nProject Instructions:\n" + self.project_instructions
+            full_instructions += (
+                "\n\nProject Instructions:\n" + self.project_instructions
+            )
 
         return full_instructions
 
