@@ -482,6 +482,28 @@ class AgentPlugin(object):
                 else:
                     return "Command execution was declined by user."
 
+            async def gh(command: str, timeout: int = 30) -> str:
+                """Execute GitHub CLI (gh) commands to interact with GitHub.
+
+                Args:
+                    command: GitHub CLI command to execute (can start with or without 'gh')
+                    timeout: Timeout in seconds (default 30)"""
+                cwd = getattr(self, "_cached_cwd", None)
+
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(tools.gh, command, cwd, timeout),
+                        timeout=timeout,
+                    )
+
+                    # Track token usage (light tool, no budget check)
+                    if tool_budget and isinstance(result, str):
+                        tool_budget.consume(result)
+                except asyncio.TimeoutError:
+                    result = f"Error: GitHub CLI command timed out after {timeout} seconds"
+
+                return result
+
             return {
                 "read_file": function_tool(read_file),
                 "read_many_files": function_tool(read_many_files),
@@ -491,6 +513,7 @@ class AgentPlugin(object):
                 "edit": function_tool(edit),
                 "exec_lua": function_tool(exec_lua),
                 "exec": function_tool(exec),
+                "gh": function_tool(gh),
             }
         except ImportError:
             self.logger.warning("Could not import function_tool from agents")
