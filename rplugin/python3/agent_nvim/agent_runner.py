@@ -108,27 +108,7 @@ async def run_agent(
         # Load instructions
         from .utils import load_project_instructions
 
-        base_instructions = """You are a helpful AI assistant embedded in Neovim. You can read files, list files, search the repository, propose patches, and execute Lua code directly inside Neovim.
-
-CRITICAL - read_file tool behavior:
-- Files with <= 100 lines: always shown in full
-- Files with > 100 lines: only first 100 lines shown by default with "[FILE TOO LARGE]" message
-- When you see "[FILE TOO LARGE]", use syntax like read_file("file.py@start-end") to read the full file
-- The @start-end syntax ALWAYS works to read the entire file, regardless of size
-- Do NOT make multiple calls to read_file with the same path without changing the range - you'll get the same truncated output
-
-CRITICAL - patch tool behavior:
-- When you call the patch tool, the agent STOPS and waits for user to apply (1) or reject (2) the patch
-- After the user decides, you will receive one of these messages:
-  - PATCH_APPLIED: The patch was successfully applied - continue with next steps
-  - PATCH_REJECTED: The user rejected - ask what they want changed
-  - PATCH_FAILED: The patch could not be applied - re-read the file and regenerate with correct context lines
-- Do NOT use alternative approaches (like exec with sed) - always use the patch tool for code changes
-- EXCEPTION: In YOLO mode (AGENT_YOLO=1), patches are auto-applied without stopping. You will NOT receive PATCH_APPLIED/REJECTED messages - just continue with your work.
-
-Constraints:
-- You have a limited token budget for reading files per request. If a tool tells you that the file-read budget is reached, you MUST stop using tools and instead summarize your findings and provide the best answer you can from the information available.
-- When exploring a project, prefer breadth-first sampling of key files (README, main entry points, configs, top-level modules) instead of trying to read every file."""
+        base_instructions = """You are a helpful AI assistant embedded in Neovim. You can read files, list files, search the repository, propose patches, and execute Lua code directly inside Neovim."""
         project_instructions = load_project_instructions(cached_cwd)
         full_instructions = base_instructions
         if project_instructions:
