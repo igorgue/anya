@@ -109,7 +109,9 @@ def format_token_summary(
 
     # Build the summary
     if context_window > 0:
-        return f"{total_tokens}/{ctx_str} tokens ({percentage:.1f}%)"
+        # Cap percentage at 100% for display
+        display_percentage = min(percentage, 100.0)
+        return f"{total_tokens}/{ctx_str} tokens ({display_percentage:.1f}%)"
     else:
         return f"{total_tokens} tokens"
 
@@ -155,7 +157,10 @@ def format_placeholder_text(
             ctx_str = f"{context_window / 1000:.0f}K"
         else:
             ctx_str = str(context_window)
-        text = f"{percentage:.0f}% of {ctx_str}"
+        
+        # Cap percentage at 100% for display
+        display_percentage = min(percentage, 100.0)
+        text = f"{display_percentage:.0f}% of {ctx_str}"
     else:
         text = f"{total_tokens} tokens"
 

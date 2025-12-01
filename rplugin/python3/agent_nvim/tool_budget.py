@@ -53,7 +53,9 @@ class ToolBudget:
     def get_status(self) -> str:
         """Get current budget status for logging."""
         percentage = (self.tokens_used / self.budget * 100) if self.budget > 0 else 0
-        return f"{self.tokens_used}/{self.budget} tokens ({percentage:.1f}%)"
+        # Cap percentage at 100% for display
+        display_percentage = min(percentage, 100.0)
+        return f"{self.tokens_used}/{self.budget} tokens ({display_percentage:.1f}%)"
 
 
 def wrap_tool_with_budget(

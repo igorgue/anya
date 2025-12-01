@@ -3,7 +3,7 @@ setlocal nonumber
 setlocal norelativenumber
 setlocal signcolumn=no
 setlocal wrap
-setlocal scrolloff=1
+" Remove standard scrolloff - we'll handle it with custom logic below
 syntax enable
 
 " Map Ctrl+C to cancel
@@ -65,3 +65,26 @@ augroup AgentPromptResize
     autocmd!
     autocmd VimResized <buffer> silent! resize 5
 augroup END
+
+" Bottom-only scrolloff to avoid going under floating toolbar
+augroup AgentPromptBottomScrolloff
+    autocmd!
+    autocmd CursorMoved,CursorMovedI <buffer> call s:BottomScrolloff()
+augroup END
+
+" Initialize with no scrolloff
+setlocal scrolloff=0
+
+" Function to handle bottom-only scrolloff
+function! s:BottomScrolloff()
+    let total_lines = line('$')
+    let current_line = line('.')
+    let distance_to_bottom = total_lines - current_line
+    
+    " Apply scrolloff only when within 1 lines of bottom
+    if distance_to_bottom < 1
+        setlocal scrolloff=1
+    else
+        setlocal scrolloff=0
+    endif
+endfunction
