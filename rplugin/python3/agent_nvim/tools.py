@@ -303,22 +303,31 @@ def edit(edit_blocks: str) -> str:
     - A SEARCH section with the exact code to find
     - A REPLACE section with the new code
 
-    Format:
+    Example:
     ```
-    path/to/file.py
+    src/utils.py
     <<<<<<< SEARCH
-    exact code to find
+    def calculate_total(items):
+        total = 0
+        for item in items:
+            total += item['price']
+        return total
     =======
-    replacement code
+    def calculate_total(items):
+        total = 0
+        for item in items:
+            total += item['price'] * item['quantity']
+        return total
     >>>>>>> REPLACE
     ```
 
     Rules:
-    - The SEARCH section must EXACTLY match existing code (including whitespace)
+    - The SEARCH section must EXACTLY match existing code (including whitespace and indentation)
     - Include enough context lines to uniquely identify the location
     - Keep blocks small and focused on specific changes
     - Use multiple blocks for multiple changes
     - For new files: use empty SEARCH section
+    - The user will review and approve each edit before it's applied
 
     Args:
         edit_blocks: String containing one or more SEARCH/REPLACE blocks
