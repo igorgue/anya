@@ -66,7 +66,7 @@ augroup AgentPromptResize
     autocmd VimResized <buffer> silent! resize 5
 augroup END
 
-" Bottom-only scrolloff to avoid going under floating toolbar
+" Simple bottom scrolloff to keep cursor above toolbar
 augroup AgentPromptBottomScrolloff
     autocmd!
     autocmd CursorMoved,CursorMovedI <buffer> call s:BottomScrolloff()
@@ -81,7 +81,7 @@ function! s:BottomScrolloff()
     let current_line = line('.')
     let distance_to_bottom = total_lines - current_line
     
-    " Apply scrolloff only when within 1 lines of bottom
+    " Apply scrolloff only when within 1 lines of bottom (reserve space for toolbar)
     if distance_to_bottom < 1
         setlocal scrolloff=1
     else
