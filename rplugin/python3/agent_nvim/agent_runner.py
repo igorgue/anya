@@ -10,7 +10,7 @@ from .token_tracker import (
     get_context_window,
     calculate_usage_percentage,
 )
-from .agents import CodeAgent
+from .agents import AutoAgent, CodeAgent, PlanAgent
 
 
 async def run_agent(
@@ -138,7 +138,14 @@ async def run_agent(
         if yolo_mode:
             logger.info("YOLO mode enabled - patches will be auto-applied")
 
-        # Create agent using CodeAgent
+        # Create the agent system with handoffs
+        # We need to create agents in stages to wire up bidirectional handoffs:
+        # 1. Create wrapper objects
+        # 2. Create specialized agents first (code, plan) without handoff back
+        # 3. Create auto agent with handoffs to specialized agents
+        # 4. The SDK handles the handoff chain internally
+
+        # CodeAgent handles coding tasks
         code_agent = CodeAgent(
             model=model,
             logger=logger,
@@ -147,15 +154,52 @@ async def run_agent(
             project_instructions=project_instructions,
             yolo_mode=yolo_mode,
         )
-        agent = code_agent.create_agent()
+
+        # PlanAgent handles complex planning tasks
+        plan_agent = PlanAgent(
+            model=model,
+            logger=logger,
+            tools=tools,  # Plan agent may need tools for research
+            mcp_servers=mcp_servers if mcp_servers else None,
+            project_instructions=project_instructions,
+        )
+
+        # Create specialized agents first (without handoff back to auto yet)
+        code_sdk_agent = code_agent.create_agent()
+        plan_sdk_agent = plan_agent.create_agent()
+
+        if not code_sdk_agent or not plan_sdk_agent:
+            nvim.async_call(
+                buffer_manager.append_content,
+                ["Error: Failed to create agents. Run :AgentInstall."],
+            )
+            emit_event_fn("AgentRequestFinished", {"id": request_id, "status": "error"})
+            return
+
+        # AutoAgent is the entry point, routing to specialized agents
+        auto_agent = AutoAgent(
+            model=model,
+            logger=logger,
+            mcp_servers=mcp_servers if mcp_servers else None,
+            project_instructions=project_instructions,
+        )
+
+        # Register handoffs from auto to specialized agents
+        auto_agent.register_handoff_agent("code", code_sdk_agent)
+        auto_agent.register_handoff_agent("plan", plan_sdk_agent)
+
+        # Create auto agent (entry point)
+        agent = auto_agent.create_agent()
 
         if not agent:
             nvim.async_call(
                 buffer_manager.append_content,
-                ["Error: Failed to create agent. Run :AgentInstall."],
+                ["Error: Failed to create auto agent. Run :AgentInstall."],
             )
             emit_event_fn("AgentRequestFinished", {"id": request_id, "status": "error"})
             return
+
+        logger.info("Agent system created: auto -> [code, plan]")
 
         # Display agent header with model name (unless skipped for continuations)
         display_model = model if model else "gpt-4o"
@@ -276,9 +320,21 @@ async def run_agent(
             "hooks": hooks,
         }
 
-        # Use custom model provider if configured (for OpenRouter, etc.)
+        # Configure RunConfig for handoffs
+        # nest_handoff_history=False is required for non-OpenAI providers using
+        # chat_completions API, as they don't support the nested message format
+        from agents import RunConfig
+
+        api_type = os.environ.get("AGENT_API_TYPE", "responses")
+        use_nested_history = api_type != "chat_completions"
+
         if custom_run_config:
+            # Custom provider already has RunConfig, update handoff setting
+            custom_run_config.nest_handoff_history = use_nested_history
             run_kwargs["run_config"] = custom_run_config
+        elif not use_nested_history:
+            # Only create RunConfig if we need to disable nesting
+            run_kwargs["run_config"] = RunConfig(nest_handoff_history=False)
 
         # Run the agent with streaming and conversation history
         result_stream = Runner.run_streamed(agent, **run_kwargs)

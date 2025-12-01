@@ -1,4 +1,4 @@
-"""CodeAgent implementation for the main coding assistant."""
+"""PlanAgent implementation for breaking down complex tasks."""
 
 import logging
 
@@ -9,17 +9,12 @@ except ImportError:
     Optional = type
 
 
-class CodeAgent:
+class PlanAgent:
     """
-    Main coding agent for agent.nvim.
+    Planning agent specialized in breaking down complex tasks.
 
-    This agent handles general coding tasks including:
-    - Reading and writing files
-    - Debugging and fixing errors
-    - Refactoring and optimizing code
-    - Writing new features
-    - Explaining code logic
-    - Searching the repository
+    This agent analyzes complex requests, breaks them into
+    manageable sub-tasks, and creates actionable plans.
     """
 
     def __init__(
@@ -29,40 +24,30 @@ class CodeAgent:
         tools: Optional[List] = None,
         mcp_servers: Optional[List] = None,
         project_instructions: Optional[str] = None,
-        yolo_mode: bool = False,
     ):
         self.model = model
         self.logger = logger
         self.tools = tools or []
         self.mcp_servers = mcp_servers or []
         self.project_instructions = project_instructions or ""
-        self.yolo_mode = yolo_mode
         self.agent = None
 
     def create_agent(self):
-        """Create the OpenAI Agent with configured tools and instructions."""
+        """Create the PlanAgent."""
         try:
             from agents import Agent
-            from agents.agent import StopAtTools
         except ImportError as e:
-            self.logger.error(f"Could not import Agent from agents package: {e}")
+            self.logger.error(f"Could not import from agents package: {e}")
             return None
 
         instructions = self._build_instructions()
 
         agent_kwargs = {
-            "name": "Code Agent",
+            "name": "Plan Agent",
             "instructions": instructions,
-            "tools": self.tools,
+            "tools": self.tools,  # Plan agent may need some tools for research
         }
 
-        # Only use StopAtTools if not in YOLO mode
-        if not self.yolo_mode:
-            agent_kwargs["tool_use_behavior"] = StopAtTools(
-                stop_at_tool_names=["patch"]
-            )
-
-        # Add MCP servers if available
         if self.mcp_servers:
             agent_kwargs["mcp_servers"] = self.mcp_servers
 
@@ -76,22 +61,16 @@ class CodeAgent:
         """Build the full instructions for the agent."""
         from ..utils import load_agent_prompt
 
-        base_instructions = load_agent_prompt("code")
+        base_instructions = load_agent_prompt("plan")
         if not base_instructions:
-            base_instructions = """You are a helpful AI assistant embedded in Neovim. You can read files, list files, search the repository, propose patches, and execute Lua code directly inside Neovim."""
+            base_instructions = """You are a planning agent that breaks down complex tasks into manageable steps.
+Analyze requests, create actionable plans, and present them clearly."""
 
         full_instructions = base_instructions
 
         # Add project-specific instructions
         if self.project_instructions:
             full_instructions += "\n\nProject Instructions:\n" + self.project_instructions
-
-        # Add MCP servers info
-        if self.mcp_servers:
-            full_instructions += (
-                f"\n\nAdditional MCP tools are available for enhanced capabilities "
-                f"(loaded {len(self.mcp_servers)} MCP servers: {[s.name for s in self.mcp_servers]})."
-            )
 
         return full_instructions
 

@@ -19,10 +19,6 @@ except ImportError:
 class CompactAgent:
     """
     Specialized agent for context compaction and summarization.
-
-    This is a NEW AGENT created with OpenAI Agents SDK, specifically
-    designed for summarization tasks with its own system prompt and
-    tools focused on context analysis and compaction.
     """
 
     def __init__(self, model: str, logger: logging.Logger):
