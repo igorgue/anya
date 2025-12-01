@@ -29,14 +29,10 @@ class AutoAgent:
         self,
         model: str,
         logger: logging.Logger,
-        tools: Optional[List] = None,
-        mcp_servers: Optional[List] = None,
         project_instructions: Optional[str] = None,
     ):
         self.model = model
         self.logger = logger
-        self.tools = tools or []
-        self.mcp_servers = mcp_servers or []
         self.project_instructions = project_instructions or ""
         self.agent = None
         self._handoff_agents = {}
@@ -60,6 +56,10 @@ class AutoAgent:
         handoffs = []
         for name, agent in self._handoff_agents.items():
             if agent is not None:
+                # Verify agent has tools before creating handoff
+                agent_tool_count = len(agent.tools) if hasattr(agent, 'tools') and agent.tools else 0
+                self.logger.info(f"Handoff to {name} agent has {agent_tool_count} tools")
+                
                 handoffs.append(
                     handoff(
                         agent=agent,
@@ -73,11 +73,8 @@ class AutoAgent:
             "name": "Auto Agent",
             "instructions": instructions,
             "handoffs": handoffs,
-            "tools": self.tools,  # Pass tools to auto agent for fallback support
+            "tools": [],  # Pure router - no tools
         }
-
-        if self.mcp_servers:
-            agent_kwargs["mcp_servers"] = self.mcp_servers
 
         if self.model:
             agent_kwargs["model"] = self.model

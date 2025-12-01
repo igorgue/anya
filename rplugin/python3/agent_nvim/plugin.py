@@ -5,6 +5,7 @@ import os
 import logging
 import asyncio
 import uuid
+import threading
 
 # Try to import typing, with fallback for older Python versions
 try:
@@ -59,6 +60,9 @@ class AgentPlugin(object):
 
         # Tool wrappers will be created lazily
         self._tool_wrappers = None
+        
+        # Flag to track if agents have been eagerly initialized
+        self._agents_initialized = False
 
         # Initialize Lua module (history will be initialized by ftplugin when buffer opens)
         try:
@@ -66,6 +70,9 @@ class AgentPlugin(object):
             self._sync_config_to_lua()
         except Exception as e:
             self.logger.debug(f"Failed to initialize Lua module: {e}")
+        
+        # Eagerly initialize agents on startup
+        self._initialize_agents_on_startup()
 
     def _setup_compact_agent(self):
         """Initialize the specialized CompactAgent with model configuration."""
@@ -272,6 +279,93 @@ class AgentPlugin(object):
             self.logger.debug(f"Updated config: {key} = {value}")
         except Exception as e:
             self.logger.error(f"Failed to update config: {e}")
+
+    def _initialize_agents_on_startup(self):
+        """Eagerly initialize agents on plugin startup."""
+        # Get cwd from main thread before starting background thread
+        try:
+            cwd = self.nvim.call("getcwd")
+        except Exception:
+            cwd = None
+        
+        def init_agents_thread(cwd):
+            try:
+                from agents import Agent
+                from .model_provider import get_custom_run_config
+                from .utils import load_project_instructions
+                import os
+
+                model = os.environ.get("AGENT_MODEL", "gpt-5.1")
+
+                # Configure client if using custom provider
+                custom_run_config = get_custom_run_config()
+                if not custom_run_config:
+                    from agents import (
+                        set_default_openai_client,
+                        set_default_openai_api,
+                        set_tracing_disabled,
+                    )
+                    from openai import AsyncOpenAI
+
+                    base_url = os.environ.get("AGENT_BASE_URL")
+                    api_key = os.environ.get("AGENT_API_KEY") or os.environ.get(
+                        "OPENAI_API_KEY"
+                    )
+
+                    if base_url or api_key:
+                        client_kwargs = {}
+                        if base_url:
+                            client_kwargs["base_url"] = base_url
+                        if api_key:
+                            client_kwargs["api_key"] = api_key
+
+                        custom_client = AsyncOpenAI(**client_kwargs)
+                        set_default_openai_client(custom_client, use_for_tracing=False)
+
+                        api_type = os.environ.get("AGENT_API_TYPE", "responses")
+                        set_default_openai_api(api_type)
+
+                        if os.environ.get("AGENT_DISABLE_TRACING", "1") == "1":
+                            set_tracing_disabled(True)
+
+                # Load project instructions
+                project_instructions = load_project_instructions(cwd)
+
+                # Load MCP servers
+                mcp_servers, _ = self.mcp_manager.load_servers()
+                
+                # Initialize MCP if available (non-blocking)
+                if mcp_servers:
+                    # MCP connection is async, but we start it here for early setup
+                    import asyncio
+                    
+                    async def connect_mcp():
+                        try:
+                            await self.mcp_manager.connect_servers(mcp_servers)
+                        except Exception as e:
+                            self.logger.debug(f"MCP initialization in background: {e}")
+                    
+                    try:
+                        asyncio.create_task(connect_mcp())
+                    except Exception as e:
+                        self.logger.debug(f"Could not schedule MCP connection: {e}")
+
+                # Skip eager agent initialization
+                # Agents MUST be created fresh for each request with tools attached
+                # Otherwise handoffs won't have access to tools
+                self._agents_initialized = True
+                self.logger.info("Agent initialization deferred to request time (ensures tools are properly attached)")
+
+            except ImportError as e:
+                self.logger.debug(
+                    f"Agents SDK not yet available for eager init: {e}"
+                )
+            except Exception as e:
+                self.logger.warning(f"Error during eager agent initialization: {e}")
+
+        # Start initialization in background thread to avoid blocking plugin load
+        thread = threading.Thread(target=init_agents_thread, args=(cwd,), daemon=True)
+        thread.start()
 
     def _get_tool_wrappers(self, tool_budget: ToolBudget | None = None):
         """Get tool wrappers, creating them with optional budget tracking.

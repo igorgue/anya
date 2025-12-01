@@ -123,6 +123,9 @@ async def run_agent(
         logger.info(f"Registered tools: {list(tool_wrappers.keys())}")
         for tool_name, tool in tool_wrappers.items():
             logger.info(f"  Tool '{tool_name}': {type(tool).__name__}")
+        
+        if not tools:
+            logger.warning("WARNING: No tools registered! Agents will not have tool access.")
 
         # Add MCP hosted tools if available
         if hosted_tools:
@@ -145,7 +148,7 @@ async def run_agent(
         # 3. Create auto agent with handoffs to specialized agents
         # 4. The SDK handles the handoff chain internally
 
-        # CodeAgent handles coding tasks
+        # Create specialized agents first
         code_agent = CodeAgent(
             model=model,
             logger=logger,
@@ -155,18 +158,32 @@ async def run_agent(
             yolo_mode=yolo_mode,
         )
 
-        # PlanAgent handles complex planning tasks
         plan_agent = PlanAgent(
             model=model,
             logger=logger,
-            tools=tools,  # Plan agent may need tools for research
+            tools=tools,
             mcp_servers=mcp_servers if mcp_servers else None,
             project_instructions=project_instructions,
         )
 
-        # Create specialized agents first (without handoff back to auto yet)
         code_sdk_agent = code_agent.create_agent()
         plan_sdk_agent = plan_agent.create_agent()
+        
+        # Verify tools are present on handoff agents
+        code_tools = code_sdk_agent.tools if code_sdk_agent and hasattr(code_sdk_agent, 'tools') else []
+        plan_tools = plan_sdk_agent.tools if plan_sdk_agent and hasattr(plan_sdk_agent, 'tools') else []
+        
+        logger.info(f"CodeAgent SDK agent created with {len(code_tools)} tools")
+        if code_tools:
+            for tool in code_tools:
+                tool_name = getattr(tool, 'name', 'unknown')
+                logger.info(f"  - CodeAgent tool: {tool_name}")
+        
+        logger.info(f"PlanAgent SDK agent created with {len(plan_tools)} tools")
+        if plan_tools:
+            for tool in plan_tools:
+                tool_name = getattr(tool, 'name', 'unknown')
+                logger.info(f"  - PlanAgent tool: {tool_name}")
 
         if not code_sdk_agent or not plan_sdk_agent:
             nvim.async_call(
@@ -176,20 +193,17 @@ async def run_agent(
             emit_event_fn("AgentRequestFinished", {"id": request_id, "status": "error"})
             return
 
-        # AutoAgent is the entry point, routing to specialized agents
+        # Create AutoAgent with handoffs to both agents
+        # AUTO agent is a pure router - no tools, no MCP servers
         auto_agent = AutoAgent(
             model=model,
             logger=logger,
-            tools=tools,  # Pass tools to auto agent so it can handle requests and hand off
-            mcp_servers=mcp_servers if mcp_servers else None,
             project_instructions=project_instructions,
         )
 
-        # Register handoffs from auto to specialized agents
         auto_agent.register_handoff_agent("code", code_sdk_agent)
         auto_agent.register_handoff_agent("plan", plan_sdk_agent)
 
-        # Create auto agent (entry point)
         agent = auto_agent.create_agent()
 
         if not agent:
@@ -393,6 +407,13 @@ async def run_agent(
 
             # Debug: Log all event types
             logger.info(f"Event type: {event_type}")
+            
+            # Log agent updates to see handoffs
+            if event_type == "AgentUpdatedStreamEvent":
+                if hasattr(event, 'new_agent'):
+                    agent_name = getattr(event.new_agent, 'name', 'unknown')
+                    agent_tools = len(event.new_agent.tools) if hasattr(event.new_agent, 'tools') and event.new_agent.tools else 0
+                    logger.info(f">>> HANDOFF: Agent updated to '{agent_name}' with {agent_tools} tools")
 
             if event_type == "RawResponsesStreamEvent":
                 data = event.data

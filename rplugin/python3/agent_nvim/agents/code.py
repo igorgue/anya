@@ -62,7 +62,7 @@ class CodeAgent:
                 stop_at_tool_names=["patch"]
             )
 
-        # Add MCP servers if available
+        # Add MCP servers if available (but tools take priority)
         if self.mcp_servers:
             agent_kwargs["mcp_servers"] = self.mcp_servers
 
@@ -70,6 +70,18 @@ class CodeAgent:
             agent_kwargs["model"] = self.model
 
         self.agent = Agent(**agent_kwargs)
+        
+        # Verify agent has both tool lists after creation
+        agent_tools = len(self.agent.tools) if hasattr(self.agent, 'tools') and self.agent.tools else 0
+        agent_mcp = len(self.agent.mcp_servers) if hasattr(self.agent, 'mcp_servers') and self.agent.mcp_servers else 0
+        self.logger.info(f"Agent '{self.agent.name}' created with {agent_tools} tools and {agent_mcp} MCP servers")
+        
+        # Log tools for debugging handoff issues
+        self.logger.info(f"CodeAgent created with {len(self.tools)} tools")
+        for tool in self.tools:
+            tool_name = getattr(tool, 'name', str(tool))
+            self.logger.info(f"  - {tool_name}")
+        
         return self.agent
 
     def _build_instructions(self) -> str:

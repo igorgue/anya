@@ -45,7 +45,7 @@ class PlanAgent:
         agent_kwargs = {
             "name": "Plan Agent",
             "instructions": instructions,
-            "tools": self.tools,  # Plan agent may need some tools for research
+            "tools": self.tools,
         }
 
         if self.mcp_servers:
