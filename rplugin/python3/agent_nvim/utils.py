@@ -37,6 +37,40 @@ def resolve_mentions(text: str, read_file_fn) -> str:
     return re.sub(r"@([\w./-]+(?:@[\w-]+)?)", replace_match, text)
 
 
+def get_plugin_root() -> str:
+    """Get the root directory of the agent.nvim plugin.
+
+    Returns:
+        Absolute path to the plugin root directory
+    """
+    # utils.py is at rplugin/python3/agent_nvim/utils.py
+    # Plugin root is 4 levels up
+    return os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+
+
+def load_agent_prompt(agent_name: str) -> str:
+    """Load system prompt for an agent from its markdown file.
+
+    Args:
+        agent_name: Name of the agent (e.g., 'code', 'compact', 'auto')
+
+    Returns:
+        System prompt content, or empty string if file not found
+    """
+    plugin_root = get_plugin_root()
+    prompt_path = os.path.join(plugin_root, "prompts", f"{agent_name}.md")
+
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception:
+            pass
+    return ""
+
+
 def load_project_instructions(cwd: str) -> str:
     """Loads project-specific instructions from AGENTS.md or .agent/instructions.md.
 

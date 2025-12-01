@@ -57,22 +57,24 @@ class CompactAgent:
         """Create specialized summarization agent with custom system prompt."""
         try:
             from agents import Agent, function_tool
+            from ..utils import load_agent_prompt
 
-            # Custom system prompt oriented toward analysis and summarization
-            system_prompt = """
-            You are a Context Compaction Agent, specialized in analyzing and 
-            summarizing conversations while preserving essential information.
-            
-            Your task is to:
-            1. Identify active tasks, ongoing work, and action items
-            2. Extract key decisions, conclusions, and important constraints
-            3. Preserve file references, code snippets, and technical details
-            4. Maintain conversation flow and timeline coherence
-            5. Reduce token usage while retaining critical context
-            
-            Focus on maintaining conversational continuity and ensuring that
-            the user can continue the discussion without losing important context.
-            """
+            system_prompt = load_agent_prompt("compact")
+            if not system_prompt:
+                system_prompt = """
+                You are a Context Compaction Agent, specialized in analyzing and 
+                summarizing conversations while preserving essential information.
+                
+                Your task is to:
+                1. Identify active tasks, ongoing work, and action items
+                2. Extract key decisions, conclusions, and important constraints
+                3. Preserve file references, code snippets, and technical details
+                4. Maintain conversation flow and timeline coherence
+                5. Reduce token usage while retaining critical context
+                
+                Focus on maintaining conversational continuity and ensuring that
+                the user can continue the discussion without losing important context.
+                """
 
             return Agent(
                 name="context_compactor",
@@ -158,7 +160,6 @@ class CompactAgent:
         except Exception as e:
             self.logger.error(f"Error creating analyze tool: {e}")
             return None
-            return None
 
     def _create_summarize_tool(self):
         """Create tool for summarizing content."""
@@ -232,7 +233,7 @@ class CompactAgent:
 
                 if missing_files:
                     validation.append(
-                        f"  Missing file references: {', '.join(missing_files)}"
+                        f"  Missing file references: {', '.join(missing_files)}"
                     )
                 else:
                     validation.append("**All file references preserved**")
@@ -284,7 +285,7 @@ class CompactAgent:
 
             # Run the agent using Runner
             async def run_compact():
-                from .model_provider import get_custom_run_config
+                from ..model_provider import get_custom_run_config
 
                 run_kwargs = {
                     "starting_agent": self.agent,
@@ -448,7 +449,7 @@ class CompactAgent:
             prompt += f"INSTRUCTIONS:\n{instructions}\n\nProvide a concise summary that follows the user's instructions."
 
             async def run_with_instructions():
-                from .model_provider import get_custom_run_config
+                from ..model_provider import get_custom_run_config
 
                 run_kwargs = {
                     "starting_agent": instruction_agent,
@@ -499,19 +500,15 @@ class CompactAgent:
             # Format conversation
             conversation_text = self._format_conversation(conversation_history)
 
-            # Identify focus topics (keep these)
-            keep_keywords = []
-            avoid_keywords = []
-
             # Extract topics to keep
+            keep_keywords = []
             keep_patterns = [
                 r"keep\s+(?:all\s+)?(?:mentions\s+of\s+)?([^,\.]+)",
                 r"preserve\s+(?:all\s+)?(?:mentions\s+of\s+)?([^,\.]+)",
-                r"focus\s+on\s+(?:the\s+)?([^,\.]+)",
+                r"focus\s+on\s+([^,\.]+)",
             ]
 
-            import re
-
+            avoid_keywords = []
             for pattern in keep_patterns:
                 matches = re.findall(pattern, instructions_lower)
                 keep_keywords.extend(matches)
@@ -620,29 +617,41 @@ class CompactAgent:
         """Create agent with user-specific instructions for compaction."""
         try:
             from agents import Agent, function_tool
+            from ..utils import load_agent_prompt
 
-            enhanced_system_prompt = f"""
-            You are a Context Compaction Agent with specific user instructions:
-            
-            USER INSTRUCTIONS: {user_instructions}
-            
-            Follow these instructions precisely while:
-            1. Maintaining conversation coherence and flow
-            2. Preserving essential technical details and code
-            3. Keeping the conversation natural and readable
-            4. Ensuring the user can continue their work seamlessly
-            5. Removing unnecessary repetition and verbosity
-            
-            Pay special attention to:
-            - Topics the user wants to focus on
-            - Content they explicitly want to avoid
-            - Temporal references (earlier discussions vs. current work)
-            - Specific files, features, or tasks mentioned
-            - Action items, decisions, and next steps
-            
-            The goal is to create a compact version that allows the conversation to continue
-            naturally while respecting all the user's specific instructions.
-            """
+            base_prompt = load_agent_prompt("compact")
+            if base_prompt:
+                enhanced_system_prompt = f"""{base_prompt}
+
+## Additional User Instructions
+
+{user_instructions}
+
+Follow these instructions precisely while maintaining conversation coherence and flow.
+"""
+            else:
+                enhanced_system_prompt = f"""
+                You are a Context Compaction Agent with specific user instructions:
+                
+                USER INSTRUCTIONS: {user_instructions}
+                
+                Follow these instructions precisely while:
+                1. Maintaining conversation coherence and flow
+                2. Preserving essential technical details and code
+                3. Keeping the conversation natural and readable
+                4. Ensuring the user can continue their work seamlessly
+                5. Removing unnecessary repetition and verbosity
+                
+                Pay special attention to:
+                - Topics the user wants to focus on
+                - Content they explicitly want to avoid
+                - Temporal references (earlier discussions vs. current work)
+                - Specific files, features, or tasks mentioned
+                - Action items, decisions, and next steps
+                
+                The goal is to create a compact version that allows the conversation to continue
+                naturally while respecting all the user's specific instructions.
+                """
 
             # Try to create enhanced agent
             try:

@@ -22,7 +22,7 @@ from .buffers import BufferManager
 from .mcp import MCPManager
 from .agent_runner import run_agent
 from .tool_budget import ToolBudget
-from .compact_agent import CompactAgent, ContextAnalyzer
+from .agents import CompactAgent, ContextAnalyzer
 from .compact_preview import CompactPreviewModal
 from . import tool_tracker
 from . import exec_permissions

@@ -10,6 +10,7 @@ from .token_tracker import (
     get_context_window,
     calculate_usage_percentage,
 )
+from .agents import CodeAgent
 
 
 async def run_agent(
@@ -56,13 +57,11 @@ async def run_agent(
         # Import from current Python environment
         try:
             from agents import (
-                Agent,
                 Runner,
                 set_default_openai_client,
                 set_default_openai_api,
                 set_tracing_disabled,
             )
-            from agents.agent import StopAtTools
             from agents.exceptions import MaxTurnsExceeded
             from openai import AsyncOpenAI
         except ImportError as e:
@@ -105,14 +104,10 @@ async def run_agent(
                 if os.environ.get("AGENT_DISABLE_TRACING", "1") == "1":
                     set_tracing_disabled(True)
 
-        # Load instructions
+        # Load project instructions
         from .utils import load_project_instructions
 
-        base_instructions = """You are a helpful AI assistant embedded in Neovim. You can read files, list files, search the repository, propose patches, and execute Lua code directly inside Neovim."""
         project_instructions = load_project_instructions(cached_cwd)
-        full_instructions = base_instructions
-        if project_instructions:
-            full_instructions += "\n\nProject Instructions:\n" + project_instructions
 
         # Load MCP servers
         mcp_servers, hosted_tools = mcp_manager.load_servers()
@@ -120,12 +115,6 @@ async def run_agent(
         # Initialize and connect MCP servers if available
         if mcp_servers:
             mcp_servers = await mcp_manager.connect_servers(mcp_servers)
-
-            if mcp_servers:
-                full_instructions += (
-                    f"\n\nAdditional MCP tools are available for enhanced capabilities "
-                    f"(loaded {len(mcp_servers)} MCP servers: {[s.name for s in mcp_servers]})."
-                )
 
         # Build tools list
         tools = list(tool_wrappers.values())
@@ -149,28 +138,24 @@ async def run_agent(
         if yolo_mode:
             logger.info("YOLO mode enabled - patches will be auto-applied")
 
-        # Initialize Agent with optional model
-        agent_kwargs = {
-            "name": "Neovim Agent",
-            "instructions": full_instructions,
-            "tools": tools,
-        }
+        # Create agent using CodeAgent
+        code_agent = CodeAgent(
+            model=model,
+            logger=logger,
+            tools=tools,
+            mcp_servers=mcp_servers if mcp_servers else None,
+            project_instructions=project_instructions,
+            yolo_mode=yolo_mode,
+        )
+        agent = code_agent.create_agent()
 
-        # Only use StopAtTools if not in YOLO mode
-        if not yolo_mode:
-            # Stop agent when patch tool is called - user must approve/reject before continuing
-            agent_kwargs["tool_use_behavior"] = StopAtTools(
-                stop_at_tool_names=["patch"]
+        if not agent:
+            nvim.async_call(
+                buffer_manager.append_content,
+                ["Error: Failed to create agent. Run :AgentInstall."],
             )
-
-        # Add MCP servers if available
-        if mcp_servers:
-            agent_kwargs["mcp_servers"] = mcp_servers
-
-        if model:
-            agent_kwargs["model"] = model
-
-        agent = Agent(**agent_kwargs)
+            emit_event_fn("AgentRequestFinished", {"id": request_id, "status": "error"})
+            return
 
         # Display agent header with model name (unless skipped for continuations)
         display_model = model if model else "gpt-4o"
