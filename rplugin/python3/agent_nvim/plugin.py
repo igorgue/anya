@@ -500,7 +500,9 @@ class AgentPlugin(object):
                     if tool_budget and isinstance(result, str):
                         tool_budget.consume(result)
                 except asyncio.TimeoutError:
-                    result = f"Error: GitHub CLI command timed out after {timeout} seconds"
+                    result = (
+                        f"Error: GitHub CLI command timed out after {timeout} seconds"
+                    )
 
                 return result
 

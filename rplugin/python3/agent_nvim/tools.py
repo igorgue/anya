@@ -481,8 +481,8 @@ def gh(command: str, cwd: str = None, timeout: int = 30) -> str:
     """
     try:
         # Ensure command starts with 'gh'
-        if not command.strip().startswith('gh'):
-            command = f'gh {command}'
+        if not command.strip().startswith("gh"):
+            command = f"gh {command}"
 
         if cwd is None:
             cwd = os.getcwd()

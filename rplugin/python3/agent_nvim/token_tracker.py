@@ -157,7 +157,7 @@ def format_placeholder_text(
             ctx_str = f"{context_window / 1000:.0f}K"
         else:
             ctx_str = str(context_window)
-        
+
         # Cap percentage at 100% for display
         display_percentage = min(percentage, 100.0)
         text = f"{display_percentage:.0f}% of {ctx_str}"
