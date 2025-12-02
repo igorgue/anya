@@ -293,22 +293,23 @@ def display_tool_result(
                                     logger.warning("YOLO: Edits failed to apply")
 
                             nvim.async_call(apply_yolo_edits)
+                            # YOLO mode: resume streaming after edits applied
+                            nvim.exec_lua("_G.agent_stream_paused = false")
+                            if emit_event_fn and request_id:
+                                emit_event_fn(
+                                    "AgentToolCall",
+                                    {
+                                        "id": request_id,
+                                        "message": "thinking",
+                                    },
+                                )
                         else:
                             # Non-YOLO mode: just render for user review
+                            # Keep stream paused - user will confirm/reject
                             nvim.async_call(
                                 lambda: buffer_manager.render_edit_blocks(result_str)
                             )
 
-                        # Resume streaming
-                        nvim.exec_lua("_G.agent_stream_paused = false")
-                        if emit_event_fn and request_id:
-                            emit_event_fn(
-                                "AgentToolCall",
-                                {
-                                    "id": request_id,
-                                    "message": "thinking",
-                                },
-                            )
                         return
                     else:
                         logger.warning("render_edit_blocks not found on buffer_manager")
@@ -393,19 +394,21 @@ def display_tool_result(
                                     logger.warning("YOLO: Patch failed to apply")
 
                             nvim.async_call(apply_yolo_patch)
-                        # Normal mode - user will approve/reject
-                        # No blank line needed here - flush_and_pause handles spacing
+                            # YOLO mode: resume streaming after patch applied
+                            nvim.exec_lua("_G.agent_stream_paused = false")
+                            if emit_event_fn and request_id:
+                                emit_event_fn(
+                                    "AgentToolCall",
+                                    {
+                                        "id": request_id,
+                                        "message": "thinking",
+                                    },
+                                )
+                        else:
+                            # Normal mode - user will approve/reject
+                            # Keep stream paused - user will confirm/reject
+                            pass
 
-                        # Resume streaming
-                        nvim.exec_lua("_G.agent_stream_paused = false")
-                        if emit_event_fn and request_id:
-                            emit_event_fn(
-                                "AgentToolCall",
-                                {
-                                    "id": request_id,
-                                    "message": "thinking",
-                                },
-                            )
                         return
                     else:
                         logger.warning("render_diff_block not found on buffer_manager")

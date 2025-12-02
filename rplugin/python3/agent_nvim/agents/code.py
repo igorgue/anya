@@ -59,7 +59,7 @@ class CodeAgent:
         # Only use StopAtTools if not in YOLO mode
         if not self.yolo_mode:
             agent_kwargs["tool_use_behavior"] = StopAtTools(
-                stop_at_tool_names=["patch"]
+                stop_at_tool_names=["patch", "edit"]
             )
 
         # Add MCP servers if available (but tools take priority)
