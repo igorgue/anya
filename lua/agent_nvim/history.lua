@@ -44,14 +44,47 @@ function M:load()
     return
   end
 
+  local content = file:read("*a")
+  file:close()
+
   self.data = {}
-  for line in file:lines() do
-    -- Skip empty lines and comments
-    if line ~= "" and not line:match("^#") then
-      table.insert(self.data, line)
+  
+  -- Split by delimiter (handles multi-line prompts)
+  local delimiter = "\n---PROMPT_SEPARATOR---\n"
+  
+  -- Find the position after the header comments (after the blank line following comments)
+  local header_end = content:find("\n\n")
+  if not header_end then
+    -- No header, use whole content
+    header_end = 0
+  end
+  
+  -- Extract content after headers
+  local data_content = content:sub(header_end + 1)
+  local start = 1
+  
+  while true do
+    local delim_start, delim_end = data_content:find(delimiter, start, true)
+    local prompt
+    
+    if delim_start then
+      prompt = data_content:sub(start, delim_start - 1)
+      start = delim_end + 1
+    else
+      prompt = data_content:sub(start)
+      start = nil
+    end
+    
+    -- Skip empty entries
+    prompt = vim.trim(prompt)
+    if prompt ~= "" then
+      table.insert(self.data, prompt)
+    end
+    
+    if not start then
+      break
     end
   end
-  file:close()
 
   self.idx = #self.data
   self.cursor = self.idx
@@ -68,12 +101,16 @@ function M:save()
   local success, write_err = pcall(function()
     -- Write header comment
     file:write("# Agent.nvim Prompt History\n")
-    file:write("# Format: one prompt per line\n")
+    file:write("# Format: prompts separated by ---PROMPT_SEPARATOR--- delimiter\n")
     file:write("# Lines starting with # are comments\n\n")
 
-    -- Write all prompts
-    for _, prompt in ipairs(self.data) do
-      file:write(prompt .. "\n")
+    -- Write all prompts with delimiter
+    local delimiter = "\n---PROMPT_SEPARATOR---\n"
+    for i, prompt in ipairs(self.data) do
+      file:write(prompt)
+      if i < #self.data then
+        file:write(delimiter)
+      end
     end
   end)
 
