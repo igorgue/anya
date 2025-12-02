@@ -52,7 +52,7 @@ class ConfigManager:
     def _get_default_config() -> Dict[str, Any]:
         """Get default configuration."""
         return {
-            "agent": "AUTO",
+            "agent": "CODER",
             "mode": "ASK",
             "toolbar_enabled": True,
         }

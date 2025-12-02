@@ -21,7 +21,7 @@ that has access to your codebase.
 Features:
 - Chat interface with streaming responses.
 - Access to file system (read, list, search).
-- Patching capability (propose and apply patches).
+- Code editing capability (make changes via SEARCH/REPLACE blocks).
 - Context awareness via `@file` mentions.
 - Project-specific instructions via `AGENTS.md`.
 
@@ -60,8 +60,8 @@ Ensure you have your OpenAI API key set in your environment:
 
 4. The agent will stream its response in the top content buffer.
 
-5. If the agent proposes a patch, it will appear in a new `AgentDiff` buffer.
-   Review it and run `:AgentApply` to apply the changes.
+5. If the agent makes code edits, they will appear as SEARCH/REPLACE blocks.
+   Review them and use the toolbar to accept or reject the changes.
 
 6. To cancel a running request, press `<C-c>` or use the `/cancel` command.
 
@@ -81,9 +81,6 @@ Slash Commands:
 
 :AgentTestImport                                            *AgentTestImport*
     Verifies that dependencies can be imported.
-
-:AgentApply                                                      *AgentApply*
-    Applies the patch currently shown in the `AgentDiff` buffer.
 
 :AgentCancel                                                    *AgentCancel*
     Cancels the currently running agent request.

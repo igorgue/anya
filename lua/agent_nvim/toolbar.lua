@@ -3,15 +3,14 @@
 local M = {}
 
 -- Main agent options
-local MAIN_AGENTS = { "AUTO", "CODER", "PLAN" }
+local MAIN_AGENTS = { "CODER", "PLAN" }
 -- All available agents
-local ALL_AGENTS = { "AUTO", "CODER", "REVIEWER", "VERIFIER", "PLAN", "COMPACT" }
+local ALL_AGENTS = { "CODER", "REVIEWER", "VERIFIER", "PLAN", "COMPACT" }
 -- Mode options
 local MODES = { "ASK", "YOLO" }
 
 -- Highlight groups
 local HIGHLIGHTS = {
-  AUTO = "Comment",
   ASK = "Comment",
   CODER = "DiagnosticWarn",
   YOLO = "DiagnosticError",
@@ -23,7 +22,7 @@ local HIGHLIGHTS = {
 
 -- State
 local state = {
-  agent = "AUTO",
+  agent = "CODER",
   mode = "ASK",
   toolbar_win = nil,
   toolbar_buf = nil,
@@ -34,7 +33,7 @@ local state = {
 -- Load state from global Lua variable (will be set by Python)
 local function load_state_from_python()
   if _G.agent_state then
-    state.agent = _G.agent_state.agent or "AUTO"
+    state.agent = _G.agent_state.agent or "CODER"
     state.mode = _G.agent_state.mode or "ASK"
   end
 end

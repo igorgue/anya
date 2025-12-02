@@ -3,10 +3,6 @@
 
 " No need to check b:current_syntax or load markdown manually
 
-" Explicitly highlight diff blocks (in case markdown syntax misses it)
-syntax include @Diff syntax/diff.vim
-syntax region AgentDiffBlock start="^```diff.*$" end="^```$" contains=@Diff keepend
-
 " SEARCH/REPLACE block highlighting (Aider-style)
 " Match the markers
 syntax match AgentSearchMarker "^<\{5,9} SEARCH>*\s*$"

@@ -234,7 +234,7 @@ class AgentPlugin(object):
     def _sync_config_to_lua(self):
         """Synchronize configuration state from Python to Lua."""
         try:
-            agent = self.config_manager.get("agent", "AUTO")
+            agent = self.config_manager.get("agent", "CODER")
             mode = self.config_manager.get("mode", "ASK")
 
             # Sync YOLO mode to environment variable so is_yolo_mode() works
@@ -289,6 +289,9 @@ class AgentPlugin(object):
         except Exception:
             cwd = None
 
+        # Store cwd for later use
+        self._cached_cwd = cwd
+
         def init_agents_thread(cwd):
             try:
                 from agents import Agent
@@ -332,13 +335,69 @@ class AgentPlugin(object):
                 # Load project instructions
                 project_instructions = load_project_instructions(cwd)
 
-                # MCP servers are now loaded and connected fresh for each request (no caching)
+                # Pre-load tools (without budget tracking for startup)
+                tool_wrappers = self._get_tool_wrappers(tool_budget=None)
+                tools_list = list(tool_wrappers.values()) if tool_wrappers else []
+                self.logger.info(f"Pre-loaded {len(tools_list)} tools on startup")
 
-                # Mark initialization complete - agents will be created fresh each request
-                self._agents_initialized = True
-                self.logger.info(
-                    "MCP servers pre-connected on startup. Agents will be created fresh per request."
+                # Pre-load and connect MCP servers
+                mcp_servers = []
+                hosted_tools = []
+                try:
+                    mcp_servers, hosted_tools = self.mcp_manager.load_servers()
+                    if mcp_servers:
+                        # Run async connect in a new event loop
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            mcp_servers = loop.run_until_complete(
+                                self.mcp_manager.connect_servers(mcp_servers)
+                            )
+                            self.logger.info(
+                                f"Pre-connected {len(mcp_servers)} MCP servers on startup"
+                            )
+                        finally:
+                            loop.close()
+
+                    if hosted_tools:
+                        tools_list.extend(hosted_tools)
+                        self.logger.info(
+                            f"Added {len(hosted_tools)} MCP hosted tools on startup"
+                        )
+                except Exception as mcp_err:
+                    self.logger.warning(f"MCP preload failed: {mcp_err}")
+
+                # Pre-create CodeAgent on startup so it's ready for first request
+                from .agents import CodeAgent
+
+                yolo_mode = os.environ.get("AGENT_YOLO", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
                 )
+
+                # Create CodeAgent with preloaded tools and MCP servers
+                code_agent = CodeAgent(
+                    model=model,
+                    logger=self.logger,
+                    tools=tools_list,
+                    mcp_servers=mcp_servers if mcp_servers else None,
+                    project_instructions=project_instructions,
+                    yolo_mode=yolo_mode,
+                )
+
+                # Pre-create the agent to warm up imports and initialization
+                agent = code_agent.create_agent()
+                if agent:
+                    self._cached_agents = {"code": code_agent}
+                    self.logger.info(
+                        f"CodeAgent pre-initialized on startup with model {model}, "
+                        f"{len(tools_list)} tools, {len(mcp_servers)} MCP servers"
+                    )
+
+                # Mark initialization complete
+                self._agents_initialized = True
+                self.logger.info("CodeAgent ready on startup with tools and MCP servers.")
 
             except ImportError as e:
                 self.logger.debug(f"Agents SDK not yet available for eager init: {e}")
@@ -488,11 +547,6 @@ class AgentPlugin(object):
 
                 return result
 
-            def patch(patch_str: str) -> str:
-                """Propose a patch. Agent stops and waits for user to apply (1) or reject (2).
-                DEPRECATED: Use the `edit` tool with SEARCH/REPLACE blocks instead."""
-                return tools.patch(patch_str)
-
             def edit(edit_blocks: str) -> str:
                 """Make code edits using SEARCH/REPLACE blocks.
 
@@ -587,7 +641,6 @@ class AgentPlugin(object):
                 "read_many_files": function_tool(read_many_files),
                 "list_files": function_tool(list_files),
                 "search_repo": function_tool(search_repo),
-                "patch": function_tool(patch),
                 "edit": function_tool(edit),
                 "exec_lua": function_tool(exec_lua),
                 "exec": function_tool(exec),
@@ -650,9 +703,6 @@ class AgentPlugin(object):
         # Don't submit if agent is busy
         if self._agent_busy:
             return
-
-        # Apply any pending patches first
-        self.nvim.async_call(self.buffer_manager.apply_pending_patches)
 
         # Get content from prompt buffer
         prompt_buf = self.nvim.current.buffer
@@ -728,84 +778,6 @@ class AgentPlugin(object):
         else:
             self.nvim.out_write("No active agent request or compaction to cancel.\\n")
 
-    @pynvim.command("AgentApply", sync=False)
-    def agent_apply(self):
-        """Apply the patch in the AgentDiff buffer."""
-        self.buffer_manager.apply_patch()
-
-    @pynvim.function("AgentPatchAction", sync=False)
-    def agent_patch_action(self, args):
-        """Handle patch actions from Lua (apply/reject) and continue conversation."""
-        try:
-            # Args: action, patch_content, previous_state
-            # previous_state: 0=PENDING (first decision), 1=ACCEPT, 2=REJECT
-            action = args[0]
-            patch_content = args[1]
-            previous_state = args[2] if len(args) > 2 else 0
-
-            success = False
-            message = ""
-            is_first_decision = previous_state == 0  # PENDING state
-
-            if action == "apply":
-                success = self.buffer_manager._apply_single_patch(patch_content)
-                if success:
-                    self.logger.info("Patch applied!")
-                    if is_first_decision:
-                        message = "PATCH_APPLIED: The patch was successfully applied."
-                else:
-                    # Get the error from the last apply attempt
-                    if is_first_decision:
-                        message = "PATCH_FAILED: The patch could not be applied. Please read the target file again and regenerate the patch with correct context lines."
-            elif action == "reject":
-                # Reverse the patch (undo) - this is called when user rejects an already-applied patch
-                # In normal mode: user pressed 1 (apply) then 2 (reject)
-                # In YOLO mode: patch was auto-applied, user pressed 2 to undo
-                success = self.buffer_manager._apply_single_patch(
-                    patch_content, reverse=True
-                )
-                if success:
-                    self.logger.info("Patch reversed (rejected)!")
-                else:
-                    self.logger.warning(
-                        "Failed to reverse patch - may not have been applied"
-                    )
-                # Don't continue agent - this is an undo action
-                return
-            elif action == "reject_pending":
-                # First decision to reject (from PENDING state) - no patch to reverse
-                success = True
-                message = "PATCH_REJECTED: The user rejected the patch. Ask if they want changes or a different approach."
-
-            # Only continue agent on first decision (from PENDING state)
-            if message and is_first_decision:
-                self._conversation_history.append({"role": "user", "content": message})
-
-                # Show feedback in content buffer
-                feedback_text = (
-                    "> Patch applied successfully."
-                    if action == "apply" and success
-                    else (
-                        ">   Patch rejected by user."
-                        if action == "reject_pending"
-                        else ">   Patch failed to apply."
-                    )
-                )
-                self.nvim.async_call(
-                    self.buffer_manager.append_content, ["", feedback_text]
-                )
-
-                self.nvim.async_call(self.buffer_manager.append_content, ["", ""])
-
-                # Continue agent to respond to user decision
-                self.nvim.async_call(
-                    lambda: self._continue_agent_after_patch(skip_header=True)
-                )
-
-        except Exception as e:
-            self.logger.error(f"Error in AgentPatchAction: {e}")
-            self.nvim.err_write(f"Error applying/reverting patch: {e}\n")
-
     @pynvim.function("AgentEditAction", sync=False)
     def agent_edit_action(self, args):
         """Handle edit actions from Lua (apply/reject) and continue conversation."""
@@ -830,14 +802,10 @@ class AgentPlugin(object):
                     if is_first_decision:
                         message = "EDIT_FAILED: The edits could not be applied. The SEARCH content did not match the file. Please read the target file again and regenerate the edit with correct content."
             elif action == "reject":
-                # Undo - restore from backups
-                success = self.buffer_manager._restore_backups()
-                if success:
-                    self.logger.info("Edit blocks reversed (rejected)!")
-                else:
-                    self.logger.warning(
-                        "Failed to reverse edits - may not have been applied"
-                    )
+                # Undo - restore from backups (implement via git)
+                # This would need a separate implementation for undoing edits
+                # For now, log that user rejected
+                self.logger.info("Edit blocks rejected by user")
                 return
             elif action == "reject_pending":
                 # First decision to reject - no edits to reverse
@@ -865,38 +833,20 @@ class AgentPlugin(object):
                 self.nvim.async_call(self.buffer_manager.append_content, ["", ""])
 
                 # Continue agent to respond to user decision
+                import uuid
+                request_id = str(uuid.uuid4())
+                self._cancel_requested = False
+                self._current_request_id = request_id
+                self._agent_busy = True
                 self.nvim.async_call(
-                    lambda: self._continue_agent_after_patch(skip_header=True)
+                    lambda: asyncio.create_task(
+                        self._run_agent_wrapper(request_id, skip_header=True)
+                    )
                 )
 
         except Exception as e:
             self.logger.error(f"Error in AgentEditAction: {e}")
             self.nvim.err_write(f"Error applying/reverting edits: {e}\n")
-
-    def _continue_agent_after_patch(self, skip_header=False):
-        """Continue the agent after a patch action."""
-        import uuid
-
-        # Don't run if already busy
-        if self._agent_busy:
-            self.logger.info("Agent already busy, skipping continuation")
-            return
-
-        # Cache cwd before async operations
-        self._cached_cwd = self.nvim.call("getcwd")
-
-        # Generate unique request ID
-        request_id = str(uuid.uuid4())
-
-        # Reset cancellation flag and set current request ID
-        self._cancel_requested = False
-        self._current_request_id = request_id
-        self._agent_busy = True
-
-        # Run agent in background
-        asyncio.create_task(
-            self._run_agent_wrapper(request_id, skip_header=skip_header)
-        )
 
     @pynvim.command("AgentConfigUpdate", nargs="*", sync=True)
     def agent_config_update(self, args):

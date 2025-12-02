@@ -4,7 +4,7 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-agent.nvim is a Neovim plugin that integrates OpenAI's Agents SDK, providing an AI assistant with file system access, patching capabilities, and context awareness. It's a Python remote plugin that communicates with Neovim via pynvim.
+agent.nvim is a Neovim plugin that integrates OpenAI's Agents SDK, providing an AI assistant with file system access, code editing capabilities, and context awareness. It's a Python remote plugin that communicates with Neovim via pynvim.
 
 ## Architecture
 
@@ -14,7 +14,7 @@ agent.nvim is a Neovim plugin that integrates OpenAI's Agents SDK, providing an 
 - Main plugin logic using `@pynvim.plugin` decorator
 - Manages virtual environment at `~/.local/share/agent.nvim/venv`
 - Handles async operations via asyncio for agent execution
-- Implements tools: file reading, directory listing, repo search, and patch application
+- Implements tools: file reading, directory listing, repo search, and code editing
 - Includes token tracking and budget management to prevent context overflow
 
 **Vim Layer** (`plugin/agent.vim`)
@@ -25,7 +25,6 @@ agent.nvim is a Neovim plugin that integrates OpenAI's Agents SDK, providing an 
 **Buffer Management** (`rplugin/python3/agent_nvim/buffers.py`)
 - `AgentContent`: Markdown buffer for chat history and responses
 - `AgentPrompt`: Special filetype buffer for user input with custom completion
-- `AgentDiff`: Diff buffer for reviewing patches before applying
 - Streaming responses with Lua animation for smooth typing effect
 
 **File Type Configuration**
@@ -41,7 +40,7 @@ agent.nvim is a Neovim plugin that integrates OpenAI's Agents SDK, providing an 
 
 **Toolbar UI** (`lua/agent_nvim/toolbar.lua`)
 - Shows current agent and mode in bottom right of prompt buffer
-- Supports toggling between main agents (AUTO, CODER, PLAN)
+- Supports toggling between main agents (CODER, PLAN)
 - Supports toggling between modes (ASK, YOLO)
 - Picker for specialized agents (REVIEWER, VERIFIER, COMPACT)
 - Color-coded indicators with customizable highlights
@@ -63,9 +62,9 @@ agent.nvim is a Neovim plugin that integrates OpenAI's Agents SDK, providing an 
 2. User types in prompt buffer → mentions (`@filename`) trigger file path completion
 3. Enter key → `AgentSubmit` command resolves mentions and sends to agent
 4. Agent execution → runs in executor thread to avoid blocking Neovim
-5. Agent uses tools → `_tool_read_file`, `_tool_list_files`, `_tool_search_repo`, `_tool_apply_patch`
+5. Agent uses tools → `read_file`, `list_files`, `search_repo`, `edit`
 6. Responses stream → appended to content buffer via Lua animation
-7. Patches → displayed in `AgentDiff` buffer, applied via `:AgentApply` using `git apply`
+7. Code edits → applied via SEARCH/REPLACE blocks
 
 ### Project Instructions
 
@@ -102,15 +101,12 @@ python3 scripts/install.py
 # Cancel a running request (mapped to Ctrl+C)
 :AgentCancel
 
-# Apply proposed patches
-:AgentApply
-
 # Sync configuration from disk
 :AgentSyncConfig
 ```
 
 ### Toolbar Keymaps (in prompt buffer)
-- `<localleader>a` - Toggle main agents (AUTO → CODER → PLAN → AUTO)
+- `<localleader>a` - Toggle main agents (CODER ↔ PLAN)
 - `<localleader>y` - Toggle mode (ASK ↔ YOLO)
 - `<localleader>A` - Open picker for specialized agents (REVIEWER, VERIFIER, COMPACT)
 

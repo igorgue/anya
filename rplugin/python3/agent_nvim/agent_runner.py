@@ -10,7 +10,7 @@ from .token_tracker import (
     get_context_window,
     calculate_usage_percentage,
 )
-from .agents import AutoAgent, CodeAgent, PlanAgent
+from .agents import CodeAgent
 
 
 async def run_agent(
@@ -140,20 +140,14 @@ async def run_agent(
         max_tokens = calculate_max_tokens()
         logger.info(f"Calculated max_tokens: {max_tokens}")
 
-        # Check for YOLO mode - auto-apply patches without stopping
+        # Check for YOLO mode - auto-apply edits without stopping
         yolo_mode = os.environ.get("AGENT_YOLO", "").lower() in ("1", "true", "yes")
         if yolo_mode:
-            logger.info("YOLO mode enabled - patches will be auto-applied")
+            logger.info("YOLO mode enabled - edits will be auto-applied")
 
-        # Create the agent system with handoffs
-        # We need to create agents in stages to wire up bidirectional handoffs:
-        # 1. Create wrapper objects
-        # 2. Create specialized agents first (code, plan) without handoff back
-        # 3. Create auto agent with handoffs to specialized agents
-        # 4. The SDK handles the handoff chain internally
-
+        # Create the CodeAgent directly - no handoff routing needed
         # Always create agents fresh each request (don't reuse cached agents - SDK limitation)
-        logger.info("Creating agents fresh per request to maintain MCP tool access")
+        logger.info("Creating CodeAgent fresh per request")
 
         code_agent = CodeAgent(
             model=model,
@@ -164,46 +158,17 @@ async def run_agent(
             yolo_mode=yolo_mode,
         )
 
-        plan_agent = PlanAgent(
-            model=model,
-            logger=logger,
-            tools=tools,
-            mcp_servers=mcp_servers if mcp_servers else None,
-            project_instructions=project_instructions,
-        )
-
-        code_sdk_agent = code_agent.create_agent()
-        plan_sdk_agent = plan_agent.create_agent()
-
-        if not code_sdk_agent or not plan_sdk_agent:
-            nvim.async_call(
-                buffer_manager.append_content,
-                ["Error: Failed to create agents. Run :AgentInstall."],
-            )
-            emit_event_fn("AgentRequestFinished", {"id": request_id, "status": "error"})
-            return
-
-        # Create AutoAgent with handoffs to both agents
-        auto_agent = AutoAgent(
-            model=model,
-            logger=logger,
-            project_instructions=project_instructions,
-        )
-
-        auto_agent.register_handoff_agent("code", code_sdk_agent)
-        auto_agent.register_handoff_agent("plan", plan_sdk_agent)
-
-        agent = auto_agent.create_agent()
+        agent = code_agent.create_agent()
 
         if not agent:
             nvim.async_call(
                 buffer_manager.append_content,
-                ["Error: Failed to create auto agent. Run :AgentInstall."],
+                ["Error: Failed to create agent. Run :AgentInstall."],
             )
             emit_event_fn("AgentRequestFinished", {"id": request_id, "status": "error"})
             return
 
-        logger.info("Agent system created: auto -> [code, plan]")
+        logger.info("CodeAgent created successfully")
 
         # Display agent header with model name (unless skipped for continuations)
         display_model = model if model else "gpt-4o"
@@ -211,7 +176,7 @@ async def run_agent(
         # Reset the agent response started flag for intelligent spacing
         buffer_manager.reset_agent_response_flag()
 
-        # Add agent header with proper spacing (skip for patch continuations)
+        # Add agent header with proper spacing (skip for edit continuations)
         if not skip_header:
             header_lines = ["", f"# Agent ({display_model})", ""]
             nvim.async_call(buffer_manager.append_content, header_lines)
@@ -575,14 +540,14 @@ async def run_agent(
             final_output = str(result_stream.final_output)
             conversation_history.append({"role": "assistant", "content": final_output})
 
-            # If agent stopped due to patch tool (StopAtTools), show hint
-            # The patch is displayed as a diff block - user presses 1 to apply, 2 to reject
-            if "diff --git" in final_output or final_output.startswith("---"):
+            # If agent made code edits, show hint about toolbar usage
+            # Edits are displayed as SEARCH/REPLACE blocks with toolbar for approval
+            if "SEARCH" in final_output or "REPLACE" in final_output:
                 nvim.async_call(
                     buffer_manager.append_content,
                     [
                         "",
-                        "> Press **1** to apply, **2** to reject, and **za** to open the diff on top of the fold.",
+                        "> Press **1** to accept, **2** to reject and **za** to open the changeset on top of the fold",
                     ],
                 )
 
