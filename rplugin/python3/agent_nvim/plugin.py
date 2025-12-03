@@ -735,6 +735,49 @@ class AgentPlugin(object):
 
         self.nvim.async_call(_open_with_placeholder)
 
+        # Pre-connect MCP servers in the async context so they're ready when user submits
+        # This runs in the same event loop that will be used for agent requests
+        self._preconnect_mcp_servers_async()
+
+    def _preconnect_mcp_servers_async(self):
+        """Pre-connect MCP servers asynchronously for faster first request.
+
+        Uses the same event loop pattern as agent requests to ensure MCP servers
+        are connected in the correct event loop context.
+        """
+        if self._cached_mcp_servers is not None:
+            # Already connected
+            self.logger.debug("MCP servers already cached, skipping pre-connect")
+            return
+
+        if self.mcp_manager._servers_loaded and self.mcp_manager._active_servers:
+            # Already connected via mcp_manager
+            self._cached_mcp_servers = self.mcp_manager._active_servers
+            self.logger.debug("MCP servers already connected in manager, caching")
+            return
+
+        async def connect_mcp():
+            try:
+                mcp_servers, hosted_tools = self.mcp_manager.load_servers()
+                if mcp_servers:
+                    connected = await self.mcp_manager.connect_servers(mcp_servers)
+                    if connected:
+                        self._cached_mcp_servers = connected
+                        self.logger.info(
+                            f"Pre-connected {len(connected)} MCP servers on AgentOpen"
+                        )
+            except Exception as e:
+                self.logger.warning(f"Failed to pre-connect MCP servers: {e}")
+
+        try:
+            asyncio.create_task(connect_mcp())
+            self.logger.info("Started MCP pre-connection task on AgentOpen")
+        except RuntimeError:
+            # No event loop running yet, will connect on first request
+            self.logger.debug(
+                "No event loop for MCP pre-connect, will connect on first request"
+            )
+
     @pynvim.command("AgentSubmit", sync=False)
     def agent_submit(self):
         """Submit the current prompt to the agent."""

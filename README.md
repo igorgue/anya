@@ -175,3 +175,21 @@ function randomFunction() {
     return Math.random() > 0.5 ? "success" : "failure";
 }
 ```
+
+## 😄 Developer Humor
+
+Why do programmers prefer dark mode?  
+
+Because light attracts bugs! 🐛
+
+---
+
+*Why did the developer go broke?*  
+
+Because they used up all their cache! 💸
+
+---
+
+How many programmers does it take to change a light bulb?
+
+None - that's a hardware problem! 💡
