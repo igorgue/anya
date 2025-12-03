@@ -136,9 +136,9 @@ class BufferManager:
         self.nvim.api.win_set_option(content_win, "wrap", True)
         self.nvim.api.win_set_option(content_win, "linebreak", True)
 
-        # Create split for prompt
+        # Create split for prompt (6 lines: 5 usable + 1 for toolbar)
         self.nvim.command("botright split")
-        self.nvim.command("resize 5")
+        self.nvim.command("resize 6")
         self.nvim.api.win_set_buf(0, prompt_buf)
 
         # Store buffer handles
@@ -147,8 +147,8 @@ class BufferManager:
 
         # Set up window size preservation for prompt
         self.nvim.exec_lua(f"""
-        -- Initialize preferred height with current actual height
-        _G.agent_prompt_preferred_height = 5
+        -- Initialize preferred height with current actual height (6 = 5 usable + 1 for toolbar)
+        _G.agent_prompt_preferred_height = 6
         """)
         self._setup_prompt_size_preservation()
 
@@ -164,9 +164,9 @@ class BufferManager:
         self.nvim.exec_lua(f"""
         local group = vim.api.nvim_create_augroup("AgentPromptSizePreservation", {{ clear = true }})
         
-        -- Initialize global variables
-        _G.agent_prompt_preferred_height = 5
-        _G.agent_prompt_last_known_height = 5
+        -- Initialize global variables (6 = 5 usable + 1 for toolbar)
+        _G.agent_prompt_preferred_height = 6
+        _G.agent_prompt_last_known_height = 6
         
         local function get_prompt_window()
             for _, win in ipairs(vim.api.nvim_list_wins()) do

@@ -60,31 +60,11 @@ augroup AgentPromptHighlight
     autocmd TextChangedI <buffer> silent! call AgentHighlightPrompt()
 augroup END
 
-" Maintain prompt window height when terminal is resized
+" Maintain prompt window height when terminal is resized (6 = 5 usable + 1 for toolbar)
 augroup AgentPromptResize
     autocmd!
-    autocmd VimResized <buffer> silent! resize 5
+    autocmd VimResized <buffer> silent! resize 6
 augroup END
 
-" Simple bottom scrolloff to keep cursor above toolbar
-augroup AgentPromptBottomScrolloff
-    autocmd!
-    autocmd CursorMoved,CursorMovedI <buffer> call s:BottomScrolloff()
-augroup END
-
-" Initialize with no scrolloff
-setlocal scrolloff=0
-
-" Function to handle bottom-only scrolloff
-function! s:BottomScrolloff()
-    let total_lines = line('$')
-    let current_line = line('.')
-    let distance_to_bottom = total_lines - current_line
-    
-    " Apply scrolloff only when within 1 lines of bottom (reserve space for toolbar)
-    if distance_to_bottom < 1
-        setlocal scrolloff=1
-    else
-        setlocal scrolloff=0
-    endif
-endfunction
+" Reserve last line for toolbar - keep cursor 1 line away from bottom
+setlocal scrolloff=1
