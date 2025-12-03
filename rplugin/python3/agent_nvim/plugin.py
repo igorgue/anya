@@ -564,6 +564,29 @@ class AgentPlugin(object):
 
                 return result
 
+            async def create(path: str, content: str = "", timeout: int = 30) -> str:
+                """Create a new file with optional content.
+
+                Args:
+                    path: File path (supports ~ expansion and relative paths)
+                    content: Optional content to write to the file
+                    timeout: Timeout in seconds (default 30)"""
+                cwd = getattr(self, "_cached_cwd", None)
+
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(tools.create, path, content, cwd),
+                        timeout=timeout,
+                    )
+
+                    # Track token usage (light tool, no budget check)
+                    if tool_budget and isinstance(result, str):
+                        tool_budget.consume(result)
+                except asyncio.TimeoutError:
+                    result = f"Error: Tool timed out after {timeout} seconds"
+
+                return result
+
             def edit(edit_blocks: str) -> str:
                 """Make code edits using SEARCH/REPLACE blocks.
 
@@ -582,7 +605,8 @@ class AgentPlugin(object):
                 - Use multiple blocks for multiple changes
                 - For new files: use empty SEARCH section
                 """
-                return tools.edit(edit_blocks)
+                cwd = getattr(self, "_cached_cwd", None)
+                return tools.edit(edit_blocks, cwd)
 
             async def exec_lua(code: str) -> str:
                 """Execute Lua code inside Neovim."""
@@ -675,6 +699,7 @@ class AgentPlugin(object):
                 return result
 
             return {
+                "create": function_tool(create),
                 "read_file": function_tool(read_file),
                 "read_many_files": function_tool(read_many_files),
                 "list_files": function_tool(list_files),

@@ -1,4 +1,4 @@
-def edit(edit_blocks: str) -> str:
+def edit(edit_blocks: str, cwd: str = None) -> str:
     """Propose code edits using SEARCH/REPLACE blocks.
 
     Use this tool to make precise code modifications. Each edit block specifies:
@@ -9,9 +9,9 @@ def edit(edit_blocks: str) -> str:
     CRITICAL - edit tool behavior:
     - When you call the edit tool, the agent STOPS and waits for user to apply (1) or reject (2) the patch
     - After the user decides, you will receive one of these messages:
-    - PATCH_APPLIED: The patch was successfully applied - continue with next steps
-    - PATCH_REJECTED: The user rejected - ask what they want changed
-    - PATCH_FAILED: The patch could not be applied - re-read the file and regenerate with correct context lines
+      - PATCH_APPLIED: The patch was successfully applied - continue with next steps
+      - PATCH_REJECTED: The user rejected - ask what they want changed
+      - PATCH_FAILED: The patch could not be applied - re-read the file and regenerate with correct context lines
     - Do NOT use alternative approaches (like exec with sed) - always use the edit tool for code changes
     - EXCEPTION: In YOLO mode (AGENT_YOLO=1), patches are auto-applied without stopping. You will NOT receive PATCH_APPLIED/REJECTED messages - just continue with your work.
 
@@ -43,6 +43,7 @@ def edit(edit_blocks: str) -> str:
 
     Args:
         edit_blocks: String containing one or more SEARCH/REPLACE blocks
+        cwd: Current working directory (optional, for path resolution)
 
     Returns:
         The edit blocks content (to be rendered and applied by the UI)

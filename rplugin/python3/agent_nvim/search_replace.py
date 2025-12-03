@@ -667,11 +667,12 @@ def apply_edit_block(block: EditBlock, cwd: str) -> EditResult:
     Returns:
         EditResult with success status and details
     """
-    # Resolve path
-    if not os.path.isabs(block.path):
-        full_path = os.path.join(cwd, block.path)
+    # Resolve path with tilde expansion
+    path = os.path.expanduser(block.path)
+    if not os.path.isabs(path):
+        full_path = os.path.join(cwd, path)
     else:
-        full_path = block.path
+        full_path = path
 
     # Handle new file creation (empty SEARCH section)
     if not block.search.strip():
@@ -803,10 +804,12 @@ def apply_edit_blocks(
     results: List[EditResult] = []
 
     for block in blocks:
-        if not os.path.isabs(block.path):
-            full_path = os.path.join(cwd, block.path)
+        # Resolve path with tilde expansion
+        path = os.path.expanduser(block.path)
+        if not os.path.isabs(path):
+            full_path = os.path.join(cwd, path)
         else:
-            full_path = block.path
+            full_path = path
 
         # Get current content (from working copy or disk)
         if full_path not in working_contents:

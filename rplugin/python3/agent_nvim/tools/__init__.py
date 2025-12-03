@@ -2,6 +2,7 @@
 
 import os
 
+from .create import create
 from .edit import edit
 from .exec import exec
 from .exec_lua import exec_lua
@@ -18,6 +19,7 @@ search_repo = search
 MAX_READ_BYTES = int(os.environ.get("AGENT_MAX_READ_BYTES", 64000))  # ~16k tokens
 
 __all__ = [
+    "create",
     "edit",
     "exec",
     "exec_lua",
