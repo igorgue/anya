@@ -152,8 +152,6 @@ class BufferManager:
         # Enable render-markdown for the content buffer
         self.enable_render_markdown()
 
-
-
     def render_edit_blocks(self, edit_str):
         """Render SEARCH/REPLACE edit blocks in the content buffer using Lua.
 
@@ -195,9 +193,21 @@ class BufferManager:
                         block.raw_block,
                     )
                 except Exception as e:
-                    self.logger.warning(f"Failed to render edit block for {block.path}: {e}")
+                    self.logger.warning(
+                        f"Failed to render edit block for {block.path}: {e}"
+                    )
                     # Continue with next block instead of failing entirely
                     continue
+
+            # Add instruction message immediately after rendering edit blocks
+            # This ensures proper ordering (instruction appears after the edit blocks)
+            self._append_and_scroll(
+                [
+                    "",
+                    "> Press **1** to accept, **2** to reject and **za** to open the changeset on top of the fold",
+                ],
+                fold=False,
+            )
 
             # Scroll to bottom to show new content
             self._scroll_to_bottom()

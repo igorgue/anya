@@ -79,8 +79,13 @@ function M:init()
     callback = function(event)
       local handle = M:get_progress_handle(event.data.id)
       if handle then
-        -- Finish the waiting state and resume to thinking
-        handle.message = "thinking"
+        -- User responded to waiting prompt (edit approval, command confirmation, etc.)
+        -- Finish this handle since a new request will be started
+        handle.message = "✓ completed"
+        vim.defer_fn(function()
+          M:pop_progress_handle(event.data.id)
+          handle:finish()
+        end, 500)
       end
     end,
   })

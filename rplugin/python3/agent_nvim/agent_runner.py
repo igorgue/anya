@@ -523,17 +523,6 @@ async def run_agent(
             final_output = str(result_stream.final_output)
             conversation_history.append({"role": "assistant", "content": final_output})
 
-            # If agent made code edits, show hint about toolbar usage
-            # Edits are displayed as SEARCH/REPLACE blocks with toolbar for approval
-            if "SEARCH" in final_output or "REPLACE" in final_output:
-                nvim.async_call(
-                    buffer_manager.append_content,
-                    [
-                        "",
-                        "> Press **1** to accept, **2** to reject and **za** to open the changeset on top of the fold",
-                    ],
-                )
-
         # Track and display token usage
         try:
             if (
@@ -654,8 +643,14 @@ async def run_agent(
         # if "mcp_servers" in locals() and mcp_servers:
         #     await mcp_manager.disconnect_servers(mcp_servers)
 
-        # Clear current request ID
-        if current_request_id_ref["value"] == request_id:
+        # Check if this request is waiting for user action
+        is_waiting = False
+        if is_request_waiting:
+            is_waiting = is_request_waiting(request_id)
+
+        # Clear current request ID only if not waiting for user action
+        # If waiting, we need to preserve the request_id for AgentWaitingDone event
+        if current_request_id_ref["value"] == request_id and not is_waiting:
             current_request_id_ref["value"] = None
 
         # Emit fidget finish event
@@ -665,11 +660,6 @@ async def run_agent(
         # Skip notification if waiting for user approval (edit or command)
         import sys
         import subprocess
-
-        # Check if this request is waiting for user action
-        is_waiting = False
-        if is_request_waiting:
-            is_waiting = is_request_waiting(request_id)
 
         logger.info(
             f"Notification check: is_waiting={is_waiting}, request_id={request_id}, status={status}"
