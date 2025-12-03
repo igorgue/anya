@@ -145,12 +145,92 @@ class BufferManager:
         self.content_buf = content_buf
         self.prompt_buf = prompt_buf
 
+        # Set up window size preservation for prompt
+        self.nvim.exec_lua(f"""
+        -- Initialize preferred height with current actual height
+        _G.agent_prompt_preferred_height = 5
+        """)
+        self._setup_prompt_size_preservation()
+
         # Add welcome message if empty (with animation)
         if len(content_buf) <= 1:
             self.animate_welcome_message(content_buf)
 
         # Enable render-markdown for the content buffer
         self.enable_render_markdown()
+
+    def _setup_prompt_size_preservation(self):
+        """Set up autocmd to preserve user's preferred prompt window height."""
+        self.nvim.exec_lua(f"""
+        local group = vim.api.nvim_create_augroup("AgentPromptSizePreservation", {{ clear = true }})
+        
+        -- Initialize global variables
+        _G.agent_prompt_preferred_height = 5
+        _G.agent_prompt_last_known_height = 5
+        
+        local function get_prompt_window()
+            for _, win in ipairs(vim.api.nvim_list_wins()) do
+                if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == {self.prompt_buf.number} then
+                    return win
+                end
+            end
+            return nil
+        end
+        
+        -- Function to restore preferred height when Neovim resizes
+        local function restore_on_neovim_resize()
+            local prompt_win = get_prompt_window()
+            if prompt_win then
+                local current_height = vim.api.nvim_win_get_height(prompt_win)
+                if current_height ~= _G.agent_prompt_preferred_height then
+                    vim.api.nvim_win_set_height(prompt_win, _G.agent_prompt_preferred_height)
+                end
+            end
+        end
+        
+        -- Function to detect manual resizes by the user
+        local function detect_manual_resize()
+            local prompt_win = get_prompt_window()
+            if prompt_win then
+                local current_height = vim.api.nvim_win_get_height(prompt_win)
+                if current_height ~= _G.agent_prompt_last_known_height then
+                    _G.agent_prompt_preferred_height = current_height
+                    _G.agent_prompt_last_known_height = current_height
+                end
+            end
+        end
+        
+        -- Track manual resizes on WinResized (fires for ALL resizes)
+        vim.api.nvim_create_autocmd("WinResized", {{
+            group = group,
+            callback = function()
+                -- Small delay to let Neovim settle
+                vim.defer_fn(function()
+                    detect_manual_resize()
+                end, 50)
+            end,
+        }})
+        
+        -- Restore preferred height when Neovim window itself is resized
+        vim.api.nvim_create_autocmd("VimResized", {{
+            group = group,
+            callback = function()
+                vim.defer_fn(restore_on_neovim_resize, 100)
+            end,
+        }})
+        
+        -- Update last known height when entering prompt window
+        vim.api.nvim_create_autocmd("WinEnter", {{
+            group = group,
+            buffer = {self.prompt_buf.number},
+            callback = function()
+                local prompt_win = get_prompt_window()
+                if prompt_win then
+                    _G.agent_prompt_last_known_height = vim.api.nvim_win_get_height(prompt_win)
+                end
+            end,
+        }})
+        """)
 
     def render_edit_blocks(self, edit_str):
         """Render SEARCH/REPLACE edit blocks in the content buffer using Lua.
