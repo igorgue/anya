@@ -329,7 +329,7 @@ async def run_agent(
 
         event_count = 0
         max_events = 50000  # Safety limit to prevent infinite loops
-        
+
         # Track thinking/reasoning content
         thinking_buffer = []
         thinking_active = False
@@ -417,8 +417,16 @@ async def run_agent(
                         # If we have thinking content buffered, flush it first
                         if thinking_buffer:
                             thinking_content = "".join(thinking_buffer).strip()
-                            if thinking_content:  # Only show if non-empty after stripping
-                                thinking_lines = ["**Thinking**", "``````", thinking_content, "``````"]
+                            if (
+                                thinking_content
+                            ):  # Only show if non-empty after stripping
+                                thinking_lines = [
+                                    "**Thinking**",
+                                    "``````",
+                                    thinking_content,
+                                    "``````",
+                                ]
+
                                 def flush_thinking():
                                     # Flush pending stream content and pause
                                     nvim.exec_lua(
@@ -439,14 +447,19 @@ async def run_agent(
                                         _G.agent_stream_paused = true
                                         """
                                     )
-                                    buffer_manager.append_content(thinking_lines, fold=True, fold_error=False)
-                                    buffer_manager.append_content([""]) # Blank line after fold
+                                    buffer_manager.append_content(
+                                        thinking_lines, fold=True, fold_error=False
+                                    )
+                                    buffer_manager.append_content(
+                                        [""]
+                                    )  # Blank line after fold
                                     # Resume streaming
                                     nvim.exec_lua("_G.agent_stream_paused = false")
+
                                 nvim.async_call(flush_thinking)
                             thinking_buffer = []
                             thinking_active = False
-                        
+
                         buffer_manager.append_stream_lua_direct(delta, content_bufnr)
 
                 # Process reasoning/thinking text events (for reasoning models like o1, glm-4, etc.)
@@ -552,6 +565,7 @@ async def run_agent(
             thinking_content = "".join(thinking_buffer).strip()
             if thinking_content:  # Only show if non-empty after stripping
                 thinking_lines = ["**Thinking**", "``````", thinking_content, "``````"]
+
                 def flush_thinking():
                     # Flush pending stream content
                     nvim.exec_lua(
@@ -571,10 +585,13 @@ async def run_agent(
                         end
                         """
                     )
-                    buffer_manager.append_content(thinking_lines, fold=True, fold_error=False)
-                    buffer_manager.append_content([""]) # Blank line after fold
+                    buffer_manager.append_content(
+                        thinking_lines, fold=True, fold_error=False
+                    )
+                    buffer_manager.append_content([""])  # Blank line after fold
+
                 nvim.async_call(flush_thinking)
-        
+
         # Log stream completion details
         logger.info(f"Stream loop ended after {event_count} events")
         logger.info(f"result_stream.is_complete: {result_stream.is_complete}")

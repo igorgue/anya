@@ -326,7 +326,9 @@ def display_tool_result(
                                 logger.info(f"Setting waiting for request {request_id}")
                                 set_waiting_fn(request_id, True)
                             else:
-                                logger.warning(f"Cannot set waiting: set_waiting_fn={set_waiting_fn}, request_id={request_id}")
+                                logger.warning(
+                                    f"Cannot set waiting: set_waiting_fn={set_waiting_fn}, request_id={request_id}"
+                                )
                             # Emit waiting event to update notification
                             if emit_event_fn and request_id:
                                 emit_event_fn(
@@ -342,7 +344,6 @@ def display_tool_result(
                         logger.warning("render_edit_blocks not found on buffer_manager")
                 else:
                     logger.warning("append_content_fn does not have __self__")
-
 
             args = tool_info["args"]
 
@@ -409,18 +410,18 @@ def display_tool_result(
                         f"``````",
                         f"Failed to display {tool_name} result: {e}",
                         "``````",
-                        ""
+                        "",
                     ]
                     append_content_fn(simple_error, fold=True, fold_error=True)
                 except Exception as e2:
                     logger.error(f"Even simple error display failed: {e2}")
-            
+
             # Resume streaming after tool output is written
             try:
                 nvim.exec_lua("_G.agent_stream_paused = false")
             except Exception as e:
                 logger.error(f"Error resuming streaming: {e}")
-                
+
             # Emit event to reset fidget back to "thinking"
             if emit_event_fn and request_id:
                 try:

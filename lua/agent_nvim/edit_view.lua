@@ -189,7 +189,7 @@ function M.handle_keypress(bufnr, key)
   local ok, result = pcall(function()
     return vim.api.nvim_win_get_cursor(0)
   end)
-  
+
   if not ok then
     -- Current window is invalid, try to find a valid window for this buffer
     local found_win = nil
@@ -199,24 +199,24 @@ function M.handle_keypress(bufnr, key)
         break
       end
     end
-    
+
     if not found_win then
-      return  -- No valid window for this buffer
+      return -- No valid window for this buffer
     end
-    
+
     ok, result = pcall(function()
       return vim.api.nvim_win_get_cursor(found_win)
     end)
-    
+
     if not ok then
-      return  -- Can't get cursor position
+      return -- Can't get cursor position
     end
-    
+
     cursor = result
   else
     cursor = result
   end
-  
+
   local row = cursor[1] - 1
 
   local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns_id, 0, -1, { details = true })

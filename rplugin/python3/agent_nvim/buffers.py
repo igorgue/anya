@@ -471,7 +471,11 @@ class BufferManager:
             fold_error: If True, highlight the fold header as an error (red)
         """
         try:
-            if hasattr(self, "content_buf") and self.content_buf and self.content_buf.valid:
+            if (
+                hasattr(self, "content_buf")
+                and self.content_buf
+                and self.content_buf.valid
+            ):
                 # Ensure every item is a single line
                 processed = []
                 for item in lines:
@@ -484,7 +488,9 @@ class BufferManager:
                 def wrapped_append():
                     """Append and scroll."""
                     try:
-                        self._append_and_scroll(processed, fold=fold, fold_error=fold_error)
+                        self._append_and_scroll(
+                            processed, fold=fold, fold_error=fold_error
+                        )
                     except Exception as e:
                         self.logger.error(f"Error appending content to buffer: {e}")
                         # Don't re-raise to prevent cascading errors

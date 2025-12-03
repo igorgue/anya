@@ -48,25 +48,25 @@ function M:load()
   file:close()
 
   self.data = {}
-  
+
   -- Split by delimiter (handles multi-line prompts)
   local delimiter = "\n---PROMPT_SEPARATOR---\n"
-  
+
   -- Find the position after the header comments (after the blank line following comments)
   local header_end = content:find("\n\n")
   if not header_end then
     -- No header, use whole content
     header_end = 0
   end
-  
+
   -- Extract content after headers
   local data_content = content:sub(header_end + 1)
   local start = 1
-  
+
   while true do
     local delim_start, delim_end = data_content:find(delimiter, start, true)
     local prompt
-    
+
     if delim_start then
       prompt = data_content:sub(start, delim_start - 1)
       start = delim_end + 1
@@ -74,13 +74,13 @@ function M:load()
       prompt = data_content:sub(start)
       start = nil
     end
-    
+
     -- Skip empty entries
     prompt = vim.trim(prompt)
     if prompt ~= "" then
       table.insert(self.data, prompt)
     end
-    
+
     if not start then
       break
     end
