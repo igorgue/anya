@@ -1,5 +1,6 @@
 """MCP server management for agent.nvim plugin."""
 
+import asyncio
 import os
 import re
 import json
@@ -220,7 +221,7 @@ class MCPManager:
             return [], []
 
     async def connect_servers(self, mcp_servers):
-        """Connect to MCP servers.
+        """Connect to MCP servers in parallel for faster startup.
 
         Args:
             mcp_servers: List of MCP server instances to connect
@@ -228,6 +229,7 @@ class MCPManager:
         Returns:
             List of successfully connected servers
         """
+        import traceback
 
         # If servers are already loaded and active, return them directly
         if self._servers_loaded and self._active_servers:
@@ -236,44 +238,58 @@ class MCPManager:
             )
             return self._active_servers
 
+        async def connect_single_server(server):
+            """Connect a single server, returning (server, success) tuple."""
+            try:
+                # Check if already connected (has session)
+                if hasattr(server, "session") and server.session:
+                    self.logger.debug(f"MCP server {server.name} already connected")
+                    return (server, True)
+
+                self.logger.info(f"Connecting to MCP server: {server.name}")
+
+                # Check if server has connect method
+                if hasattr(server, "connect"):
+                    await server.connect()
+                    self.logger.info(
+                        f"Successfully connected to MCP server: {server.name}"
+                    )
+                    return (server, True)
+                else:
+                    self.logger.warning(
+                        f"MCP server {server.name} does not have connect method, skipping connection"
+                    )
+                    # Still return server if it might auto-connect
+                    return (server, True)
+
+            except Exception as server_error:
+                self.logger.error(
+                    f"Failed to connect MCP server {server.name}: {server_error}"
+                )
+                self.logger.error(
+                    f"Traceback for {server.name}: {traceback.format_exc()}"
+                )
+                return (server, False)
+
         connected_servers = []
         try:
-            # Connect all MCP servers
-            for server in mcp_servers:
-                try:
-                    # Check if already connected (has session)
-                    if hasattr(server, "session") and server.session:
-                        self.logger.debug(f"MCP server {server.name} already connected")
-                        connected_servers.append(server)
+            # Connect all MCP servers in parallel using asyncio.gather
+            if mcp_servers:
+                self.logger.info(
+                    f"Connecting to {len(mcp_servers)} MCP servers in parallel..."
+                )
+                results = await asyncio.gather(
+                    *[connect_single_server(server) for server in mcp_servers],
+                    return_exceptions=True,
+                )
+
+                for result in results:
+                    if isinstance(result, Exception):
+                        self.logger.error(f"MCP server connection exception: {result}")
                         continue
-
-                    self.logger.info(f"Connecting to MCP server: {server.name}")
-
-                    # Check if server has connect method
-                    if hasattr(server, "connect"):
-                        await server.connect()
-                        self.logger.info(
-                            f"Successfully connected to MCP server: {server.name}"
-                        )
+                    server, success = result
+                    if success:
                         connected_servers.append(server)
-                    else:
-                        self.logger.warning(
-                            f"MCP server {server.name} does not have connect method, skipping connection"
-                        )
-                        # Still add to connected_servers if it might auto-connect
-                        connected_servers.append(server)
-
-                except Exception as server_error:
-                    import traceback
-
-                    self.logger.error(
-                        f"Failed to connect MCP server {server.name}: {server_error}"
-                    )
-                    self.logger.error(
-                        f"Traceback for {server.name}: {traceback.format_exc()}"
-                    )
-                    # Continue with other servers even if one fails
-                    continue
 
             if connected_servers:
                 self.logger.info(

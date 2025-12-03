@@ -156,6 +156,15 @@ Dependencies are installed to `~/.local/share/agent.nvim/venv` and injected into
 - Uses `nvim.async_call` for all Neovim API calls from async context
 - Logging goes to `~/.local/state/nvim/agent.nvim.log`
 
+### Initialization Synchronization
+- Plugin startup initializes MCP servers and agents in a background thread to avoid blocking Neovim
+- `_initialization_complete` threading.Event ensures user requests wait for startup to finish
+- Prevents race condition where requests before startup completion would reinitialize MCP servers
+- `_run_agent_wrapper` polls the event with non-blocking `asyncio.sleep()` calls
+- Uses polling loop with timeout (30s) and per-10-check logging for debugging
+- Cached MCP servers and agents are reused on subsequent requests
+- Threading.Event is thread-safe and works across thread/asyncio boundaries
+
 ### Token Management
 - Tracks token usage across requests to prevent context overflow
 - Implements tool budget system to limit file reading/searching

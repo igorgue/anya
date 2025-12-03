@@ -28,6 +28,8 @@ async def run_agent(
     cached_agents=None,
     cached_mcp_servers=None,
     skip_header=False,
+    is_request_waiting=None,
+    set_waiting_fn=None,
 ):
     """Run the agent with streaming output.
 
@@ -53,7 +55,7 @@ async def run_agent(
         {"id": request_id, "model": model, "message": "thinking"},
     )
 
-    status = "error"  # Default to error, will be set to success if completion succeeds
+    status = "success"  # Default to success, will be set to error only if an exception occurs
 
     try:
         # Import from current Python environment
@@ -82,20 +84,19 @@ async def run_agent(
         from .model_provider import get_custom_run_config
 
         custom_run_config = get_custom_run_config()
+        logger.info(f"Custom run config: {custom_run_config is not None}")
 
-        # If not using custom provider, configure default client (for responses API)
+        # If not using custom provider, configure default client
         if not custom_run_config:
             base_url = os.environ.get("AGENT_BASE_URL")
             api_key = os.environ.get("AGENT_API_KEY") or os.environ.get(
                 "OPENAI_API_KEY"
             )
 
-            if base_url or api_key:
-                client_kwargs = {}
+            if api_key:
+                client_kwargs = {"api_key": api_key}
                 if base_url:
                     client_kwargs["base_url"] = base_url
-                if api_key:
-                    client_kwargs["api_key"] = api_key
 
                 custom_client = AsyncOpenAI(**client_kwargs)
                 set_default_openai_client(custom_client, use_for_tracing=False)
@@ -111,12 +112,15 @@ async def run_agent(
 
         project_instructions = load_project_instructions(cached_cwd)
 
-        # Load MCP servers
-        mcp_servers, hosted_tools = mcp_manager.load_servers()
-
-        # Initialize and connect MCP servers if available
-        if mcp_servers:
-            mcp_servers = await mcp_manager.connect_servers(mcp_servers)
+        # Use cached MCP servers if available, otherwise load and connect
+        if cached_mcp_servers is not None:
+            mcp_servers = cached_mcp_servers
+            hosted_tools = []
+            logger.info(f"Using {len(mcp_servers)} cached MCP servers")
+        else:
+            mcp_servers, hosted_tools = mcp_manager.load_servers()
+            if mcp_servers:
+                mcp_servers = await mcp_manager.connect_servers(mcp_servers)
 
         # Build tools list
         tools = list(tool_wrappers.values())
@@ -197,12 +201,12 @@ async def run_agent(
         # Create hooks to manage max turns and context limits
         from agents import RunHooks
 
-        max_turns = 10000
+        max_turns = 100
         turn_warning_threshold = (
-            9000  # Start forcing responses early to ensure we get output
+            90  # Start forcing responses early to ensure we get output
         )
         context_limit_threshold = (
-            0.70  # 70% context usage triggers limit (be conservative)
+            0.90  # 70% context usage triggers limit (be conservative)
         )
 
         class LimitHooks(RunHooks):
@@ -289,7 +293,7 @@ async def run_agent(
             "hooks": hooks,
         }
 
-        # Configure RunConfig for handoffs
+        # Configure RunConfig for chat_completions API type
         # nest_handoff_history=False is required for non-OpenAI providers using
         # chat_completions API, as they don't support the nested message format
         from agents import RunConfig
@@ -298,15 +302,23 @@ async def run_agent(
         use_nested_history = api_type != "chat_completions"
 
         if custom_run_config:
-            # Custom provider already has RunConfig, update handoff setting
-            custom_run_config.nest_handoff_history = use_nested_history
             run_kwargs["run_config"] = custom_run_config
         elif not use_nested_history:
-            # Only create RunConfig if we need to disable nesting
+            # Only create RunConfig if we need to disable nesting for chat_completions
             run_kwargs["run_config"] = RunConfig(nest_handoff_history=False)
 
         # Run the agent with streaming and conversation history
+        logger.info(
+            f"Starting agent run with config: api_type={api_type}, use_nested={use_nested_history}"
+        )
+        logger.info(f"Run kwargs: {list(run_kwargs.keys())}")
+        if "run_config" in run_kwargs:
+            logger.info(
+                f"RunConfig: nest_handoff_history={run_kwargs['run_config'].nest_handoff_history if hasattr(run_kwargs['run_config'], 'nest_handoff_history') else 'N/A'}"
+            )
+
         result_stream = Runner.run_streamed(agent, **run_kwargs)
+        logger.info(f"Runner.run_streamed called successfully, starting event loop")
 
         # Cache buffer number before async loop
         content_bufnr = (
@@ -315,13 +327,24 @@ async def run_agent(
             else buffer_manager.content_buf.number
         )
 
-        # Track if we've seen a handoff to continue streaming after handoff completes
-        handoff_occurred = False
         event_count = 0
         max_events = 50000  # Safety limit to prevent infinite loops
 
+        logger.info(f"Starting to iterate over stream events")
+        logger.info(f"result_stream type: {type(result_stream)}")
+        logger.info(f"result_stream.is_complete: {result_stream.is_complete}")
         async for event in result_stream.stream_events():
             event_count += 1
+            if event_count <= 10 or event_count % 100 == 0:
+                logger.info(f"Event #{event_count} received: {type(event).__name__}")
+            # Check for stored exceptions after each event
+            if (
+                hasattr(result_stream, "_stored_exception")
+                and result_stream._stored_exception
+            ):
+                logger.error(
+                    f"Stored exception detected: {result_stream._stored_exception}"
+                )
             if event_count > max_events:
                 logger.warning(
                     f"Exceeded max events ({max_events}), breaking from event loop"
@@ -370,22 +393,9 @@ async def run_agent(
 
             event_type = type(event).__name__
 
-            # Debug: Log all event types
-            logger.info(f"Event type: {event_type}")
-
-            # Log agent updates to see handoffs
-            if event_type == "AgentUpdatedStreamEvent":
-                handoff_occurred = True
-                if hasattr(event, "new_agent"):
-                    agent_name = getattr(event.new_agent, "name", "unknown")
-                    agent_tools = (
-                        len(event.new_agent.tools)
-                        if hasattr(event.new_agent, "tools") and event.new_agent.tools
-                        else 0
-                    )
-                    logger.info(
-                        f">>> HANDOFF: Agent updated to '{agent_name}' with {agent_tools} tools"
-                    )
+            # Debug: Log all event types (only first 20 to avoid spam)
+            if event_count <= 20:
+                logger.info(f"Event type: {event_type}")
 
             if event_type == "RawResponsesStreamEvent":
                 data = event.data
@@ -396,8 +406,17 @@ async def run_agent(
                 if hasattr(data, "__dict__"):
                     logger.info(f"Data attributes: {data.__dict__.keys()}")
 
-                # Only process actual output text, not reasoning/thinking
+                # Process text output events
                 if data_type == "ResponseTextDeltaEvent":
+                    delta = data.delta
+                    if delta:
+                        buffer_manager.append_stream_lua_direct(delta, content_bufnr)
+
+                # Process reasoning/thinking text events (for reasoning models like o1, glm-4, etc.)
+                elif data_type in [
+                    "ResponseReasoningSummaryTextDeltaEvent",
+                    "ResponseReasoningTextDeltaEvent",
+                ]:
                     delta = data.delta
                     if delta:
                         buffer_manager.append_stream_lua_direct(delta, content_bufnr)
@@ -413,6 +432,7 @@ async def run_agent(
                         buffer_manager.append_content,
                         emit_event_fn=emit_event_fn,
                         request_id=request_id,
+                        set_waiting_fn=set_waiting_fn,
                     )
 
                 # Look for other potential tool-related events
@@ -430,60 +450,16 @@ async def run_agent(
                         buffer_manager.append_content,
                         emit_event_fn=emit_event_fn,
                         request_id=request_id,
+                        set_waiting_fn=set_waiting_fn,
                     )
                 else:
                     # Log unknown types for debugging
                     logger.debug(f"Other responses event: {data_type}")
 
-            elif event_type == "RawChatCompletionsStreamEvent":
-                # Handle chat completions API events
-                data = event.data
-                data_type = type(data).__name__
-
-                logger.info(f"Chat completions data type: {data_type}")
-
-                if data_type == "ChatCompletionsTextDeltaEvent":
-                    delta = data.delta
-                    if delta:
-                        buffer_manager.append_stream_lua_direct(delta, content_bufnr)
-
-                # Handle tool call events in chat completions
-                elif data_type == "ChatCompletionsToolCallDeltaEvent":
-                    logger.info(f"Tool call delta: {data}")
-                    tool_events.handle_tool_call_delta(
-                        data,
-                        content_bufnr,
-                        nvim,
-                        logger,
-                        buffer_manager.append_content,
-                        emit_event_fn=emit_event_fn,
-                        request_id=request_id,
-                    )
-                elif data_type == "ChatCompletionsToolCallEndEvent":
-                    logger.info(f"Tool call end: {data}")
-                    tool_events.handle_tool_call_end(
-                        data,
-                        content_bufnr,
-                        logger,
-                        emit_event_fn=emit_event_fn,
-                        request_id=request_id,
-                    )
-                elif data_type == "ChatCompletionsToolCallOutputEvent":
-                    logger.info(f"Tool call output: {data}")
-                    tool_events.handle_tool_call_output(
-                        data,
-                        content_bufnr,
-                        nvim,
-                        logger,
-                        buffer_manager.append_content,
-                        emit_event_fn=emit_event_fn,
-                        request_id=request_id,
-                    )
-                else:
-                    # Log unknown event types for debugging
-                    logger.info(f"Unhandled chat completion event: {data_type}")
-                    if hasattr(data, "__dict__"):
-                        logger.info(f"Data attributes: {data.__dict__.keys()}")
+            # NOTE: RawChatCompletionsStreamEvent does not exist in the SDK.
+            # The SDK internally converts chat completions events to Responses API
+            # format via ChatCmplStreamHandler, so all events come through
+            # RawResponsesStreamEvent regardless of api_type setting.
 
             # Handle RunItemStreamEvent - this is where tool calls appear during streaming
             elif event_type == "RunItemStreamEvent":
@@ -501,6 +477,7 @@ async def run_agent(
                             buffer_manager.append_content,
                             emit_event_fn=emit_event_fn,
                             request_id=request_id,
+                            set_waiting_fn=set_waiting_fn,
                         )
 
             # Handle other tool-related events
@@ -514,6 +491,7 @@ async def run_agent(
                     buffer_manager.append_content,
                     emit_event_fn=emit_event_fn,
                     request_id=request_id,
+                    set_waiting_fn=set_waiting_fn,
                 )
             elif "Tool" in event_type:
                 logger.info(f"Tool event: {event_type}")
@@ -525,15 +503,20 @@ async def run_agent(
                     buffer_manager.append_content,
                     emit_event_fn=emit_event_fn,
                     request_id=request_id,
+                    set_waiting_fn=set_waiting_fn,
                 )
             else:
                 # Log other event types for debugging
                 logger.debug(f"Other event type: {event_type}")
 
-            # Only break on completion if no handoff occurred
-            # If a handoff occurred, continue streaming to get the delegated agent's response
-            if result_stream.is_complete and not handoff_occurred:
-                break
+        # Log stream completion details
+        logger.info(f"Stream loop ended after {event_count} events")
+        logger.info(f"result_stream.is_complete: {result_stream.is_complete}")
+        if hasattr(result_stream, "final_output"):
+            logger.info(f"final_output type: {type(result_stream.final_output)}")
+            logger.info(
+                f"final_output: {str(result_stream.final_output)[:500] if result_stream.final_output else 'None'}"
+            )
 
         # Get the final output and add it to conversation history
         if hasattr(result_stream, "final_output") and result_stream.final_output:
@@ -589,9 +572,9 @@ async def run_agent(
         except Exception as e:
             logger.debug(f"Error tracking token usage: {e}")
 
-        # Agent completed successfully (unless cancelled)
-        if not cancel_flag_getter():
-            status = "success"
+        # Mark as cancelled if user cancelled the request
+        if cancel_flag_getter():
+            status = "cancelled"
 
     except MaxTurnsExceeded as e:
         # Handle max turns gracefully - this isn't really an error
@@ -679,10 +662,20 @@ async def run_agent(
         emit_event_fn("AgentRequestFinished", {"id": request_id, "status": status})
 
         # Send desktop notification on Linux when agent turn is complete
+        # Skip notification if waiting for user approval (edit or command)
         import sys
         import subprocess
 
-        if sys.platform == "linux":
+        # Check if this request is waiting for user action
+        is_waiting = False
+        if is_request_waiting:
+            is_waiting = is_request_waiting(request_id)
+
+        logger.info(
+            f"Notification check: is_waiting={is_waiting}, request_id={request_id}, status={status}"
+        )
+
+        if sys.platform == "linux" and not is_waiting:
             try:
                 title = "Agent.nvim"
                 if status == "success":

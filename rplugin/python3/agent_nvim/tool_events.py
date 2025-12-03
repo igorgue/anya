@@ -5,7 +5,14 @@ import os
 
 
 def handle_tool_event(
-    event, content_bufnr, nvim, logger, append_content_fn, emit_event_fn=None
+    event,
+    content_bufnr,
+    nvim,
+    logger,
+    append_content_fn,
+    emit_event_fn=None,
+    request_id=None,
+    set_waiting_fn=None,
 ):
     """Handle tool-related events and display tool calls.
 
@@ -15,6 +22,9 @@ def handle_tool_event(
         nvim: Neovim instance
         logger: Logger instance
         append_content_fn: Function to append content to buffer
+        emit_event_fn: Optional function to emit user events
+        request_id: Optional request ID
+        set_waiting_fn: Optional function to set waiting state
     """
     try:
         event_str = str(event)
@@ -52,7 +62,8 @@ def handle_tool_event(
                             append_content_fn,
                             content_bufnr,
                             emit_event_fn=emit_event_fn,
-                            request_id=None,
+                            request_id=request_id,
+                            set_waiting_fn=set_waiting_fn,
                         )
                         return
 
@@ -197,6 +208,7 @@ def display_tool_result(
     content_bufnr=None,
     emit_event_fn=None,
     request_id=None,
+    set_waiting_fn=None,
 ):
     """Display tool call and result combined in a code block.
 
@@ -309,6 +321,21 @@ def display_tool_result(
                             nvim.async_call(
                                 lambda: buffer_manager.render_edit_blocks(result_str)
                             )
+                            # Mark this request as waiting for approval
+                            if set_waiting_fn and request_id:
+                                logger.info(f"Setting waiting for request {request_id}")
+                                set_waiting_fn(request_id, True)
+                            else:
+                                logger.warning(f"Cannot set waiting: set_waiting_fn={set_waiting_fn}, request_id={request_id}")
+                            # Emit waiting event to update notification
+                            if emit_event_fn and request_id:
+                                emit_event_fn(
+                                    "AgentWaiting",
+                                    {
+                                        "id": request_id,
+                                        "message": "waiting for edit approval",
+                                    },
+                                )
 
                         return
                     else:
@@ -580,6 +607,7 @@ def handle_tool_item(
     append_content_fn,
     emit_event_fn=None,
     request_id=None,
+    set_waiting_fn=None,
 ):
     """Handle tool call items from result_stream.new_items.
 
@@ -591,6 +619,7 @@ def handle_tool_item(
         append_content_fn: Function to append content to buffer
         emit_event_fn: Function to emit fidget events
         request_id: Request ID for fidget updates
+        set_waiting_fn: Optional function to set waiting state
     """
     try:
         item_type = type(item).__name__
@@ -703,6 +732,7 @@ def handle_tool_item(
                 content_bufnr,
                 emit_event_fn=emit_event_fn,
                 request_id=request_id,
+                set_waiting_fn=set_waiting_fn,
             )
         else:
             # This might be a different type of item

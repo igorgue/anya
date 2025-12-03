@@ -23,7 +23,9 @@ from .buffers import BufferManager
 from .mcp import MCPManager
 from .agent_runner import run_agent
 from .tool_budget import ToolBudget
-from .agents import CompactAgent, ContextAnalyzer
+
+# CompactAgent and ContextAnalyzer are lazy-loaded to avoid heavy imports at startup
+# from .agents import CompactAgent, ContextAnalyzer
 from .compact_preview import CompactPreviewModal
 from . import tool_tracker
 from . import exec_permissions
@@ -48,8 +50,10 @@ class AgentPlugin(object):
         self.buffer_manager = BufferManager(nvim, self.logger)
         self.mcp_manager = MCPManager(self.logger)
 
-        # Initialize compact agent components
-        self._setup_compact_agent()
+        # Compact agent components are lazy-loaded on first /compact use
+        self.compact_agent = None
+        self.context_analyzer = None
+        self.preview_modal = None
 
         # Conversation state
         self._conversation_history = []
@@ -57,6 +61,7 @@ class AgentPlugin(object):
         self._current_request_id = None
         self._cached_cwd = None
         self._agent_busy = False
+        self._request_waiting = {}  # Track which requests are waiting for user action
 
         # Tool wrappers will be created lazily
         self._tool_wrappers = None
@@ -64,6 +69,10 @@ class AgentPlugin(object):
         # Flag to track if agents have been eagerly initialized
         self._agents_initialized = False
         self._cached_agents = None  # Cache initialized agents for fast reuse
+        self._cached_mcp_servers = None  # Cache connected MCP servers
+        self._initialization_complete = (
+            threading.Event()
+        )  # Signal when startup init is done
 
         # Initialize Lua module (history will be initialized by ftplugin when buffer opens)
         try:
@@ -76,8 +85,15 @@ class AgentPlugin(object):
         self._initialize_agents_on_startup()
 
     def _setup_compact_agent(self):
-        """Initialize the specialized CompactAgent with model configuration."""
+        """Initialize the specialized CompactAgent with model configuration (lazy-loaded)."""
+        # Skip if already initialized
+        if self.compact_agent is not None:
+            return
+
         try:
+            # Lazy import to avoid heavy imports at plugin startup
+            from .agents import CompactAgent, ContextAnalyzer
+
             compact_model = self._get_compact_model()
             self.compact_agent = CompactAgent(model=compact_model, logger=self.logger)
             self.context_analyzer = ContextAnalyzer(self.logger)
@@ -293,6 +309,7 @@ class AgentPlugin(object):
         self._cached_cwd = cwd
 
         def init_agents_thread(cwd):
+            self.logger.info("=== STARTUP INITIALIZATION THREAD STARTED ===")
             try:
                 from agents import Agent
                 from .model_provider import get_custom_run_config
@@ -340,34 +357,17 @@ class AgentPlugin(object):
                 tools_list = list(tool_wrappers.values()) if tool_wrappers else []
                 self.logger.info(f"Pre-loaded {len(tools_list)} tools on startup")
 
-                # Pre-load and connect MCP servers
-                mcp_servers = []
-                hosted_tools = []
-                try:
-                    mcp_servers, hosted_tools = self.mcp_manager.load_servers()
-                    if mcp_servers:
-                        # Run async connect in a new event loop
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        try:
-                            mcp_servers = loop.run_until_complete(
-                                self.mcp_manager.connect_servers(mcp_servers)
-                            )
-                            self.logger.info(
-                                f"Pre-connected {len(mcp_servers)} MCP servers on startup"
-                            )
-                        finally:
-                            loop.close()
-
-                    if hosted_tools:
-                        tools_list.extend(hosted_tools)
-                        self.logger.info(
-                            f"Added {len(hosted_tools)} MCP hosted tools on startup"
-                        )
-                except Exception as mcp_err:
-                    self.logger.warning(f"MCP preload failed: {mcp_err}")
+                # NOTE: We intentionally do NOT connect MCP servers here.
+                # MCP server connections are bound to the event loop they're created in.
+                # Connecting in a background thread's event loop and then using them
+                # in the main event loop causes streaming to hang.
+                # MCP servers will be connected lazily on first request in the correct event loop.
+                self.logger.info(
+                    "Skipping MCP server connection in background thread (will connect on first request)"
+                )
 
                 # Pre-create CodeAgent on startup so it's ready for first request
+                # This warms up imports and SDK initialization
                 from .agents import CodeAgent
 
                 yolo_mode = os.environ.get("AGENT_YOLO", "").lower() in (
@@ -376,12 +376,12 @@ class AgentPlugin(object):
                     "yes",
                 )
 
-                # Create CodeAgent with preloaded tools and MCP servers
+                # Create CodeAgent without MCP servers (they'll be added on first request)
                 code_agent = CodeAgent(
                     model=model,
                     logger=self.logger,
                     tools=tools_list,
-                    mcp_servers=mcp_servers if mcp_servers else None,
+                    mcp_servers=None,  # MCP servers connected lazily in main event loop
                     project_instructions=project_instructions,
                     yolo_mode=yolo_mode,
                 )
@@ -392,27 +392,44 @@ class AgentPlugin(object):
                     self._cached_agents = {"code": code_agent}
                     self.logger.info(
                         f"CodeAgent pre-initialized on startup with model {model}, "
-                        f"{len(tools_list)} tools, {len(mcp_servers)} MCP servers"
+                        f"{len(tools_list)} tools (MCP servers will connect on first request)"
                     )
 
                 # Mark initialization complete
                 self._agents_initialized = True
-                self.logger.info("CodeAgent ready on startup with tools and MCP servers.")
+                self.logger.info(
+                    "SDK warmup complete. MCP servers will connect on first request."
+                )
 
             except ImportError as e:
                 self.logger.debug(f"Agents SDK not yet available for eager init: {e}")
             except Exception as e:
                 self.logger.warning(f"Error during eager agent initialization: {e}")
+            finally:
+                # Signal that initialization is complete (even if it failed)
+                self.logger.info("=== SETTING INITIALIZATION COMPLETE EVENT ===")
+                self._initialization_complete.set()
+                self.logger.info("=== STARTUP INITIALIZATION THREAD FINISHED ===")
 
         # Start initialization in background thread to avoid blocking plugin load
         thread = threading.Thread(target=init_agents_thread, args=(cwd,), daemon=True)
+        self.logger.info("Starting initialization thread...")
         thread.start()
 
-    def _get_tool_wrappers(self, tool_budget: ToolBudget | None = None):
+    def _get_tool_wrappers(
+        self,
+        tool_budget: ToolBudget | None = None,
+        emit_event_fn=None,
+        request_id=None,
+        set_waiting_fn=None,
+    ):
         """Get tool wrappers, creating them with optional budget tracking.
 
         Args:
             tool_budget: Optional ToolBudget instance for tracking token usage
+            emit_event_fn: Optional function to emit user events
+            request_id: Optional request ID for event emission
+            set_waiting_fn: Optional function to set waiting state for a request
         """
         try:
             from agents import function_tool
@@ -592,6 +609,27 @@ class AgentPlugin(object):
                     return tools.exec(command, cwd=cwd, timeout=timeout)
 
                 self.logger.info("Command NOT in allow list, prompting user")
+
+                # Mark this request as waiting for approval
+                if set_waiting_fn and request_id:
+                    self.logger.info(
+                        f"Setting waiting for command approval: request_id={request_id}"
+                    )
+                    set_waiting_fn(request_id, True)
+                else:
+                    self.logger.warning(
+                        f"Cannot set waiting for command: set_waiting_fn={set_waiting_fn}, request_id={request_id}"
+                    )
+
+                # Emit waiting event to update notification
+                if emit_event_fn and request_id:
+                    emit_event_fn(
+                        "AgentWaiting",
+                        {
+                            "id": request_id,
+                            "message": "waiting for command approval",
+                        },
+                    )
 
                 # Prompt user for permission
                 choice = await exec_permissions.prompt_exec_permission(
@@ -816,6 +854,19 @@ class AgentPlugin(object):
             if message and is_first_decision:
                 self._conversation_history.append({"role": "user", "content": message})
 
+                # Clear waiting flag for the current request since user has responded
+                if self._current_request_id in self._request_waiting:
+                    del self._request_waiting[self._current_request_id]
+
+                # Emit event to finish the waiting state in fidget
+                from . import utils
+
+                utils.emit_user_event(
+                    self.nvim,
+                    "AgentWaitingDone",
+                    {"id": self._current_request_id},
+                )
+
                 # Show feedback in content buffer
                 feedback_text = (
                     "> Edits applied successfully."
@@ -834,6 +885,7 @@ class AgentPlugin(object):
 
                 # Continue agent to respond to user decision
                 import uuid
+
                 request_id = str(uuid.uuid4())
                 self._cancel_requested = False
                 self._current_request_id = request_id
@@ -1038,6 +1090,9 @@ class AgentPlugin(object):
     def _handle_compact_command(self, args):
         """Handle /compact slash command using the specialized agent."""
         try:
+            # Lazy-load compact agent on first use
+            self._setup_compact_agent()
+
             if not self.compact_agent:
                 self.buffer_manager.append_content(
                     [
@@ -1575,11 +1630,54 @@ class AgentPlugin(object):
         self._agent_busy = True
 
         # Run agent in background
-        asyncio.create_task(self._run_agent_wrapper(request_id))
+        try:
+            asyncio.create_task(self._run_agent_wrapper(request_id))
+        except RuntimeError:
+            # If no event loop is running, schedule it for later
+            self.logger.warning("No event loop running, scheduling agent request")
+            self.nvim.out_write("Agent starting...\n")
 
     async def _run_agent_wrapper(self, request_id, skip_header=False):
         """Wrapper to call run_agent with all necessary parameters."""
         import os
+
+        # Wait for startup initialization to complete before proceeding
+        # This prevents MCP servers from being reinitialized if request comes before startup finishes
+        if not self._initialization_complete.is_set():
+            self.logger.info("=== AGENT REQUEST WAITING FOR INITIALIZATION ===")
+            start_wait_time = asyncio.get_event_loop().time()
+            wait_timeout = 30.0
+            check_count = 0
+
+            while not self._initialization_complete.is_set():
+                check_count += 1
+                elapsed = asyncio.get_event_loop().time() - start_wait_time
+                if elapsed > wait_timeout:
+                    self.logger.error("Initialization timeout after 30 seconds")
+                    self.nvim.async_call(
+                        self.buffer_manager.append_content,
+                        [
+                            "",
+                            "> Error: Agent initialization timed out. Please try again.",
+                        ],
+                    )
+                    self._agent_busy = False
+                    return
+
+                # Log every 10 checks
+                if check_count % 10 == 0:
+                    self.logger.info(
+                        f"Still waiting for init... ({elapsed:.1f}s elapsed)"
+                    )
+
+                # Wait a bit before checking again (non-blocking)
+                await asyncio.sleep(0.1)
+
+            self.logger.info(
+                f"=== INITIALIZATION COMPLETE (after {asyncio.get_event_loop().time() - start_wait_time:.2f}s) ==="
+            )
+        else:
+            self.logger.info("Initialization already complete, proceeding immediately")
 
         # Get model for budget calculation
         model = os.environ.get("AGENT_MODEL", "gpt-5.1")
@@ -1590,8 +1688,20 @@ class AgentPlugin(object):
             f"Created tool budget: {tool_budget.budget} tokens for model {model}"
         )
 
-        # Get tool wrappers with budget tracking
-        tool_wrappers = self._get_tool_wrappers(tool_budget=tool_budget)
+        # Define emit_event_fn before creating tool wrappers
+        emit_event_fn = lambda name, data: utils.emit_user_event(self.nvim, name, data)
+
+        # Define set_waiting_fn to track which requests are waiting for approval
+        def set_request_waiting(req_id, is_waiting):
+            self._request_waiting[req_id] = is_waiting
+
+        # Get tool wrappers with budget tracking and event emission
+        tool_wrappers = self._get_tool_wrappers(
+            tool_budget=tool_budget,
+            emit_event_fn=emit_event_fn,
+            request_id=request_id,
+            set_waiting_fn=set_request_waiting,
+        )
 
         # Create a reference object for current_request_id
         current_request_id_ref = {"value": self._current_request_id}
@@ -1609,12 +1719,21 @@ class AgentPlugin(object):
                 tool_wrappers=tool_wrappers,
                 cached_cwd=self._cached_cwd,
                 cached_agents=self._cached_agents,  # Use pre-initialized agents if available
-                cached_mcp_servers=None,  # Always load fresh MCP servers for each request
-                emit_event_fn=lambda name, data: utils.emit_user_event(
-                    self.nvim, name, data
-                ),
+                cached_mcp_servers=self._cached_mcp_servers,
+                emit_event_fn=emit_event_fn,
                 skip_header=skip_header,
+                is_request_waiting=lambda req_id: self._request_waiting.get(
+                    req_id, False
+                ),
+                set_waiting_fn=set_request_waiting,
             )
+
+            # Cache MCP servers after first successful request for faster subsequent requests
+            if self._cached_mcp_servers is None and self.mcp_manager._active_servers:
+                self._cached_mcp_servers = self.mcp_manager._active_servers
+                self.logger.info(
+                    f"Cached {len(self._cached_mcp_servers)} MCP servers for subsequent requests"
+                )
         finally:
             pass
 

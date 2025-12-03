@@ -31,7 +31,11 @@ function M:init()
     callback = function(event)
       local handle = M:get_progress_handle(event.data.id)
       if handle then
-        handle.message = event.data.message or "calling tool"
+        if event.data.message == "thinking" then
+          handle.message = "thinking"
+        else
+          handle.message = event.data.message or "calling tool"
+        end
       end
     end,
   })
@@ -59,12 +63,24 @@ function M:init()
   })
 
   vim.api.nvim_create_autocmd({ "User" }, {
-    pattern = "AgentRequestFinished",
+    pattern = "AgentWaiting",
     group = group,
     callback = function(event)
       local handle = M:get_progress_handle(event.data.id)
       if handle then
-        handle.message = "cancelling"
+        handle.message = event.data.message or "waiting for response"
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AgentWaitingDone",
+    group = group,
+    callback = function(event)
+      local handle = M:get_progress_handle(event.data.id)
+      if handle then
+        -- Finish the waiting state and resume to thinking
+        handle.message = "thinking"
       end
     end,
   })
@@ -75,6 +91,12 @@ function M:init()
     callback = function(event)
       local handle = M:get_progress_handle(event.data.id)
       if handle then
+        -- Don't override if we're waiting for user action (edit approval or command confirmation)
+        local current_msg = handle.message or ""
+        if current_msg:find("waiting") then
+          -- Keep the waiting message, don't show "finished"
+          return
+        end
         M:report_exit_status(handle, event)
         -- Display completion message for at least 1 second
         vim.defer_fn(function()

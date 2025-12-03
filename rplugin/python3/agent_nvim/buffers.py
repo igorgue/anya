@@ -180,19 +180,24 @@ class BufferManager:
 
             # Render each block
             for block in blocks:
-                self.nvim.exec_lua(
-                    """
-                    local args = {...}
-                    require('agent_nvim.edit_view').render_edit(
-                        args[1], args[2], args[3], args[4], args[5]
+                try:
+                    self.nvim.exec_lua(
+                        """
+                        local args = {...}
+                        require('agent_nvim.edit_view').render_edit(
+                            args[1], args[2], args[3], args[4], args[5]
+                        )
+                        """,
+                        self.content_buf.number,
+                        block.path,
+                        block.search,
+                        block.replace,
+                        block.raw_block,
                     )
-                    """,
-                    self.content_buf.number,
-                    block.path,
-                    block.search,
-                    block.replace,
-                    block.raw_block,
-                )
+                except Exception as e:
+                    self.logger.warning(f"Failed to render edit block for {block.path}: {e}")
+                    # Continue with next block instead of failing entirely
+                    continue
 
             # Scroll to bottom to show new content
             self._scroll_to_bottom()
