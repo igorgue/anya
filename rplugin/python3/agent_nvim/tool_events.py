@@ -397,18 +397,42 @@ def display_tool_result(
         # Append content and fold it, then resume streaming
         # Pass fold_error=True if this is an error result
         def append_and_resume():
-            append_content_fn(output_lines, fold=True, fold_error=is_error)
+            try:
+                append_content_fn(output_lines, fold=True, fold_error=is_error)
+            except Exception as e:
+                logger.error(f"Error appending tool result to buffer: {e}")
+                # Try to append a simple error message
+                try:
+                    simple_error = [
+                        "",
+                        "**Tool Error**:",
+                        f"``````",
+                        f"Failed to display {tool_name} result: {e}",
+                        "``````",
+                        ""
+                    ]
+                    append_content_fn(simple_error, fold=True, fold_error=True)
+                except Exception as e2:
+                    logger.error(f"Even simple error display failed: {e2}")
+            
             # Resume streaming after tool output is written
-            nvim.exec_lua("_G.agent_stream_paused = false")
+            try:
+                nvim.exec_lua("_G.agent_stream_paused = false")
+            except Exception as e:
+                logger.error(f"Error resuming streaming: {e}")
+                
             # Emit event to reset fidget back to "thinking"
             if emit_event_fn and request_id:
-                emit_event_fn(
-                    "AgentToolCall",
-                    {
-                        "id": request_id,
-                        "message": "thinking",
-                    },
-                )
+                try:
+                    emit_event_fn(
+                        "AgentToolCall",
+                        {
+                            "id": request_id,
+                            "message": "thinking",
+                        },
+                    )
+                except Exception as e:
+                    logger.error(f"Error emitting tool call event: {e}")
 
         nvim.async_call(append_and_resume)
 

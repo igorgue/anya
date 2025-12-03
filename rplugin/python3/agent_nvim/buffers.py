@@ -470,24 +470,32 @@ class BufferManager:
             fold: If True, fold the appended content immediately
             fold_error: If True, highlight the fold header as an error (red)
         """
-        if hasattr(self, "content_buf") and self.content_buf and self.content_buf.valid:
-            # Ensure every item is a single line
-            processed = []
-            for item in lines:
-                if isinstance(item, str) and "\n" in item:
-                    # Split on newlines, keep empty parts (blank lines)
-                    processed.extend([ln for ln in item.split("\n")])
-                else:
-                    processed.append(item)
+        try:
+            if hasattr(self, "content_buf") and self.content_buf and self.content_buf.valid:
+                # Ensure every item is a single line
+                processed = []
+                for item in lines:
+                    if isinstance(item, str) and "\n" in item:
+                        # Split on newlines, keep empty parts (blank lines)
+                        processed.extend([ln for ln in item.split("\n")])
+                    else:
+                        processed.append(item)
 
-            def wrapped_append():
-                """Append and scroll."""
-                self._append_and_scroll(processed, fold=fold, fold_error=fold_error)
+                def wrapped_append():
+                    """Append and scroll."""
+                    try:
+                        self._append_and_scroll(processed, fold=fold, fold_error=fold_error)
+                    except Exception as e:
+                        self.logger.error(f"Error appending content to buffer: {e}")
+                        # Don't re-raise to prevent cascading errors
 
-            # Write the processed list to the buffer
-            self.nvim.async_call(wrapped_append)
-            # Enable render-markdown after content is added
-            self.nvim.async_call(self.enable_render_markdown)
+                # Write the processed list to the buffer
+                self.nvim.async_call(wrapped_append)
+                # Enable render-markdown after content is added
+                self.nvim.async_call(self.enable_render_markdown)
+        except Exception as e:
+            self.logger.error(f"Error in append_content: {e}")
+            # Don't re-raise to prevent cascading errors during error handling
 
     def _append_and_scroll(self, processed, fold=False, fold_error=False):
         """Helper to append lines and autoscroll content buffer.
@@ -497,80 +505,94 @@ class BufferManager:
             fold: If True, create a fold for the appended lines
             fold_error: If True, highlight the fold header as an error (red)
         """
-        if (
-            not hasattr(self, "content_buf")
-            or not self.content_buf
-            or not self.content_buf.valid
-        ):
+        try:
+            if (
+                not hasattr(self, "content_buf")
+                or not self.content_buf
+                or not self.content_buf.valid
+            ):
+                return
+
+            # Get current lines to determine if buffer is empty
+            current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+            start_line = len(current_lines)
+        except Exception as e:
+            self.logger.error(f"Error accessing buffer in _append_and_scroll: {e}")
             return
 
-        # Get current lines to determine if buffer is empty
-        current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
-        start_line = len(current_lines)
-
-        # Save the current window to restore focus later
         try:
-            current_win = self.nvim.current.window
-        except Exception:
-            current_win = None
+            # Save the current window to restore focus later
+            try:
+                current_win = self.nvim.current.window
+            except Exception:
+                current_win = None
 
-        # Check if buffer is empty (single empty line)
-        buffer_is_empty = current_lines == [""]
+            # Check if buffer is empty (single empty line)
+            buffer_is_empty = current_lines == [""]
 
-        if buffer_is_empty:
-            # Replace the empty line instead of appending after it
-            self.nvim.api.buf_set_lines(self.content_buf, 0, -1, False, processed)
-            start_line = 0
-        else:
-            # Append lines
-            self.nvim.api.buf_set_lines(self.content_buf, -1, -1, False, processed)
+            if buffer_is_empty:
+                # Replace the empty line instead of appending after it
+                self.nvim.api.buf_set_lines(self.content_buf, 0, -1, False, processed)
+                start_line = 0
+            else:
+                # Append lines
+                self.nvim.api.buf_set_lines(self.content_buf, -1, -1, False, processed)
 
-        # Get the new line count (end of appended content)
-        end_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
+            # Get the new line count (end of appended content)
+            end_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
 
-        # Highlight file references in appended lines (higher priority overrides Special)
-        self._highlight_file_refs(start_line, end_line)
+            # Highlight file references in appended lines (higher priority overrides Special)
+            self._highlight_file_refs(start_line, end_line)
 
-        # Highlight user prompts (lower priority so file refs can override)
-        self._highlight_user_prompt(start_line, end_line)
+            # Highlight user prompts (lower priority so file refs can override)
+            self._highlight_user_prompt(start_line, end_line)
 
-        # Create fold if requested BEFORE autoscroll
-        # This ensures the window is positioned correctly after folding
-        if fold and len(processed) > 1:
-            bufnr = self.content_buf.number
-            # start_line is 0-indexed count, so +1 for 1-indexed vim line
-            fold_start = start_line + 1
-            fold_end = end_line
-            self._create_fold(bufnr, fold_start, fold_end, fold_error=fold_error)
+            # Create fold if requested BEFORE autoscroll
+            # This ensures the window is positioned correctly after folding
+            if fold and len(processed) > 1:
+                bufnr = self.content_buf.number
+                # start_line is 0-indexed count, so +1 for 1-indexed vim line
+                fold_start = start_line + 1
+                fold_end = end_line
+                self._create_fold(bufnr, fold_start, fold_end, fold_error=fold_error)
+
+        except Exception as e:
+            self.logger.error(f"Error writing to buffer in _append_and_scroll: {e}")
+            return
 
         # Autoscroll to bottom only if autoscroll is enabled
         # Do this AFTER folding to ensure cursor is positioned correctly
-        for win in self.nvim.windows:
-            if win.buffer == self.content_buf:
-                try:
-                    # Check if autoscroll is enabled for this buffer
-                    autoscroll_enabled = self.nvim.api.buf_get_var(
-                        self.content_buf, "agent_autoscroll_enabled"
-                    )
-                except Exception:
-                    # If variable doesn't exist, default to enabled
-                    autoscroll_enabled = 1
-
-                # Only scroll if autoscroll is enabled and position is valid
-                if autoscroll_enabled:
+        try:
+            for win in self.nvim.windows:
+                if win.buffer == self.content_buf:
                     try:
-                        # If we created a fold, scroll to the line containing the fold (first line of folded region)
-                        # Otherwise scroll to the end of the appended content
-                        if fold and len(processed) > 1:
-                            # Scroll to the first line of the fold (where the summary is)
-                            win.cursor = (start_line + 1, 0)
-                        else:
-                            # Scroll to the end of appended content
-                            if end_line > 0:
-                                win.cursor = (end_line, 0)
+                        # Check if autoscroll is enabled for this buffer
+                        autoscroll_enabled = self.nvim.api.buf_get_var(
+                            self.content_buf, "agent_autoscroll_enabled"
+                        )
                     except Exception:
-                        # Cursor position invalid, skip scrolling
-                        pass
+                        # If variable doesn't exist, default to enabled
+                        autoscroll_enabled = 1
+
+                    # Only scroll if autoscroll is enabled and position is valid
+                    if autoscroll_enabled:
+                        try:
+                            # If we created a fold, scroll to the line containing the fold (first line of folded region)
+                            # Otherwise scroll to the end of the appended content
+                            if fold and len(processed) > 1:
+                                # Scroll to the first line of the fold (where the summary is)
+                                win.cursor = (start_line + 1, 0)
+                            else:
+                                # Scroll to the end of appended content
+                                if end_line > 0:
+                                    win.cursor = (end_line, 0)
+                        except Exception:
+                            # Cursor position invalid, skip scrolling
+                            pass
+        except Exception:
+            # Windows collection changed during iteration (e.g., window closed)
+            # This is safe to ignore as the content was already appended
+            pass
 
         # Restore focus to the previously active window
         if current_win and current_win.valid:
