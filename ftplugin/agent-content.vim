@@ -11,6 +11,15 @@ inoremap <buffer> <silent> <C-c> <Esc>:AgentCancel<CR>
 " Map G to go to end and re-enable autoscroll
 nnoremap <buffer> <silent> G G:let b:agent_autoscroll_enabled = 1<CR>
 
+" Map j to re-enable autoscroll when already at the last line
+function! AgentContentSmartJ() abort
+    if line('.') == line('$')
+        let b:agent_autoscroll_enabled = 1
+    endif
+    normal! j
+endfunction
+nnoremap <buffer> <silent> j :call AgentContentSmartJ()<CR>
+
 " Enable manual folding for tool calls
 setlocal foldmethod=manual
 setlocal foldlevel=99

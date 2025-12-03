@@ -2,6 +2,8 @@
 
 An AI-powered Neovim plugin built on the OpenAI Agents SDK.
 
+> **Joke**: Why do programmers prefer dark mode? Because light attracts bugs! 🐛
+
 ## Features
 - **Chat Interface**: Split-window layout with streaming responses.
 - **Context Awareness**: Reference files using `@filename` (with autocompletion).
