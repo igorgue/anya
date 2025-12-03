@@ -1,6 +1,6 @@
 # agent.nvim
 
-An AI-proweed Neovim plugin built on te OpenAI Agets SDK.
+An AI-powered Neovim plugin built on the OpenAI Agents SDK.
 
 ## Features
 - **Chat Interface**: Split-window layout with streaming responses.
@@ -153,43 +153,3 @@ When conversations become long, you can use the `/compact` command to intelligen
 ### Custom Instructions
 
 Create an `AGENTS.md` file in your project root to provide specific instructions to the agent (e.g., coding style, architecture overview).
-
-## Random Section Added for Testing
-
-This is a completely random section added to test the edit tool functionality. It contains:
-
-- Random bullet point 1: Testing bullet points
-- Random bullet point 2: More testing content  
-- Random bullet point 3: Even more random content
-
-### Random Subsection
-
-Here's some random text in a subsection to test nested heading editing. This content is completely meaningless but serves to verify that the edit tool works correctly across different markdown structures.
-
-**Bold random text** and *italic random text* for testing formatting preservation.
-
-```javascript
-// Random code block for testing
-function randomFunction() {
-    console.log("This is a random edit test!");
-    return Math.random() > 0.5 ? "success" : "failure";
-}
-```
-
-## 😄 Developer Humor
-
-Why do programmers prefer dark mode?  
-
-Because light attracts bugs! 🐛
-
----
-
-*Why did the developer go broke?*  
-
-Because they used up all their cache! 💸
-
----
-
-How many programmers does it take to change a light bulb?
-
-None - that's a hardware problem! 💡

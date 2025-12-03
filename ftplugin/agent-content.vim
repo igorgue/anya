@@ -8,6 +8,9 @@ let b:markdown_fenced_languages = ['diff']
 nnoremap <buffer> <silent> <C-c> :AgentCancel<CR>
 inoremap <buffer> <silent> <C-c> <Esc>:AgentCancel<CR>
 
+" Map G to go to end and re-enable autoscroll
+nnoremap <buffer> <silent> G G:let b:agent_autoscroll_enabled = 1<CR>
+
 " Enable manual folding for tool calls
 setlocal foldmethod=manual
 setlocal foldlevel=99
