@@ -536,10 +536,13 @@ class BufferManager:
         if content_type == 'llm' and last_was_header_like:
             return 1
         
-        # After thinking: always 1 blank line before next content (LLM or tool)
-        # This ensures there's always a blank line after thinking, regardless of what follows
+        # After thinking: 1 blank line before LLM (thinking ends with blank, but we want another before LLM)
+        # Tool after thinking: 0 blank lines (thinking already ends with blank, tool doesn't need another)
         if last_was_thinking:
-            return 1
+            if content_type == 'llm':
+                return 1
+            elif content_type == 'tool':
+                return 0
         
         # Tool/thinking after header/user: no blank line (they already end with blank)
         if last_was_header_like:
