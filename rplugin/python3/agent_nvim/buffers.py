@@ -90,6 +90,10 @@ class BufferManager:
         self._username_highlight_ns = nvim.api.create_namespace(
             "agent_username_highlight"
         )
+        # Track last output type for consistent spacing
+        # Values: None, 'header', 'tool', 'thinking', 'llm'
+        # Note: 'thinking' is ONLY for built-in reasoning (o1/glm-4), NOT MCP tools
+        self._last_output_type = None
 
     def create_layout(self):
         """Create the agent UI layout with content and prompt buffers."""
@@ -462,13 +466,84 @@ class BufferManager:
                 "agent_nvim_blink_file_completion_callback(...)", [[], callback_id]
             )
 
-    def append_content(self, lines, fold=False, fold_error=False):
+    def _calculate_spacing(self, content_type):
+        """Calculate blank lines needed before content based on output state.
+        
+        Args:
+            content_type: Type of content being added ('header', 'tool', 'thinking', 'llm', 'user')
+                         'thinking' is ONLY for built-in reasoning (o1/glm-4), NOT MCP tools
+            
+        Returns:
+            Number of blank lines to prepend (0, 1, or 2)
+        """
+        # Spacing rules (based on user requirements):
+        # - LLM text and tool outputs both end with blank lines
+        # - First content (None): no spacing
+        # - Header/user after content: 1 blank line before
+        # - After header/user: no spacing (they end with blank line)
+        # - Tool after LLM: 0 blank lines (LLM already ends with blank, tool gets spacing from that)
+        # - LLM after tool: 0 blank lines (tool already ends with blank, LLM gets spacing from that)
+        # - Consecutive tools: no spacing between them (both end with blank)
+        # - Consecutive LLM (after interruption): 0 blank lines (previous LLM already ended with blank)
+        
+        if self._last_output_type is None:
+            # Very first content - no spacing
+            return 0
+        
+        # Headers and user prompts get 1 blank line before them (unless first)
+        if content_type in ('header', 'user'):
+            return 1
+        
+        # Thinking and tool are both "tool-like" for spacing purposes
+        current_is_tool = content_type in ('tool', 'thinking')
+        last_was_tool = self._last_output_type in ('tool', 'thinking')
+        last_was_thinking = self._last_output_type == 'thinking'
+        last_was_llm = self._last_output_type == 'llm'
+        # Headers and user prompts both end with a blank line in their content
+        last_was_header_like = self._last_output_type in ('header', 'user')
+        
+        # LLM after header/user: 1 blank line (header ends with blank, but we want another before LLM)
+        if content_type == 'llm' and last_was_header_like:
+            return 1
+        
+        # After thinking: always 1 blank line before next content (LLM or tool)
+        # This ensures there's always a blank line after thinking, regardless of what follows
+        if last_was_thinking:
+            return 1
+        
+        # Tool/thinking after header/user: no blank line (they already end with blank)
+        if last_was_header_like:
+            return 0
+        
+        # Between consecutive tool-like items: no blank line (both end with blank)
+        # But exclude thinking from this - thinking always needs spacing after it
+        if current_is_tool and last_was_tool and not last_was_thinking:
+            return 0
+        
+        # Tool after LLM: 0 blank lines (LLM already ends with blank)
+        if current_is_tool and last_was_llm:
+            return 0
+        
+        # LLM after tool: 1 blank line (after tool group, LLM needs a blank line before it)
+        # But if last was thinking, we already handled it above
+        if content_type == 'llm' and last_was_tool and not last_was_thinking:
+            return 1
+        
+        # LLM after LLM (after interruption): 0 blank lines (previous LLM already ended with blank)
+        if content_type == 'llm' and last_was_llm:
+            return 0
+        
+        # Default: 1 blank line for other transitions
+        return 1
+
+    def append_content(self, lines, fold=False, fold_error=False, content_type='llm'):
         """Append one or more lines to the content buffer.
 
         Args:
             lines: List of strings to append
             fold: If True, fold the appended content immediately
             fold_error: If True, highlight the fold header as an error (red)
+            content_type: Type of content ('header', 'tool', 'llm') for spacing
         """
         try:
             if (
@@ -476,8 +551,17 @@ class BufferManager:
                 and self.content_buf
                 and self.content_buf.valid
             ):
+                # Calculate spacing based on previous output type
+                spacing = self._calculate_spacing(content_type)
+                self.logger.info(f"Spacing: last={self._last_output_type}, current={content_type}, spacing={spacing}")
+                
                 # Ensure every item is a single line
                 processed = []
+                
+                # Add spacing blank lines if needed
+                for _ in range(spacing):
+                    processed.append("")
+                
                 for item in lines:
                     if isinstance(item, str) and "\n" in item:
                         # Split on newlines, keep empty parts (blank lines)
@@ -485,11 +569,14 @@ class BufferManager:
                     else:
                         processed.append(item)
 
+                # Update state tracker
+                self._last_output_type = content_type
+
                 def wrapped_append():
                     """Append and scroll."""
                     try:
                         self._append_and_scroll(
-                            processed, fold=fold, fold_error=fold_error
+                            processed, fold=fold, fold_error=fold_error, spacing_lines=spacing
                         )
                     except Exception as e:
                         self.logger.error(f"Error appending content to buffer: {e}")
@@ -503,13 +590,14 @@ class BufferManager:
             self.logger.error(f"Error in append_content: {e}")
             # Don't re-raise to prevent cascading errors during error handling
 
-    def _append_and_scroll(self, processed, fold=False, fold_error=False):
+    def _append_and_scroll(self, processed, fold=False, fold_error=False, spacing_lines=0):
         """Helper to append lines and autoscroll content buffer.
 
         Args:
             processed: List of lines to append
             fold: If True, create a fold for the appended lines
             fold_error: If True, highlight the fold header as an error (red)
+            spacing_lines: Number of blank lines prepended for spacing (fold should skip these)
         """
         try:
             if (
@@ -558,7 +646,8 @@ class BufferManager:
             if fold and len(processed) > 1:
                 bufnr = self.content_buf.number
                 # start_line is 0-indexed count, so +1 for 1-indexed vim line
-                fold_start = start_line + 1
+                # Skip spacing_lines so fold starts at actual content, not blank lines
+                fold_start = start_line + 1 + spacing_lines
                 fold_end = end_line
                 self._create_fold(bufnr, fold_start, fold_end, fold_error=fold_error)
 
@@ -807,18 +896,23 @@ class BufferManager:
             text: Text to append
             bufnr: Buffer number (must be passed in, can't access from async context)
         """
-        # Handle initial spacing for agent responses
-        # The header ends with a blank line. We need to preserve it by ensuring
-        # content starts on a NEW line (after the blank line).
+        # Handle initial spacing for agent responses based on spacing state
         if not self._agent_response_started and text:
-            # Strip leading newlines - we'll add exactly one to ensure proper spacing
+            # Calculate spacing based on what came before
+            spacing = self._calculate_spacing('llm')
+            
+            # Strip leading newlines from the text
             text = text.lstrip("\n")
             # If stripping leaves empty text, skip this chunk (don't set flag yet)
             if not text:
                 return
-            # Prepend newline so content starts AFTER the blank line, not ON it
-            text = "\n" + text
+            
+            # Add spacing newlines based on state
+            text = ("\n" * spacing) + text
+            
             self._agent_response_started = True
+            # Update state to reflect LLM output
+            self._last_output_type = 'llm'
 
         # Escape text for Lua string
         escaped_text = (
@@ -1026,9 +1120,37 @@ class BufferManager:
             pass
 
     def reset_agent_response_flag(self):
-        """Reset the agent response started flag and Lua spacing check."""
+        """Reset the agent response started flag and Lua spacing check.
+        
+        Note: Does NOT reset _last_output_type - that is managed by append_content.
+        The header's append_content call will set it to 'header' after appending.
+        """
         self._agent_response_started = False
+        # Don't reset _last_output_type here - let append_content manage it
+        # This allows correct spacing calculation for the header based on
+        # what came before (e.g., 'llm' from previous response)
         # Also reset the Lua spacing check for the new response
+        try:
+            self.nvim.exec_lua("_G.agent_stream_spacing_checked = false")
+        except Exception:
+            pass
+    
+    def set_output_type(self, output_type):
+        """Manually set the last output type for spacing calculations.
+        
+        Args:
+            output_type: Type to set ('header', 'tool', 'thinking', 'llm', 'user', or None)
+                         'thinking' is ONLY for built-in reasoning (o1/glm-4), NOT MCP tools
+        """
+        self._last_output_type = output_type
+    
+    def reset_spacing_state(self):
+        """Reset spacing state to initial values.
+        
+        Call this when clearing the buffer to ensure correct spacing for the next content.
+        """
+        self._last_output_type = None
+        self._agent_response_started = False
         try:
             self.nvim.exec_lua("_G.agent_stream_spacing_checked = false")
         except Exception:

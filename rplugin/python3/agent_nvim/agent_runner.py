@@ -182,8 +182,9 @@ async def run_agent(
 
         # Add agent header with proper spacing (skip for edit continuations)
         if not skip_header:
-            header_lines = ["", f"# Agent ({display_model})", ""]
-            nvim.async_call(buffer_manager.append_content, header_lines)
+            # Header now includes trailing blank line but not leading (spacing handled automatically)
+            header_lines = [f"# Agent ({display_model})", ""]
+            nvim.async_call(buffer_manager.append_content, header_lines, False, False, 'header')
 
         # Track the line number where agent response will start
         # Used to capture only the LLM response if cancelled
@@ -425,12 +426,15 @@ async def run_agent(
                                     "``````",
                                     thinking_content,
                                     "``````",
+                                    "",  # Add trailing blank line like tool outputs
                                 ]
 
                                 def flush_thinking():
                                     # Flush pending stream content and pause
+                                    content_bufnr = buffer_manager.content_buf.number if buffer_manager.content_buf and buffer_manager.content_buf.valid else -1
                                     nvim.exec_lua(
                                         """
+                                        local content_bufnr = ...
                                         if _G.agent_stream_queue then
                                             for _, item in ipairs(_G.agent_stream_queue) do
                                                 if vim.api.nvim_buf_is_valid(item.bufnr) and item.text ~= "" then
@@ -444,16 +448,30 @@ async def run_agent(
                                             end
                                             _G.agent_stream_queue = {}
                                         end
+                                        
+                                        -- Add blank line after LLM text if it doesn't already end with one
+                                        if vim.api.nvim_buf_is_valid(content_bufnr) then
+                                            local line_count = vim.api.nvim_buf_line_count(content_bufnr)
+                                            if line_count > 0 then
+                                                local last_line = vim.api.nvim_buf_get_lines(content_bufnr, line_count - 1, line_count, false)
+                                                -- Check if last line is not empty (has any content, including just a dot)
+                                                if #last_line > 0 and last_line[1] and last_line[1]:gsub("%s", "") ~= "" then
+                                                    -- Last line has content, add blank line
+                                                    vim.api.nvim_buf_set_lines(content_bufnr, line_count, line_count, false, {""})
+                                                end
+                                            end
+                                        end
+                                        
                                         _G.agent_stream_paused = true
-                                        """
+                                        """,
+                                        content_bufnr,
                                     )
                                     buffer_manager.append_content(
-                                        thinking_lines, fold=True, fold_error=False
+                                        thinking_lines, fold=True, fold_error=False, content_type='thinking'
                                     )
-                                    buffer_manager.append_content(
-                                        [""]
-                                    )  # Blank line after fold
-                                    # Resume streaming
+                                    # Reset agent_response_started so next LLM text adds spacing
+                                    buffer_manager._agent_response_started = False
+                                    # Resume streaming after fold is written
                                     nvim.exec_lua("_G.agent_stream_paused = false")
 
                                 nvim.async_call(flush_thinking)
@@ -564,12 +582,14 @@ async def run_agent(
         if thinking_buffer:
             thinking_content = "".join(thinking_buffer).strip()
             if thinking_content:  # Only show if non-empty after stripping
-                thinking_lines = ["**Thinking**", "``````", thinking_content, "``````"]
+                thinking_lines = ["**Thinking**", "``````", thinking_content, "``````", ""]  # Add trailing blank line
 
                 def flush_thinking():
                     # Flush pending stream content
+                    content_bufnr = buffer_manager.content_buf.number if buffer_manager.content_buf and buffer_manager.content_buf.valid else -1
                     nvim.exec_lua(
                         """
+                        local content_bufnr = ...
                         if _G.agent_stream_queue then
                             for _, item in ipairs(_G.agent_stream_queue) do
                                 if vim.api.nvim_buf_is_valid(item.bufnr) and item.text ~= "" then
@@ -583,12 +603,27 @@ async def run_agent(
                             end
                             _G.agent_stream_queue = {}
                         end
-                        """
+                        
+                        -- Add blank line after LLM text if it doesn't already end with one
+                        if vim.api.nvim_buf_is_valid(content_bufnr) then
+                            local line_count = vim.api.nvim_buf_line_count(content_bufnr)
+                            if line_count > 0 then
+                                local last_line = vim.api.nvim_buf_get_lines(content_bufnr, line_count - 1, line_count, false)
+                                -- Check if last line is not empty (has any content, including just a dot)
+                                if #last_line > 0 and last_line[1] and last_line[1]:gsub("%s", "") ~= "" then
+                                    -- Last line has content, add blank line
+                                    vim.api.nvim_buf_set_lines(content_bufnr, line_count, line_count, false, {""})
+                                end
+                            end
+                        end
+                        """,
+                        content_bufnr,
                     )
                     buffer_manager.append_content(
-                        thinking_lines, fold=True, fold_error=False
+                        thinking_lines, fold=True, fold_error=False, content_type='thinking'
                     )
-                    buffer_manager.append_content([""])  # Blank line after fold
+                    # Reset agent_response_started in case more LLM text follows
+                    buffer_manager._agent_response_started = False
 
                 nvim.async_call(flush_thinking)
 
@@ -600,6 +635,54 @@ async def run_agent(
             logger.info(
                 f"final_output: {str(result_stream.final_output)[:500] if result_stream.final_output else 'None'}"
             )
+
+        # Ensure LLM text ends with a blank line when streaming completes
+        # Flush any remaining stream content and add blank line if needed
+        def ensure_llm_ends_with_blank():
+            try:
+                # Flush any remaining stream content
+                nvim.exec_lua(
+                    """
+                    if _G.agent_stream_queue then
+                        for _, item in ipairs(_G.agent_stream_queue) do
+                            if vim.api.nvim_buf_is_valid(item.bufnr) and item.text ~= "" then
+                                local line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                                local last_line_idx = line_count - 1
+                                local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
+                                local last_column = #(last_line[1] or "")
+                                local lines = vim.split(item.text, "\\n", {plain = true})
+                                vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
+                            end
+                        end
+                        _G.agent_stream_queue = {}
+                    end
+                    """
+                )
+                
+                # Add blank line after LLM text if it doesn't already end with one
+                if buffer_manager.content_buf and buffer_manager.content_buf.valid:
+                    content_bufnr = buffer_manager.content_buf.number
+                    nvim.exec_lua(
+                        """
+                        local bufnr = ...
+                        if vim.api.nvim_buf_is_valid(bufnr) then
+                            local line_count = vim.api.nvim_buf_line_count(bufnr)
+                            if line_count > 0 then
+                                local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)
+                                -- Check if last line is not empty (has any content, including just a dot)
+                                if #last_line > 0 and last_line[1] and last_line[1]:gsub("%s", "") ~= "" then
+                                    -- Last line has content, add blank line
+                                    vim.api.nvim_buf_set_lines(bufnr, line_count, line_count, false, {""})
+                                end
+                            end
+                        end
+                        """,
+                        content_bufnr,
+                    )
+            except Exception as e:
+                logger.debug(f"Error ensuring LLM ends with blank: {e}")
+
+        nvim.async_call(ensure_llm_ends_with_blank)
 
         # Get the final output and add it to conversation history
         if hasattr(result_stream, "final_output") and result_stream.final_output:

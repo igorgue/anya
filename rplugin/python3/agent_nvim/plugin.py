@@ -224,8 +224,8 @@ class AgentPlugin(object):
                 [
                     "> **Context compacted successfully**",
                     "Conversation reduced to essential context.",
-                    "",
-                ]
+                ],
+                content_type='llm'
             )
 
             self.logger.info("Applied compacted context to conversation")
@@ -1164,7 +1164,6 @@ class AgentPlugin(object):
             if not self.compact_agent:
                 self.buffer_manager.append_content(
                     [
-                        "",
                         "  **Compact agent not available**",
                         "The CompactAgent failed to initialize. This could be due to:",
                         "- Missing OpenAI agents SDK installation",
@@ -1173,8 +1172,8 @@ class AgentPlugin(object):
                         "",
                         "Basic fallback compaction is available with limited functionality.",
                         "For full features, run `:AgentInstall` and check your OpenAI API key.",
-                        "",
-                    ]
+                    ],
+                    content_type='llm'
                 )
                 return
 
@@ -1189,11 +1188,10 @@ class AgentPlugin(object):
                 except (ValueError, TypeError):
                     self.buffer_manager.append_content(
                         [
-                            "",
                             "  **Invalid token count**",
                             "Please provide a valid number for --tokens parameter.",
-                            "",
-                        ]
+                        ],
+                        content_type='llm'
                     )
                     return
             elif instructions and self.compact_agent:
@@ -1500,6 +1498,8 @@ class AgentPlugin(object):
                     )
                 except Exception:
                     pass
+                # Reset spacing state so next content starts fresh
+                self.buffer_manager.reset_spacing_state()
             # Clear conversation history
             self._conversation_history = []
         elif cmd == "/cancel":
@@ -1680,11 +1680,8 @@ class AgentPlugin(object):
         is_first_message = self.buffer_manager.clear_welcome_message()
 
         # Append user message (show original text to user)
-        # No blank line on top for first message, add blank line for subsequent messages
-        if is_first_message:
-            self.buffer_manager.append_content([f"# {username}", "", text])
-        else:
-            self.buffer_manager.append_content(["", f"# {username}", "", text])
+        # Let spacing state machine handle leading blank lines based on _last_output_type
+        self.buffer_manager.append_content([f"# {username}", "", text], content_type='user')
 
         # Add user message to conversation history
         self._conversation_history.append({"role": "user", "content": resolved_text})

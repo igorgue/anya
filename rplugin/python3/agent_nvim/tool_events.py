@@ -120,14 +120,20 @@ def display_tool_call(
                 -- Clear the queue after flushing
                 _G.agent_stream_queue = {}
             end
-            -- Add blank line for separation before tool output (use passed buffer)
-            if content_bufnr and content_bufnr > 0 and vim.api.nvim_buf_is_valid(content_bufnr) then
+            
+            -- Add blank line after LLM text if it doesn't already end with one
+            if vim.api.nvim_buf_is_valid(content_bufnr) then
                 local line_count = vim.api.nvim_buf_line_count(content_bufnr)
-                local last_line = vim.api.nvim_buf_get_lines(content_bufnr, line_count - 1, line_count, false)
-                if (last_line[1] or "") ~= "" then
-                    vim.api.nvim_buf_set_lines(content_bufnr, -1, -1, false, {""})
+                if line_count > 0 then
+                    local last_line = vim.api.nvim_buf_get_lines(content_bufnr, line_count - 1, line_count, false)
+                    -- Check if last line is not empty (has any content, including just a dot)
+                    if #last_line > 0 and last_line[1] and last_line[1]:gsub("%s", "") ~= "" then
+                        -- Last line has content, add blank line
+                        vim.api.nvim_buf_set_lines(content_bufnr, line_count, line_count, false, {""})
+                    end
                 end
             end
+            
             -- Now pause streaming to prevent new text from appearing before tool output
             _G.agent_stream_paused = true
             -- Reset spacing check so it will re-check when streaming resumes after tool output
@@ -274,10 +280,9 @@ def display_tool_result(
                                 if success:
                                     append_content_fn(
                                         [
-                                            "",
                                             "> Edits auto-applied (press **2** to undo)",
-                                            "",
-                                        ]
+                                        ],
+                                        content_type='llm'
                                     )
                                     logger.info("YOLO: Edits applied successfully")
                                     try:
@@ -297,10 +302,9 @@ def display_tool_result(
                                 else:
                                     append_content_fn(
                                         [
-                                            "",
                                             ">   Edits failed to apply - LLM will retry",
-                                            "",
-                                        ]
+                                        ],
+                                        content_type='llm'
                                     )
                                     logger.warning("YOLO: Edits failed to apply")
 
@@ -393,29 +397,40 @@ def display_tool_result(
         output_lines.append(display_result)
         output_lines.append("```")
         output_lines.append("``````")
-        output_lines.append("")  # Blank line for separation from next LLM output
+        # Add trailing blank line - tool outputs should end with blank line
+        # This ensures proper spacing when followed by LLM text
+        # The spacing calculation will handle consecutive tools (no extra blank)
+        output_lines.append("")
 
         # Append content and fold it, then resume streaming
         # Pass fold_error=True if this is an error result
+        # Use content_type='tool' to let BufferManager handle spacing
         def append_and_resume():
             try:
-                append_content_fn(output_lines, fold=True, fold_error=is_error)
+                append_content_fn(output_lines, fold=True, fold_error=is_error, content_type='tool')
             except Exception as e:
                 logger.error(f"Error appending tool result to buffer: {e}")
                 # Try to append a simple error message
                 try:
                     simple_error = [
-                        "",
                         "**Tool Error**:",
                         f"``````",
                         f"Failed to display {tool_name} result: {e}",
                         "``````",
-                        "",
                     ]
-                    append_content_fn(simple_error, fold=True, fold_error=True)
+                    append_content_fn(simple_error, fold=True, fold_error=True, content_type='tool')
                 except Exception as e2:
                     logger.error(f"Even simple error display failed: {e2}")
 
+            # Reset agent_response_started so next LLM chunk recalculates spacing
+            # This is safe because:
+            # - If next is LLM text: will see _last_output_type='tool' and add spacing
+            # - If next is tool: uses append_content with content_type='tool', not streaming
+            if hasattr(append_content_fn, '__self__'):
+                buffer_manager = append_content_fn.__self__
+                if hasattr(buffer_manager, '_agent_response_started'):
+                    buffer_manager._agent_response_started = False
+            
             # Resume streaming after tool output is written
             try:
                 nvim.exec_lua("_G.agent_stream_paused = false")
