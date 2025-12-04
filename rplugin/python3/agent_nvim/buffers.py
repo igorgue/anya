@@ -1196,37 +1196,40 @@ class BufferManager:
             self.logger.error(f"Error capturing thinking end line: {e}")
     
     def finalize_thinking_section(self, bufnr):
-        """Finalize thinking section by adding closing fence, blank line, and creating fold.
+        """Finalize thinking section by creating fold and adding blank line.
         
         Args:
             bufnr: Buffer number
             
-        Note: This method should be called from async_call context (it's called from
+        Note: The closing fence should already be written by the caller (agent_runner.py)
+        immediately after flushing thinking content. This prevents race conditions where
+        tool output or LLM text could be written before the fence.
+        
+        This method should be called from async_call context (it's called from
         finalize_thinking() which is already wrapped in async_call).
         """
         try:
-            # Use the captured thinking end line if available, otherwise calculate it
-            # This ensures we use the line captured BEFORE any LLM content was written
-            if hasattr(self, '_thinking_end_line') and self._thinking_end_line is not None:
-                thinking_end_line = self._thinking_end_line  # 0-indexed
-                self.logger.debug(f"Using captured thinking end line: {thinking_end_line} (0-indexed)")
+            # Check if fence was already written by caller
+            fence_already_written = getattr(self, '_thinking_fence_written', False)
+            
+            if fence_already_written and hasattr(self, '_thinking_end_line') and self._thinking_end_line is not None:
+                # Use the captured end line - fence is at this line (0-indexed)
+                thinking_end_line = self._thinking_end_line
+                self.logger.debug(f"Using pre-written fence at line {thinking_end_line} (0-indexed)")
+                # Closing fence is at thinking_end_line, so fold_end is thinking_end_line + 1 (1-indexed)
+                closing_fence_line = thinking_end_line + 1
             else:
-                # Fallback: calculate from current buffer state
-                # This should only happen if capture_thinking_end_line wasn't called
+                # Fallback: fence wasn't written by caller, we need to write it
+                # This shouldn't normally happen, but handle it for safety
+                self.logger.warning("Fence not pre-written, calculating position")
                 import time
-                time.sleep(0.05)  # Small delay to catch any last-minute writes
+                time.sleep(0.1)
                 current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
                 thinking_end_line = len(current_lines)  # 0-indexed
-                self.logger.warning(f"Using calculated thinking end line (capture not called): {thinking_end_line} (0-indexed)")
-            
-            # Add closing fence at the exact end of thinking content
-            closing_fence = ["``````"]
-            # Insert at the exact line where thinking content ends (thinking_end_line is 0-indexed)
-            self.nvim.api.buf_set_lines(self.content_buf, thinking_end_line, thinking_end_line, False, closing_fence)
-            
-            # Get the line number of the closing fence (this is where the fold should end)
-            # The closing fence is at thinking_end_line (0-indexed), so fold_end is thinking_end_line + 1 (1-indexed)
-            closing_fence_line = thinking_end_line + 1  # 1-indexed for fold
+                
+                # Write the fence
+                self.nvim.api.buf_set_lines(self.content_buf, thinking_end_line, thinking_end_line, False, ["``````"])
+                closing_fence_line = thinking_end_line + 1  # 1-indexed for fold
             
             # Create fold if we have a start line (fold includes closing fence but not blank line)
             if hasattr(self, '_thinking_start_line') and self._thinking_start_line:
@@ -1245,11 +1248,13 @@ class BufferManager:
             # This ensures proper spacing for the next content
             self._last_output_type = 'thinking'
             
-            # Clear thinking tracking lines
+            # Clear thinking tracking state
             if hasattr(self, '_thinking_start_line'):
                 delattr(self, '_thinking_start_line')
             if hasattr(self, '_thinking_end_line'):
                 delattr(self, '_thinking_end_line')
+            if hasattr(self, '_thinking_fence_written'):
+                delattr(self, '_thinking_fence_written')
         except Exception as e:
             self.logger.error(f"Error finalizing thinking section: {e}")
             import traceback

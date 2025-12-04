@@ -335,6 +335,67 @@ async def run_agent(
         thinking_initialized = False
         thinking_finalizing = False  # Flag to prevent new thinking content after finalization starts
         thinking_finalize_buffer = []  # Buffer for thinking content that arrives during finalization
+        
+        # Helper to finalize thinking synchronously before tool calls
+        # Uses threading.Event to ensure finalization completes before returning
+        import threading
+        def finalize_thinking_sync():
+            """Finalize thinking section synchronously. Returns when finalization is complete."""
+            nonlocal thinking_initialized, thinking_finalizing
+            
+            if not thinking_initialized or thinking_finalizing:
+                return
+            
+            thinking_finalizing = True
+            logger.info("Synchronously finalizing thinking before tool")
+            
+            finalization_done = threading.Event()
+            
+            def do_finalize():
+                try:
+                    content_bufnr_local = buffer_manager.content_buf.number if buffer_manager.content_buf and buffer_manager.content_buf.valid else -1
+                    # Stop timer and flush queue
+                    nvim.exec_lua(
+                        """
+                        if _G.agent_stream_timer then _G.agent_stream_timer:stop(); _G.agent_stream_timer = nil end
+                        if _G.agent_stream_queue then
+                            for _, item in ipairs(_G.agent_stream_queue) do
+                                if vim.api.nvim_buf_is_valid(item.bufnr) and item.text ~= "" then
+                                    local lc = vim.api.nvim_buf_line_count(item.bufnr)
+                                    local ll = vim.api.nvim_buf_get_lines(item.bufnr, lc-1, lc, false)
+                                    vim.api.nvim_buf_set_text(item.bufnr, lc-1, #(ll[1] or ""), lc-1, #(ll[1] or ""), vim.split(item.text, "\\n", {plain=true}))
+                                end
+                            end
+                            _G.agent_stream_queue = {}
+                        end
+                        """
+                    )
+                    # Write any buffered thinking content
+                    if thinking_finalize_buffer:
+                        buffered_text = "".join(thinking_finalize_buffer)
+                        cl = nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
+                        tl = buffered_text.split("\n")
+                        if tl: nvim.api.buf_set_lines(buffer_manager.content_buf, len(cl), len(cl), False, tl)
+                        thinking_finalize_buffer.clear()
+                    
+                    # Capture end line and write fence IMMEDIATELY
+                    cl = nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
+                    nvim.api.buf_set_lines(buffer_manager.content_buf, len(cl), len(cl), False, ["``````"])
+                    buffer_manager._thinking_end_line = len(cl)
+                    buffer_manager._thinking_fence_written = True
+                    
+                    # Create fold and add blank line
+                    buffer_manager.finalize_thinking_section(content_bufnr_local)
+                    buffer_manager._agent_response_started = False
+                    logger.info("Thinking finalization complete")
+                finally:
+                    finalization_done.set()
+            
+            nvim.async_call(do_finalize)
+            # Wait for finalization to complete (up to 2 seconds)
+            if not finalization_done.wait(timeout=2.0):
+                logger.warning("Thinking finalization timed out!")
+            thinking_initialized = False
 
         logger.info(f"Starting to iterate over stream events")
         logger.info(f"result_stream type: {type(result_stream)}")
@@ -505,11 +566,18 @@ async def run_agent(
                                     # but BEFORE any LLM content is written
                                     # This ensures the fold ends at the correct location
                                     current_lines = nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
-                                    buffer_manager._thinking_end_line = len(current_lines)  # 0-indexed
-                                    logger.debug(f"Captured thinking end line after flushing: {buffer_manager._thinking_end_line} (0-indexed)")
+                                    thinking_end_line = len(current_lines)  # 0-indexed
+                                    logger.debug(f"Captured thinking end line after flushing: {thinking_end_line} (0-indexed)")
                                     
-                                    # Now finalize - capture end line RIGHT before adding closing fence
-                                    # Add a small delay to ensure all writes are complete
+                                    # Write closing fence IMMEDIATELY - this is critical to avoid race conditions
+                                    # By writing it here, we ensure it's placed before any tool output or LLM text
+                                    nvim.api.buf_set_lines(buffer_manager.content_buf, thinking_end_line, thinking_end_line, False, ["``````"])
+                                    
+                                    # Store the end line for fold creation (the closing fence is at thinking_end_line)
+                                    buffer_manager._thinking_end_line = thinking_end_line
+                                    buffer_manager._thinking_fence_written = True
+                                    
+                                    # Now finalize - just create the fold, fence is already written
                                     time.sleep(0.1)
                                     buffer_manager.finalize_thinking_section(content_bufnr)
                                 
@@ -650,6 +718,9 @@ async def run_agent(
                 # Check for tool-related events in responses API
                 elif "Tool" in data_type or "tool" in data_type.lower():
                     logger.info(f"Tool event in responses: {data_type}")
+                    # If thinking is initialized, finalize it BEFORE displaying tool
+                    finalize_thinking_sync()
+                    
                     tool_events.handle_tool_event(
                         event,
                         content_bufnr,
@@ -668,6 +739,9 @@ async def run_agent(
                     "ResponseToolCallOutputEvent",
                 ]:
                     logger.info(f"Found tool-related event: {data_type}")
+                    # If thinking is initialized, finalize it BEFORE displaying tool
+                    finalize_thinking_sync()
+                    
                     tool_events.handle_tool_event(
                         event,
                         content_bufnr,
@@ -695,6 +769,9 @@ async def run_agent(
 
                     # Process tool call items as they stream
                     if "ToolCall" in item_type or "Tool" in item_type:
+                        # If thinking is initialized, finalize it BEFORE displaying tool call
+                        finalize_thinking_sync()
+                        
                         tool_events.handle_tool_item(
                             event.item,
                             content_bufnr,
@@ -709,6 +786,9 @@ async def run_agent(
             # Handle other tool-related events
             elif "ToolCall" in event_type:
                 logger.info(f"ToolCall event: {event_type}")
+                # If thinking is initialized, finalize it BEFORE displaying tool call
+                finalize_thinking_sync()
+                
                 tool_events.handle_tool_call_event(
                     event,
                     content_bufnr,
@@ -721,6 +801,9 @@ async def run_agent(
                 )
             elif "Tool" in event_type:
                 logger.info(f"Tool event: {event_type}")
+                # If thinking is initialized, finalize it BEFORE displaying tool output
+                finalize_thinking_sync()
+                
                 tool_events.handle_tool_event(
                     event,
                     content_bufnr,
@@ -755,7 +838,6 @@ async def run_agent(
                     import time
                     time.sleep(0.1)
                 
-                buffer_manager.finalize_thinking_section(content_bufnr)
                 # Stop timer, flush pending stream content, then finalize thinking section
                 content_bufnr = buffer_manager.content_buf.number if buffer_manager.content_buf and buffer_manager.content_buf.valid else -1
                 nvim.exec_lua(
@@ -797,7 +879,22 @@ async def run_agent(
                     """,
                     content_bufnr,
                 )
-                # Now finalize thinking section (add closing fence and create fold)
+                # Capture thinking end line AFTER flushing stream queue but BEFORE finalizing
+                # This ensures we capture the correct end location
+                import time
+                time.sleep(0.1)  # Small delay to ensure flush completes
+                current_lines = nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
+                thinking_end_line = len(current_lines)  # 0-indexed
+                logger.debug(f"Captured thinking end line after flushing: {thinking_end_line} (0-indexed)")
+                
+                # Write closing fence IMMEDIATELY - this is critical to avoid race conditions
+                nvim.api.buf_set_lines(buffer_manager.content_buf, thinking_end_line, thinking_end_line, False, ["``````"])
+                
+                # Store the end line for fold creation
+                buffer_manager._thinking_end_line = thinking_end_line
+                buffer_manager._thinking_fence_written = True
+                
+                # Now finalize thinking section (just create the fold, fence is already written)
                 buffer_manager.finalize_thinking_section(content_bufnr)
                 # Reset agent_response_started in case more LLM text follows
                 buffer_manager._agent_response_started = False
