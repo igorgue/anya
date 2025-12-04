@@ -363,14 +363,14 @@ def display_tool_result(
             if args:
                 first_param = next(iter(args.values()), None)
 
-            # Format title with first parameter
+            # Build base title text (without icon - icon will be added via virtual text)
             if first_param:
                 param_str = str(first_param)
                 if len(param_str) > 80:
                     param_str = param_str[:77] + "..."
-                tool_title = f"{icon}  {tool_name} | `{param_str}`"
+                tool_title = f"{tool_name} | `{param_str}`"
             else:
-                tool_title = f"{icon}  {tool_name}"
+                tool_title = f"{tool_name}"
 
             output_lines.append(tool_title)
             output_lines.append("``````")
@@ -405,9 +405,11 @@ def display_tool_result(
         # Append content and fold it, then resume streaming
         # Pass fold_error=True if this is an error result
         # Use content_type='tool' to let BufferManager handle spacing
+        # The tool title is always the first line (index 0) in output_lines
         def append_and_resume():
             try:
-                append_content_fn(output_lines, fold=True, fold_error=is_error, content_type='tool')
+                # Pass tool_title_index=0 to indicate the tool title is at index 0 in output_lines
+                append_content_fn(output_lines, fold=True, fold_error=is_error, content_type='tool', tool_title_index=0)
             except Exception as e:
                 logger.error(f"Error appending tool result to buffer: {e}")
                 # Try to append a simple error message

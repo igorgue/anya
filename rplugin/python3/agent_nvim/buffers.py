@@ -90,6 +90,7 @@ class BufferManager:
         self._username_highlight_ns = nvim.api.create_namespace(
             "agent_username_highlight"
         )
+        self._tool_fold_ns = nvim.api.create_namespace("agent_tool_fold")
         # Track last output type for consistent spacing
         # Values: None, 'header', 'tool', 'thinking', 'llm'
         # Note: 'thinking' is ONLY for built-in reasoning (o1/glm-4), NOT MCP tools
@@ -536,7 +537,7 @@ class BufferManager:
         # Default: 1 blank line for other transitions
         return 1
 
-    def append_content(self, lines, fold=False, fold_error=False, content_type='llm'):
+    def append_content(self, lines, fold=False, fold_error=False, content_type='llm', tool_title_index=None):
         """Append one or more lines to the content buffer.
 
         Args:
@@ -544,6 +545,7 @@ class BufferManager:
             fold: If True, fold the appended content immediately
             fold_error: If True, highlight the fold header as an error (red)
             content_type: Type of content ('header', 'tool', 'llm') for spacing
+            tool_title_index: Index in lines list where tool title is (for icon placement)
         """
         try:
             if (
@@ -575,8 +577,13 @@ class BufferManager:
                 def wrapped_append():
                     """Append and scroll."""
                     try:
+                        # Calculate tool_title_index in processed list
+                        # If tool_title_index was provided, add spacing to account for prepended blank lines
+                        processed_tool_title_index = None
+                        if tool_title_index is not None:
+                            processed_tool_title_index = tool_title_index + spacing
                         self._append_and_scroll(
-                            processed, fold=fold, fold_error=fold_error, spacing_lines=spacing
+                            processed, fold=fold, fold_error=fold_error, spacing_lines=spacing, tool_title_index=processed_tool_title_index
                         )
                     except Exception as e:
                         self.logger.error(f"Error appending content to buffer: {e}")
@@ -590,7 +597,7 @@ class BufferManager:
             self.logger.error(f"Error in append_content: {e}")
             # Don't re-raise to prevent cascading errors during error handling
 
-    def _append_and_scroll(self, processed, fold=False, fold_error=False, spacing_lines=0):
+    def _append_and_scroll(self, processed, fold=False, fold_error=False, spacing_lines=0, tool_title_index=None):
         """Helper to append lines and autoscroll content buffer.
 
         Args:
@@ -598,6 +605,7 @@ class BufferManager:
             fold: If True, create a fold for the appended lines
             fold_error: If True, highlight the fold header as an error (red)
             spacing_lines: Number of blank lines prepended for spacing (fold should skip these)
+            tool_title_index: Index in processed list where tool title is (for icon placement)
         """
         try:
             if (
@@ -634,6 +642,7 @@ class BufferManager:
 
             # Get the new line count (end of appended content)
             end_line = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
+            self.logger.info(f"_append_and_scroll: start_line={start_line} (0-indexed), end_line={end_line} (1-indexed), spacing_lines={spacing_lines}, processed_len={len(processed)}")
 
             # Highlight file references in appended lines (higher priority overrides Special)
             self._highlight_file_refs(start_line, end_line)
@@ -645,11 +654,38 @@ class BufferManager:
             # This ensures the window is positioned correctly after folding
             if fold and len(processed) > 1:
                 bufnr = self.content_buf.number
-                # start_line is 0-indexed count, so +1 for 1-indexed vim line
-                # Skip spacing_lines so fold starts at actual content, not blank lines
-                fold_start = start_line + 1 + spacing_lines
+                # Calculate tool title row (0-indexed)
+                # If tool_title_index is provided, use it directly
+                # Otherwise, find first non-empty line (fallback)
+                if tool_title_index is not None and tool_title_index < len(processed):
+                    # tool_title_index is the index in processed list (already accounts for spacing)
+                    # Lines are appended starting at start_line (0-indexed)
+                    tool_title_row = start_line + tool_title_index  # 0-indexed
+                    # Verify this is actually the tool title line
+                    try:
+                        verify_line = self.nvim.api.buf_get_lines(self.content_buf, tool_title_row, tool_title_row + 1, False)
+                        if verify_line and verify_line[0]:
+                            self.logger.info(f"Tool title at row {tool_title_row}: '{verify_line[0][:50]}'")
+                    except Exception:
+                        pass
+                else:
+                    # Fallback: find first non-empty line
+                    tool_title_row = start_line + spacing_lines  # 0-indexed
+                    for i in range(start_line, end_line):
+                        try:
+                            line = self.nvim.api.buf_get_lines(self.content_buf, i, i + 1, False)
+                            if line and line[0] and line[0].strip():
+                                tool_title_row = i
+                                self.logger.info(f"Found tool title at row {i}: '{line[0][:50]}'")
+                                break
+                        except Exception:
+                            pass
+                
+                # Fold start (1-indexed): tool_title_row + 1
+                fold_start = tool_title_row + 1  # 1-indexed for fold
                 fold_end = end_line
-                self._create_fold(bufnr, fold_start, fold_end, fold_error=fold_error)
+                self.logger.info(f"Creating fold: start={fold_start}, end={fold_end}, tool_title_row={tool_title_row} (0-indexed), start_line={start_line}, end_line={end_line}")
+                self._create_fold(bufnr, fold_start, fold_end, fold_error=fold_error, tool_title_row=tool_title_row)
 
         except Exception as e:
             self.logger.error(f"Error writing to buffer in _append_and_scroll: {e}")
@@ -696,24 +732,47 @@ class BufferManager:
             except Exception:
                 pass
 
-    def _create_fold(self, bufnr, start_line, end_line, fold_error=False):
+    def _create_fold(self, bufnr, start_line, end_line, fold_error=False, tool_title_row=None):
         """Create a fold in the buffer.
 
         Args:
             bufnr: Buffer number
-            start_line: Start line (1-indexed)
-            end_line: End line (1-indexed)
+            start_line: Start line (1-indexed) for fold
+            end_line: End line (1-indexed) for fold
             fold_error: If True, highlight the fold header as an error (red)
+            tool_title_row: Row number (0-indexed) where tool title is (for icon placement)
         """
         try:
+            # Use tool_title_row if provided (0-indexed), otherwise calculate from start_line
+            # start_line is 1-indexed, convert to 0-indexed
+            title_row = tool_title_row if tool_title_row is not None else (start_line - 1)
+            self.logger.info(f"_create_fold called: bufnr={bufnr}, start_line={start_line} (1-indexed), end_line={end_line} (1-indexed), tool_title_row param={tool_title_row}, calculated title_row={title_row} (0-indexed)")
+            # Verify end_line is correct
+            if end_line < start_line:
+                self.logger.error(f"ERROR: end_line ({end_line}) < start_line ({start_line})!")
+                return
+            
             # Add highlight to the first line (tool output title)
             # Use ErrorMsg for errors, OkMsg for success
-            # start_line is 1-indexed, nvim_buf_add_highlight uses 0-indexed
+            # title_row is 0-indexed, nvim_buf_add_highlight uses 0-indexed
             highlight_group = "ErrorMsg" if fold_error else "OkMsg"
             self.nvim.api.buf_add_highlight(
-                bufnr, -1, highlight_group, start_line - 1, 0, -1
+                bufnr, -1, highlight_group, title_row, 0, -1
             )
 
+            # Add virtual text with icon at the right edge (like edit view toolbar)
+            # Use same Nerd Font icons as edit_view.lua for consistency
+            # ICON_APPLIED = "✓" (U+F05D), ICON_REJECTED = "✗" (U+F05C)
+            if fold_error:
+                icon = "✗"  # Nerd Font X mark (U+F05C)
+            else:
+                icon = "✓"  # Nerd Font checkmark (U+F05D)
+            icon_hl = "ErrorMsg" if fold_error else "OkMsg"
+            
+            # Use extmark with virtual text positioned at right edge
+            # Create synchronously right after writing lines (exactly like edit_view.lua)
+            # Match edit_view.lua line 348: vim.api.nvim_buf_set_extmark(bufnr, ns_id, header_row, 0, {...})
+            # Create fold first, then add icon extmark (order matters)
             self.nvim.exec_lua(
                 "require('agent_nvim.folds').create_fold(...)",
                 bufnr,
@@ -721,6 +780,30 @@ class BufferManager:
                 end_line,
                 None,
             )
+            
+            # Add debugging to see what's happening
+            end_row_0_indexed = end_line - 1
+            # Log exact values
+            self.logger.info(f"Creating tool fold icon: bufnr={bufnr}, title_row={title_row}, end_row_0_indexed={end_row_0_indexed}, icon={icon!r}, icon_hl={icon_hl}")
+            
+            # Use Python API directly instead of Lua to avoid argument passing issues
+            # Create extmark with virtual text at right edge
+            # Format: virt_text is list of [text, highlight] pairs
+            try:
+                extmark_id = self.nvim.api.buf_set_extmark(
+                    bufnr,
+                    self._tool_fold_ns,
+                    title_row,  # 0-indexed row
+                    0,  # Column 0
+                    {
+                        "virt_text": [[f" {icon} ", icon_hl]],
+                        "virt_text_pos": "right_align",
+                        "end_row": end_row_0_indexed,  # 0-indexed end row
+                    },
+                )
+                self.logger.info(f"Created tool fold icon extmark id={extmark_id} on row {title_row} using Python API")
+            except Exception as e:
+                self.logger.error(f"Error creating tool fold icon extmark: {e}")
         except Exception as e:
             self.logger.error(f"Error creating fold: {e}")
 
