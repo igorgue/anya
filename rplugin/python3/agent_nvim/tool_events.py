@@ -282,7 +282,7 @@ def display_tool_result(
                                         [
                                             "> Edits auto-applied (press **2** to undo)",
                                         ],
-                                        content_type='llm'
+                                        content_type="llm",
                                     )
                                     logger.info("YOLO: Edits applied successfully")
                                     try:
@@ -304,7 +304,7 @@ def display_tool_result(
                                         [
                                             ">   Edits failed to apply - LLM will retry",
                                         ],
-                                        content_type='llm'
+                                        content_type="llm",
                                     )
                                     logger.warning("YOLO: Edits failed to apply")
 
@@ -409,7 +409,13 @@ def display_tool_result(
         def append_and_resume():
             try:
                 # Pass tool_title_index=0 to indicate the tool title is at index 0 in output_lines
-                append_content_fn(output_lines, fold=True, fold_error=is_error, content_type='tool', tool_title_index=0)
+                append_content_fn(
+                    output_lines,
+                    fold=True,
+                    fold_error=is_error,
+                    content_type="tool",
+                    tool_title_index=0,
+                )
             except Exception as e:
                 logger.error(f"Error appending tool result to buffer: {e}")
                 # Try to append a simple error message
@@ -420,7 +426,9 @@ def display_tool_result(
                         f"Failed to display {tool_name} result: {e}",
                         "``````",
                     ]
-                    append_content_fn(simple_error, fold=True, fold_error=True, content_type='tool')
+                    append_content_fn(
+                        simple_error, fold=True, fold_error=True, content_type="tool"
+                    )
                 except Exception as e2:
                     logger.error(f"Even simple error display failed: {e2}")
 
@@ -428,11 +436,11 @@ def display_tool_result(
             # This is safe because:
             # - If next is LLM text: will see _last_output_type='tool' and add spacing
             # - If next is tool: uses append_content with content_type='tool', not streaming
-            if hasattr(append_content_fn, '__self__'):
+            if hasattr(append_content_fn, "__self__"):
                 buffer_manager = append_content_fn.__self__
-                if hasattr(buffer_manager, '_agent_response_started'):
+                if hasattr(buffer_manager, "_agent_response_started"):
                     buffer_manager._agent_response_started = False
-            
+
             # Resume streaming after tool output is written
             try:
                 nvim.exec_lua("_G.agent_stream_paused = false")

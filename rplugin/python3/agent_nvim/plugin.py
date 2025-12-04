@@ -225,7 +225,7 @@ class AgentPlugin(object):
                     "> **Context compacted successfully**",
                     "Conversation reduced to essential context.",
                 ],
-                content_type='llm'
+                content_type="llm",
             )
 
             self.logger.info("Applied compacted context to conversation")
@@ -1173,7 +1173,7 @@ class AgentPlugin(object):
                         "Basic fallback compaction is available with limited functionality.",
                         "For full features, run `:AgentInstall` and check your OpenAI API key.",
                     ],
-                    content_type='llm'
+                    content_type="llm",
                 )
                 return
 
@@ -1191,7 +1191,7 @@ class AgentPlugin(object):
                             "  **Invalid token count**",
                             "Please provide a valid number for --tokens parameter.",
                         ],
-                        content_type='llm'
+                        content_type="llm",
                     )
                     return
             elif instructions and self.compact_agent:
@@ -1681,7 +1681,9 @@ class AgentPlugin(object):
 
         # Append user message (show original text to user)
         # Let spacing state machine handle leading blank lines based on _last_output_type
-        self.buffer_manager.append_content([f"# {username}", "", text], content_type='user')
+        self.buffer_manager.append_content(
+            [f"# {username}", "", text], content_type="user"
+        )
 
         # Add user message to conversation history
         self._conversation_history.append({"role": "user", "content": resolved_text})
