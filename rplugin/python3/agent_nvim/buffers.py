@@ -627,6 +627,25 @@ class BufferManager:
                 def wrapped_append():
                     """Append and scroll."""
                     try:
+                        # Defensive check: if we're about to write tool content and there's an empty thinking section, cancel it
+                        if (
+                            content_type == "tool"
+                            and hasattr(self, "_thinking_start_line")
+                            and self._thinking_start_line
+                        ):
+                            thinking_has_content = getattr(
+                                self, "_thinking_has_content", False
+                            )
+                            if not thinking_has_content:
+                                self.logger.info(
+                                    "Defensive check: cancelling empty thinking section before writing tool content"
+                                )
+                                content_bufnr = (
+                                    self.content_buf.number
+                                    if self.content_buf and self.content_buf.valid
+                                    else -1
+                                )
+                                self.cancel_empty_thinking_section(content_bufnr)
                         # Calculate tool_title_index in processed list
                         # If tool_title_index was provided, add spacing to account for prepended blank lines
                         processed_tool_title_index = None
@@ -1077,12 +1096,18 @@ class BufferManager:
     def init_thinking_section(self, bufnr):
         """Initialize thinking section with header and opening code fence.
 
+        IMPORTANT: This function writes the header SYNCHRONOUSLY (blocking) to ensure it
+        appears before any streamed content. Uses threading.Event to wait for the
+        async_call to complete before returning.
+
         Args:
             bufnr: Buffer number
 
         Returns:
             Start line number (1-indexed) where thinking section begins
         """
+        import threading
+
         # Calculate spacing based on what came before
         spacing = self._calculate_spacing("thinking")
 
@@ -1092,42 +1117,90 @@ class BufferManager:
             header_lines.append("")
         header_lines.extend(["**thinking**", "``````"])
 
-        # Append header and get start line
-        # Note: This is called from async context, use async_call for thread safety
-        try:
+        # Initialize state BEFORE any buffer operations
+        self._thinking_has_content = False
+        self._thinking_fence_written = False
 
-            def init_sync():
+        # Use threading.Event to make the write synchronous
+        write_done = threading.Event()
+        start_line_result = [None]  # Use list to allow modification in closure
+        error_result = [None]
+
+        def do_init():
+            try:
                 current_lines = self.nvim.api.buf_get_lines(
                     self.content_buf, 0, -1, False
                 )
-                start_line = len(current_lines)
+                num_lines_before = len(current_lines)
 
-                # Append header
+                # Write header to buffer FIRST
                 self.nvim.api.buf_set_lines(
                     self.content_buf, -1, -1, False, header_lines
                 )
 
+                # Get all lines after appending to see what happened
+                all_lines_after = self.nvim.api.buf_get_lines(
+                    self.content_buf, 0, -1, False
+                )
+                num_lines_after = len(all_lines_after)
+
+                # Find where **thinking** actually is
+                thinking_actual_line = None
+                for i, line in enumerate(all_lines_after):
+                    if "**thinking**" in line:
+                        thinking_actual_line = i + 1  # Convert to 1-indexed
+                        break
+
+                # The **thinking** line should be at: num_lines_before + spacing + 1 (1-indexed)
+                # But let's use the actual position we found
+                if thinking_actual_line:
+                    start_line = thinking_actual_line
+                else:
+                    # Fallback to calculated position
+                    start_line = num_lines_before + spacing + 1
+
+                start_line_result[0] = start_line
+                self._thinking_start_line = start_line
+
                 # Update state
                 self._last_output_type = "thinking"
 
-                # Store thinking start line for fold creation
-                self._thinking_start_line = start_line + 1  # 1-indexed
+                # Log detailed info
+                self.logger.info(
+                    f"Thinking section initialized: lines_before={num_lines_before}, lines_after={num_lines_after}, "
+                    f"spacing={spacing}, header_lines={header_lines}, "
+                    f"calculated_line={num_lines_before + spacing + 1}, actual_thinking_line={thinking_actual_line}, "
+                    f"using start_line={start_line} (1-indexed)"
+                )
+                # Log last few lines of buffer for debugging
+                if num_lines_after > 0:
+                    last_lines = all_lines_after[max(0, num_lines_before - 2) :]
+                    self.logger.info(
+                        f"Buffer lines from {max(0, num_lines_before - 2)} onwards: {last_lines}"
+                    )
+            except Exception as e:
+                self.logger.error(f"Error in do_init: {e}")
+                import traceback
 
-            # Execute in main thread
-            self.nvim.async_call(init_sync)
+                self.logger.error(traceback.format_exc())
+                error_result[0] = e
+            finally:
+                write_done.set()
 
-            # Calculate start line now (before async append happens)
-            # We'll get the current line count and add spacing + header lines
-            current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
-            start_line = (
-                len(current_lines) + spacing + 1
-            )  # +1 for 1-indexed, spacing already accounted
-            self._thinking_start_line = start_line
+        # Execute in main thread and WAIT for completion
+        self.nvim.async_call(do_init)
 
-            return start_line
-        except Exception as e:
-            self.logger.error(f"Error initializing thinking section: {e}")
+        # Wait for the write to complete (with timeout)
+        if not write_done.wait(timeout=2.0):
+            self.logger.error("Timeout waiting for thinking header write")
+            self._thinking_start_line = None
             return None
+
+        if error_result[0]:
+            self._thinking_start_line = None
+            return None
+
+        return start_line_result[0]
 
     def stream_thinking_content(self, text, bufnr):
         """Stream thinking content incrementally using Lua animation.
@@ -1138,6 +1211,9 @@ class BufferManager:
         """
         if not text:
             return
+
+        # Mark that thinking content has been streamed
+        self._thinking_has_content = True
 
         # Escape text for Lua string
         escaped_text = (
@@ -1270,6 +1346,149 @@ class BufferManager:
         except Exception as e:
             self.logger.error(f"Error capturing thinking end line: {e}")
 
+    def cancel_empty_thinking_section(self, bufnr):
+        """Cancel/remove an empty thinking section that was initialized but never had content.
+
+        This removes the thinking header and opening fence if no content was streamed.
+        Uses the stored _thinking_start_line to directly find and remove the section.
+
+        IMPORTANT: This function checks the actual buffer content to verify the section
+        is truly empty before removing. This prevents removing the header/fence when
+        content was streamed asynchronously via Lua.
+
+        Args:
+            bufnr: Buffer number
+        """
+        try:
+            if (
+                not hasattr(self, "_thinking_start_line")
+                or not self._thinking_start_line
+            ):
+                return  # No thinking section to cancel
+
+            current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+
+            # _thinking_start_line is 1-indexed, pointing to the "**thinking**" line
+            # Convert to 0-indexed for buffer operations
+            header_line_0 = self._thinking_start_line - 1
+
+            if header_line_0 < 0 or header_line_0 >= len(current_lines):
+                self.logger.warning(
+                    f"Thinking start line {self._thinking_start_line} is out of bounds"
+                )
+                # Clear state and return
+                self._clear_thinking_state()
+                return
+
+            # Verify this is actually the thinking header
+            header_line = current_lines[header_line_0]
+            if "**thinking**" not in header_line:
+                self.logger.warning(
+                    f"Expected thinking header at line {header_line_0}, found: {header_line}"
+                )
+                # Clear state and return
+                self._clear_thinking_state()
+                return
+
+            # Find the opening fence line (should be right after header)
+            fence_line_0 = None
+            for i in range(1, min(4, len(current_lines) - header_line_0)):
+                check_line_0 = header_line_0 + i
+                if check_line_0 < len(current_lines):
+                    line = current_lines[check_line_0]
+                    if "``````" in line or "```" in line:
+                        fence_line_0 = check_line_0
+                        break
+
+            if fence_line_0 is None:
+                self.logger.warning(
+                    "Thinking fence not found after header, aborting cancel"
+                )
+                self._clear_thinking_state()
+                return
+
+            # CRITICAL: Check if there's any content AFTER the opening fence
+            # If there is content, we should NOT cancel - the section has content
+            # that was streamed via Lua asynchronously
+            content_after_fence = False
+            for i in range(fence_line_0 + 1, len(current_lines)):
+                line = current_lines[i]
+                # Skip blank lines
+                if line.strip() == "":
+                    continue
+                # If we find a closing fence, stop checking
+                if "``````" in line or (
+                    line.strip().startswith("```") and len(line.strip()) <= 6
+                ):
+                    break
+                # Found actual content
+                content_after_fence = True
+                self.logger.info(
+                    f"Found content after opening fence at line {i}: '{line[:50]}...'"
+                )
+                break
+
+            if content_after_fence:
+                self.logger.info(
+                    "Thinking section has content in buffer, NOT cancelling - will finalize instead"
+                )
+                # Don't cancel - there's content. Set the flag so finalize knows there's content.
+                self._thinking_has_content = True
+                # Don't clear state - let the caller continue to finalize
+                return
+
+            # Find spacing lines before the header (blank lines)
+            spacing_start = header_line_0
+            while spacing_start > 0:
+                if current_lines[spacing_start - 1].strip() == "":
+                    spacing_start -= 1
+                else:
+                    break
+
+            remove_end = fence_line_0 + 1  # After the fence line
+
+            # Also remove any trailing blank lines after the fence
+            while remove_end < len(current_lines):
+                if current_lines[remove_end].strip() == "":
+                    remove_end += 1
+                else:
+                    break
+
+            # Remove from spacing_start through fence (and trailing blanks)
+            self.logger.info(
+                f"Cancelling empty thinking section: removing lines {spacing_start} to {remove_end} (0-indexed), header at {header_line_0}"
+            )
+            if remove_end > spacing_start:
+                self.nvim.api.buf_set_lines(
+                    self.content_buf,
+                    spacing_start,
+                    remove_end,
+                    False,
+                    [],
+                )
+
+            # Clear thinking tracking state
+            self._clear_thinking_state()
+
+        except Exception as e:
+            self.logger.error(f"Error cancelling empty thinking section: {e}")
+            import traceback
+
+            self.logger.error(traceback.format_exc())
+            # Clear state even on error
+            self._clear_thinking_state()
+
+    def _clear_thinking_state(self):
+        """Clear all thinking-related tracking state."""
+        if hasattr(self, "_thinking_start_line"):
+            delattr(self, "_thinking_start_line")
+        if hasattr(self, "_thinking_end_line"):
+            delattr(self, "_thinking_end_line")
+        if hasattr(self, "_thinking_fence_written"):
+            delattr(self, "_thinking_fence_written")
+        if hasattr(self, "_thinking_has_content"):
+            delattr(self, "_thinking_has_content")
+
     def finalize_thinking_section(self, bufnr):
         """Finalize thinking section by creating fold and adding blank line.
 
@@ -1284,6 +1503,28 @@ class BufferManager:
         finalize_thinking() which is already wrapped in async_call).
         """
         try:
+            # Check if thinking section has any actual content
+            # First check the flag, but also verify by checking buffer content
+            # This handles the case where content was streamed via Lua async queue
+            thinking_has_content = getattr(self, "_thinking_has_content", False)
+
+            # If flag says no content, double-check by looking at the buffer
+            # The cancel function will check buffer and either:
+            # 1. Cancel if truly empty (clears state)
+            # 2. Set _thinking_has_content=True if content found (keeps state for finalization)
+            if not thinking_has_content:
+                self.logger.info(
+                    "Thinking flag says empty, attempting cancel (will verify buffer)"
+                )
+                self.cancel_empty_thinking_section(bufnr)
+                # Re-check the flag - cancel may have set it to True if content was found
+                thinking_has_content = getattr(self, "_thinking_has_content", False)
+                if not thinking_has_content:
+                    # Section was truly empty and was cancelled, or state was cleared
+                    return
+                # Content was found, continue to finalize
+                self.logger.info("Content was found in buffer, continuing to finalize")
+
             # Check if fence was already written by caller
             fence_already_written = getattr(self, "_thinking_fence_written", False)
 
@@ -1350,12 +1591,7 @@ class BufferManager:
             self._last_output_type = "thinking"
 
             # Clear thinking tracking state
-            if hasattr(self, "_thinking_start_line"):
-                delattr(self, "_thinking_start_line")
-            if hasattr(self, "_thinking_end_line"):
-                delattr(self, "_thinking_end_line")
-            if hasattr(self, "_thinking_fence_written"):
-                delattr(self, "_thinking_fence_written")
+            self._clear_thinking_state()
         except Exception as e:
             self.logger.error(f"Error finalizing thinking section: {e}")
             import traceback

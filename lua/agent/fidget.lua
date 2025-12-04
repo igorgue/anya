@@ -33,6 +33,8 @@ function M:init()
       if handle then
         if event.data.message == "thinking" then
           handle.message = "thinking"
+        elseif event.data.message == "responding" then
+          handle.message = "responding"
         else
           handle.message = event.data.message or "calling tool"
         end

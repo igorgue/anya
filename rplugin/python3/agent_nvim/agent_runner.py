@@ -353,6 +353,7 @@ async def run_agent(
                 return
 
             thinking_finalizing = True
+            thinking_initialized = False  # Set immediately to prevent re-entry
             logger.info("Synchronously finalizing thinking before tool")
 
             finalization_done = threading.Event()
@@ -365,10 +366,18 @@ async def run_agent(
                         and buffer_manager.content_buf.valid
                         else -1
                     )
+
+                    if content_bufnr_local == -1:
+                        logger.warning(
+                            "Content buffer invalid during thinking finalization"
+                        )
+                        return
+
                     # Stop timer and flush queue
                     nvim.exec_lua(
                         """
                         if _G.agent_stream_timer then _G.agent_stream_timer:stop(); _G.agent_stream_timer = nil end
+                        _G.agent_stream_paused = true
                         if _G.agent_stream_queue then
                             for _, item in ipairs(_G.agent_stream_queue) do
                                 if vim.api.nvim_buf_is_valid(item.bufnr) and item.text ~= "" then
@@ -381,6 +390,7 @@ async def run_agent(
                         end
                         """
                     )
+
                     # Write any buffered thinking content
                     if thinking_finalize_buffer:
                         buffered_text = "".join(thinking_finalize_buffer)
@@ -392,7 +402,48 @@ async def run_agent(
                             nvim.api.buf_set_lines(
                                 buffer_manager.content_buf, len(cl), len(cl), False, tl
                             )
+                            # Mark that thinking content was streamed
+                            buffer_manager._thinking_has_content = True
                         thinking_finalize_buffer.clear()
+
+                    # Check if thinking section has any content
+                    thinking_has_content = getattr(
+                        buffer_manager, "_thinking_has_content", False
+                    )
+                    has_thinking_start = (
+                        hasattr(buffer_manager, "_thinking_start_line")
+                        and buffer_manager._thinking_start_line
+                    )
+                    logger.info(
+                        f"Checking thinking section: has_content={thinking_has_content}, has_start={has_thinking_start}"
+                    )
+
+                    if not has_thinking_start:
+                        # No thinking section to finalize
+                        logger.info("No thinking section to finalize")
+                        return
+
+                    if not thinking_has_content:
+                        # Flag says empty, but let cancel_empty_thinking_section verify
+                        # It will check the actual buffer content and either:
+                        # 1. Cancel if truly empty
+                        # 2. Set _thinking_has_content=True if content found in buffer
+                        logger.info(
+                            "Thinking flag says empty, attempting cancel (will verify buffer)"
+                        )
+                        buffer_manager.cancel_empty_thinking_section(
+                            content_bufnr_local
+                        )
+                        # Re-check - cancel may have found content and set the flag
+                        thinking_has_content = getattr(
+                            buffer_manager, "_thinking_has_content", False
+                        )
+                        if not thinking_has_content:
+                            # Truly empty and cancelled
+                            buffer_manager._agent_response_started = False
+                            return
+                        # Content was found, continue to finalize
+                        logger.info("Content found in buffer, continuing to finalize")
 
                     # Capture end line and write fence IMMEDIATELY
                     cl = nvim.api.buf_get_lines(
@@ -407,7 +458,12 @@ async def run_agent(
                     # Create fold and add blank line
                     buffer_manager.finalize_thinking_section(content_bufnr_local)
                     buffer_manager._agent_response_started = False
-                    logger.info("Thinking finalization complete")
+                    logger.info("Thinking finalization complete (sync)")
+                except Exception as e:
+                    logger.error(f"Error in finalize_thinking_sync: {e}")
+                    import traceback
+
+                    logger.error(traceback.format_exc())
                 finally:
                     finalization_done.set()
 
@@ -415,7 +471,11 @@ async def run_agent(
             # Wait for finalization to complete (up to 2 seconds)
             if not finalization_done.wait(timeout=2.0):
                 logger.warning("Thinking finalization timed out!")
-            thinking_initialized = False
+                # Clear thinking state on timeout to prevent issues
+                if hasattr(buffer_manager, "_thinking_start_line"):
+                    delattr(buffer_manager, "_thinking_start_line")
+                if hasattr(buffer_manager, "_thinking_has_content"):
+                    delattr(buffer_manager, "_thinking_has_content")
 
         logger.info(f"Starting to iterate over stream events")
         logger.info(f"result_stream type: {type(result_stream)}")
@@ -490,14 +550,20 @@ async def run_agent(
 
                 # Debug: Log all data types in responses
                 logger.info(f"Responses data type: {data_type}")
-                
+
                 # Enhanced debug logging for OpenRouter thinking content detection
                 if event_count <= 20:
                     # Log all data attributes for first 20 events
                     if hasattr(data, "__dict__"):
                         logger.info(f"Data attributes: {data.__dict__.keys()}")
                         # Log specific attributes that might indicate thinking content
-                        for attr in ['type', 'content_type', 'index', 'content_index', 'part']:
+                        for attr in [
+                            "type",
+                            "content_type",
+                            "index",
+                            "content_index",
+                            "part",
+                        ]:
                             if hasattr(data, attr):
                                 logger.info(f"  {attr}: {getattr(data, attr)}")
                         # Log full dict for analysis
@@ -508,30 +574,43 @@ async def run_agent(
                 # Process text output events
                 if data_type == "ResponseTextDeltaEvent":
                     delta = data.delta
-                    
+
                     # Check for OpenRouter thinking content type
                     # OpenRouter may use 'type', 'content_type', or 'index' to indicate thinking
                     is_thinking_content = False
-                    content_type_attr = getattr(data, 'type', None) or getattr(data, 'content_type', None)
-                    content_index = getattr(data, 'index', None) or getattr(data, 'content_index', None)
-                    
+                    content_type_attr = getattr(data, "type", None) or getattr(
+                        data, "content_type", None
+                    )
+                    content_index = getattr(data, "index", None) or getattr(
+                        data, "content_index", None
+                    )
+
                     # Log thinking content detection
                     if event_count <= 20:
-                        logger.info(f"ResponseTextDeltaEvent - checking for thinking: type={content_type_attr}, index={content_index}")
-                    
+                        logger.info(
+                            f"ResponseTextDeltaEvent - checking for thinking: type={content_type_attr}, index={content_index}"
+                        )
+
                     # Detect thinking content by type attribute
-                    if content_type_attr and 'thinking' in str(content_type_attr).lower():
+                    if (
+                        content_type_attr
+                        and "thinking" in str(content_type_attr).lower()
+                    ):
                         is_thinking_content = True
-                        logger.info(f"Thinking content detected via type attribute: {content_type_attr}")
-                    
+                        logger.info(
+                            f"Thinking content detected via type attribute: {content_type_attr}"
+                        )
+
                     # Handle thinking content - route to thinking handler
                     if is_thinking_content and delta:
                         # If finalizing, buffer content instead of streaming it
                         if thinking_finalizing:
-                            logger.debug("Buffering thinking delta (from ResponseTextDeltaEvent) - finalization in progress")
+                            logger.debug(
+                                "Buffering thinking delta (from ResponseTextDeltaEvent) - finalization in progress"
+                            )
                             thinking_finalize_buffer.append(delta)
                             continue
-                        
+
                         # Initialize thinking section on first delta
                         if not thinking_initialized:
                             content_bufnr = (
@@ -541,8 +620,10 @@ async def run_agent(
                             )
                             buffer_manager.init_thinking_section(content_bufnr)
                             thinking_initialized = True
-                            logger.info("Thinking section initialized (from ResponseTextDeltaEvent thinking content)")
-                        
+                            logger.info(
+                                "Thinking section initialized (from ResponseTextDeltaEvent thinking content)"
+                            )
+
                         # Stream thinking content
                         content_bufnr = (
                             buffer_manager.content_buf.handle
@@ -552,7 +633,7 @@ async def run_agent(
                         buffer_manager.stream_thinking_content(delta, content_bufnr)
                         logger.debug(f"Streaming thinking delta: {len(delta)} chars")
                         continue
-                    
+
                     if delta:
                         # Flush thinking content BEFORE the first LLM text delta
                         # This ensures thinking appears before the response
@@ -820,7 +901,9 @@ async def run_agent(
                                         )
                                         # Write any buffered LLM deltas that arrived during finalization
                                         if llm_finalize_buffer:
-                                            logger.debug(f"Writing {len(llm_finalize_buffer)} buffered LLM deltas")
+                                            logger.debug(
+                                                f"Writing {len(llm_finalize_buffer)} buffered LLM deltas"
+                                            )
                                             for buffered_delta in llm_finalize_buffer:
                                                 buffer_manager.append_stream_lua_direct(
                                                     buffered_delta, content_bufnr
@@ -838,7 +921,9 @@ async def run_agent(
                             thinking_initialized = False
                         elif thinking_finalizing:
                             # Finalization in progress, buffer LLM content
-                            logger.debug("Buffering LLM delta - thinking finalization in progress")
+                            logger.debug(
+                                "Buffering LLM delta - thinking finalization in progress"
+                            )
                             llm_finalize_buffer.append(delta)
                         else:
                             # No thinking content, append LLM text normally
@@ -848,14 +933,17 @@ async def run_agent(
 
                 # Process reasoning/thinking text events (for reasoning models like o1, glm-4, etc.)
                 # Also check for OpenRouter-specific thinking event types
-                elif data_type in [
-                    "ResponseReasoningSummaryTextDeltaEvent",
-                    "ResponseReasoningTextDeltaEvent",
-                    "ResponseThinkingDeltaEvent",  # Potential OpenRouter thinking event
-                    "ResponseThinkingTextDeltaEvent",  # Potential OpenRouter thinking event
-                ]:
+                elif (
+                    data_type
+                    in [
+                        "ResponseReasoningSummaryTextDeltaEvent",
+                        "ResponseReasoningTextDeltaEvent",
+                        "ResponseThinkingDeltaEvent",  # Potential OpenRouter thinking event
+                        "ResponseThinkingTextDeltaEvent",  # Potential OpenRouter thinking event
+                    ]
+                ):
                     logger.info(f"Thinking/reasoning event detected: {data_type}")
-                    delta = getattr(data, 'delta', None) or getattr(data, 'text', None)
+                    delta = getattr(data, "delta", None) or getattr(data, "text", None)
                     if delta:
                         logger.info(f"Thinking delta received: {len(delta)} chars")
                         # If finalizing, buffer content instead of streaming it
@@ -875,7 +963,9 @@ async def run_agent(
                             )
                             buffer_manager.init_thinking_section(content_bufnr)
                             thinking_initialized = True
-                            logger.info(f"Thinking section initialized (from {data_type})")
+                            logger.info(
+                                f"Thinking section initialized (from {data_type})"
+                            )
 
                         # Stream the delta immediately
                         content_bufnr = (
@@ -885,24 +975,34 @@ async def run_agent(
                         )
                         buffer_manager.stream_thinking_content(delta, content_bufnr)
                         logger.debug(f"Streaming thinking delta: {len(delta)} chars")
-                
+
                 # Handle ResponseContentPartDeltaEvent - OpenRouter may use this for multi-part content
                 elif data_type == "ResponseContentPartDeltaEvent":
                     logger.info(f"ResponseContentPartDeltaEvent detected")
                     # Check for thinking content in part
-                    part = getattr(data, 'part', None)
-                    part_type = getattr(part, 'type', None) if part else getattr(data, 'type', None)
+                    part = getattr(data, "part", None)
+                    part_type = (
+                        getattr(part, "type", None)
+                        if part
+                        else getattr(data, "type", None)
+                    )
                     logger.info(f"  part_type: {part_type}, part: {part}")
-                    
-                    if part_type and 'thinking' in str(part_type).lower():
-                        delta = getattr(data, 'delta', None) or getattr(part, 'text', None) or getattr(data, 'text', None)
+
+                    if part_type and "thinking" in str(part_type).lower():
+                        delta = (
+                            getattr(data, "delta", None)
+                            or getattr(part, "text", None)
+                            or getattr(data, "text", None)
+                        )
                         if delta:
-                            logger.info(f"Thinking content from ResponseContentPartDeltaEvent: {len(delta)} chars")
+                            logger.info(
+                                f"Thinking content from ResponseContentPartDeltaEvent: {len(delta)} chars"
+                            )
                             # If finalizing, buffer content
                             if thinking_finalizing:
                                 thinking_finalize_buffer.append(delta)
                                 continue
-                            
+
                             # Initialize thinking section if needed
                             if not thinking_initialized:
                                 content_bufnr = (
@@ -912,8 +1012,10 @@ async def run_agent(
                                 )
                                 buffer_manager.init_thinking_section(content_bufnr)
                                 thinking_initialized = True
-                                logger.info("Thinking section initialized (from ResponseContentPartDeltaEvent)")
-                            
+                                logger.info(
+                                    "Thinking section initialized (from ResponseContentPartDeltaEvent)"
+                                )
+
                             # Stream thinking content
                             content_bufnr = (
                                 buffer_manager.content_buf.handle
