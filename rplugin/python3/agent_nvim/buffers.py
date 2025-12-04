@@ -108,7 +108,6 @@ class BufferManager:
                 """
                 local ok_hl = vim.api.nvim_get_hl(0, { name = "OkMsg", link = false })
                 local err_hl = vim.api.nvim_get_hl(0, { name = "ErrorMsg", link = false })
-                
                 -- Create transparent versions - explicitly set bg to nil for transparency
                 vim.api.nvim_set_hl(0, "AgentToolFoldOk", {
                     fg = ok_hl.fg,
@@ -116,6 +115,10 @@ class BufferManager:
                 })
                 vim.api.nvim_set_hl(0, "AgentToolFoldError", {
                     fg = err_hl.fg,
+                    bg = nil,  -- Explicitly nil for transparency
+                })
+                vim.api.nvim_set_hl(0, "AgentToolFoldThinking", {
+                    fg = ok_hl.fg,  -- Use same color as OkMsg
                     bg = nil,  -- Explicitly nil for transparency
                 })
                 """
@@ -863,45 +866,46 @@ class BufferManager:
                 None,
             )
 
-            # Only add icons for tool folds, not thinking folds
-            if content_type != "thinking":
-                # Add virtual text with icon at the right edge (like edit view toolbar)
-                # Use same Nerd Font icons as edit_view.lua for consistency
-                if fold_error:
-                    icon = ""  # x mark
-                else:
-                    icon = ""  # ok mark
-                # Use transparent highlight groups for icons
-                icon_hl = "AgentToolFoldError" if fold_error else "AgentToolFoldOk"
+            # Add virtual text with icon at the right edge (like edit view toolbar)
+            # Use same Nerd Font icons as edit_view.lua for consistency
+            if content_type == "thinking":
+                icon = "󰧑"  # thinking/brain icon
+                icon_hl = "AgentToolFoldThinking"
+            elif fold_error:
+                icon = ""  # x mark
+                icon_hl = "AgentToolFoldError"
+            else:
+                icon = ""  # ok mark
+                icon_hl = "AgentToolFoldOk"
 
-                # Add debugging to see what's happening
-                end_row_0_indexed = end_line - 1
-                # Log exact values
-                self.logger.info(
-                    f"Creating tool fold icon: bufnr={bufnr}, title_row={title_row}, end_row_0_indexed={end_row_0_indexed}, icon={icon!r}, icon_hl={icon_hl}"
+            # Add debugging to see what's happening
+            end_row_0_indexed = end_line - 1
+            # Log exact values
+            self.logger.info(
+                f"Creating fold icon: bufnr={bufnr}, title_row={title_row}, end_row_0_indexed={end_row_0_indexed}, icon={icon!r}, icon_hl={icon_hl}, content_type={content_type}"
+            )
+
+            # Use Python API directly instead of Lua to avoid argument passing issues
+            # Create extmark with virtual text at right edge
+            # Format: virt_text is list of [text, highlight] pairs
+            try:
+                extmark_id = self.nvim.api.buf_set_extmark(
+                    bufnr,
+                    self._tool_fold_ns,
+                    title_row,  # 0-indexed row
+                    0,  # Column 0
+                    {
+                        "virt_text": [[f" {icon} ", icon_hl]],
+                        "virt_text_pos": "right_align",
+                        "end_row": end_row_0_indexed,  # 0-indexed end row
+                        "hl_mode": "combine",  # Combine with existing highlights for transparency
+                    },
                 )
-
-                # Use Python API directly instead of Lua to avoid argument passing issues
-                # Create extmark with virtual text at right edge
-                # Format: virt_text is list of [text, highlight] pairs
-                try:
-                    extmark_id = self.nvim.api.buf_set_extmark(
-                        bufnr,
-                        self._tool_fold_ns,
-                        title_row,  # 0-indexed row
-                        0,  # Column 0
-                        {
-                            "virt_text": [[f" {icon} ", icon_hl]],
-                            "virt_text_pos": "right_align",
-                            "end_row": end_row_0_indexed,  # 0-indexed end row
-                            "hl_mode": "combine",  # Combine with existing highlights for transparency
-                        },
-                    )
-                    self.logger.info(
-                        f"Created tool fold icon extmark id={extmark_id} on row {title_row} using Python API"
-                    )
-                except Exception as e:
-                    self.logger.error(f"Error creating tool fold icon extmark: {e}")
+                self.logger.info(
+                    f"Created fold icon extmark id={extmark_id} on row {title_row} using Python API"
+                )
+            except Exception as e:
+                self.logger.error(f"Error creating fold icon extmark: {e}")
         except Exception as e:
             self.logger.error(f"Error creating fold: {e}")
 
@@ -1086,7 +1090,7 @@ class BufferManager:
         header_lines = []
         for _ in range(spacing):
             header_lines.append("")
-        header_lines.extend(["**Thinking**", "``````"])
+        header_lines.extend(["**thinking**", "``````"])
 
         # Append header and get start line
         # Note: This is called from async context, use async_call for thread safety

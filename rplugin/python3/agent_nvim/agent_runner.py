@@ -339,6 +339,7 @@ async def run_agent(
             False  # Flag to prevent new thinking content after finalization starts
         )
         thinking_finalize_buffer = []  # Buffer for thinking content that arrives during finalization
+        llm_finalize_buffer = []  # Buffer for LLM content that arrives during thinking finalization
 
         # Helper to finalize thinking synchronously before tool calls
         # Uses threading.Event to ensure finalization completes before returning
@@ -752,19 +753,8 @@ async def run_agent(
                                         end
                                     end
                                     
-                                    -- Flush queue initially
+                                    -- Flush queue initially (thinking content only - LLM content is buffered in Python)
                                     flush_queue()
-                                    
-                                    -- Add blank line after LLM text if it doesn't already end with one
-                                    if vim.api.nvim_buf_is_valid(content_bufnr) then
-                                        local line_count = vim.api.nvim_buf_line_count(content_bufnr)
-                                        if line_count > 0 then
-                                            local last_line = vim.api.nvim_buf_get_lines(content_bufnr, line_count - 1, line_count, false)
-                                            if #last_line > 0 and last_line[1] and last_line[1]:gsub("%s", "") ~= "" then
-                                                vim.api.nvim_buf_set_lines(content_bufnr, line_count, line_count, false, {{""}})
-                                            end
-                                        end
-                                    end
                                     
                                     _G.agent_stream_paused = true
                                     
@@ -819,11 +809,23 @@ async def run_agent(
                                     )  # Ensure all stability checks and writes complete
 
                                     def resume_streaming():
+                                        nonlocal thinking_finalizing
+                                        # Clear finalization flag FIRST to allow normal LLM streaming
+                                        thinking_finalizing = False
                                         buffer_manager._agent_response_started = False
                                         nvim.exec_lua("_G.agent_stream_paused = false")
+                                        # Write the first delta
                                         buffer_manager.append_stream_lua_direct(
                                             first_delta, content_bufnr
                                         )
+                                        # Write any buffered LLM deltas that arrived during finalization
+                                        if llm_finalize_buffer:
+                                            logger.debug(f"Writing {len(llm_finalize_buffer)} buffered LLM deltas")
+                                            for buffered_delta in llm_finalize_buffer:
+                                                buffer_manager.append_stream_lua_direct(
+                                                    buffered_delta, content_bufnr
+                                                )
+                                            llm_finalize_buffer.clear()
 
                                     nvim.async_call(resume_streaming)
 
@@ -834,6 +836,10 @@ async def run_agent(
 
                             nvim.async_call(finalize_thinking)
                             thinking_initialized = False
+                        elif thinking_finalizing:
+                            # Finalization in progress, buffer LLM content
+                            logger.debug("Buffering LLM delta - thinking finalization in progress")
+                            llm_finalize_buffer.append(delta)
                         else:
                             # No thinking content, append LLM text normally
                             buffer_manager.append_stream_lua_direct(
