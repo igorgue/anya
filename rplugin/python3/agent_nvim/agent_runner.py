@@ -331,9 +331,10 @@ async def run_agent(
         event_count = 0
         max_events = 50000  # Safety limit to prevent infinite loops
 
-        # Track thinking/reasoning content
-        thinking_buffer = []
-        thinking_active = False
+        # Track thinking/reasoning content streaming
+        thinking_initialized = False
+        thinking_finalizing = False  # Flag to prevent new thinking content after finalization starts
+        thinking_finalize_buffer = []  # Buffer for thinking content that arrives during finalization
 
         logger.info(f"Starting to iterate over stream events")
         logger.info(f"result_stream type: {type(result_stream)}")
@@ -415,26 +416,116 @@ async def run_agent(
                 if data_type == "ResponseTextDeltaEvent":
                     delta = data.delta
                     if delta:
-                        # If we have thinking content buffered, flush it first
-                        if thinking_buffer:
-                            thinking_content = "".join(thinking_buffer).strip()
-                            if (
-                                thinking_content
-                            ):  # Only show if non-empty after stripping
-                                thinking_lines = [
-                                    "**Thinking**",
-                                    "``````",
-                                    thinking_content,
-                                    "``````",
-                                    "",  # Add trailing blank line like tool outputs
-                                ]
+                        # Flush thinking content BEFORE the first LLM text delta
+                        # This ensures thinking appears before the response
+                        # The fold will be created immediately, which is fine since LLM text hasn't started yet
+                        if thinking_initialized:
+                            # Set flag IMMEDIATELY to prevent new thinking content
+                            thinking_finalizing = True
+                            
+                            # Capture delta in closure
+                            first_delta = delta
 
-                                def flush_thinking():
-                                    # Flush pending stream content and pause
-                                    content_bufnr = buffer_manager.content_buf.number if buffer_manager.content_buf and buffer_manager.content_buf.valid else -1
-                                    nvim.exec_lua(
-                                        """
-                                        local content_bufnr = ...
+                            def finalize_thinking():
+                                # Stop timer, flush pending stream content, then finalize thinking section
+                                content_bufnr = buffer_manager.content_buf.number if buffer_manager.content_buf and buffer_manager.content_buf.valid else -1
+                                
+                                def do_finalize():
+                                    import time
+                                    # Keep writing buffered content until buffer is completely stable
+                                    # We need to ensure NO more thinking content arrives
+                                    max_iterations = 20
+                                    consecutive_empty = 0
+                                    required_stable_iterations = 5  # Need 5 consecutive empty checks
+                                    
+                                    for iteration in range(max_iterations):
+                                        # Write any buffered content immediately
+                                        if thinking_finalize_buffer:
+                                            buffered_text = "".join(thinking_finalize_buffer)
+                                            # Write directly to buffer at the current end
+                                            current_lines = nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
+                                            end_line = len(current_lines)
+                                            # Split text into lines and append
+                                            text_lines = buffered_text.split("\n")
+                                            if text_lines:
+                                                nvim.api.buf_set_lines(buffer_manager.content_buf, end_line, end_line, False, text_lines)
+                                            thinking_finalize_buffer.clear()
+                                            consecutive_empty = 0  # Reset counter when we write content
+                                        else:
+                                            consecutive_empty += 1
+                                            if consecutive_empty >= required_stable_iterations:
+                                                # Buffer has been empty for required iterations
+                                                break
+                                        
+                                        time.sleep(0.1)  # Wait before next check
+                                    
+                                    # One final check and write
+                                    if thinking_finalize_buffer:
+                                        buffered_text = "".join(thinking_finalize_buffer)
+                                        current_lines = nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
+                                        end_line = len(current_lines)
+                                        text_lines = buffered_text.split("\n")
+                                        if text_lines:
+                                            nvim.api.buf_set_lines(buffer_manager.content_buf, end_line, end_line, False, text_lines)
+                                        thinking_finalize_buffer.clear()
+                                        time.sleep(0.2)  # Wait for final write
+                                    
+                                    # Keep checking and writing until buffer is truly stable
+                                    # Do multiple passes to catch any late-arriving content
+                                    for final_pass in range(3):
+                                        time.sleep(0.15)
+                                        if thinking_finalize_buffer:
+                                            # More content arrived, write it
+                                            buffered_text = "".join(thinking_finalize_buffer)
+                                            current_lines = nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
+                                            end_line = len(current_lines)
+                                            text_lines = buffered_text.split("\n")
+                                            if text_lines:
+                                                nvim.api.buf_set_lines(buffer_manager.content_buf, end_line, end_line, False, text_lines)
+                                            thinking_finalize_buffer.clear()
+                                        else:
+                                            # Buffer is empty, one more check to be sure
+                                            time.sleep(0.1)
+                                            if not thinking_finalize_buffer:
+                                                # Truly empty, break
+                                                break
+                                    
+                                    # Final safety check - write any remaining content
+                                    if thinking_finalize_buffer:
+                                        buffered_text = "".join(thinking_finalize_buffer)
+                                        current_lines = nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
+                                        end_line = len(current_lines)
+                                        text_lines = buffered_text.split("\n")
+                                        if text_lines:
+                                            nvim.api.buf_set_lines(buffer_manager.content_buf, end_line, end_line, False, text_lines)
+                                        thinking_finalize_buffer.clear()
+                                        time.sleep(0.2)
+                                    
+                                    # Capture thinking end line AFTER all thinking content is flushed
+                                    # but BEFORE any LLM content is written
+                                    # This ensures the fold ends at the correct location
+                                    current_lines = nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
+                                    buffer_manager._thinking_end_line = len(current_lines)  # 0-indexed
+                                    logger.debug(f"Captured thinking end line after flushing: {buffer_manager._thinking_end_line} (0-indexed)")
+                                    
+                                    # Now finalize - capture end line RIGHT before adding closing fence
+                                    # Add a small delay to ensure all writes are complete
+                                    time.sleep(0.1)
+                                    buffer_manager.finalize_thinking_section(content_bufnr)
+                                
+                                # Stop timer, flush content, and poll until queue is truly empty
+                                nvim.exec_lua(
+                                    f"""
+                                    local content_bufnr = {content_bufnr}
+                                    
+                                    -- Stop the streaming timer first to prevent new writes
+                                    if _G.agent_stream_timer then
+                                        _G.agent_stream_timer:stop()
+                                        _G.agent_stream_timer = nil
+                                    end
+                                    
+                                    -- Function to flush queue
+                                    local function flush_queue()
                                         if _G.agent_stream_queue then
                                             for _, item in ipairs(_G.agent_stream_queue) do
                                                 if vim.api.nvim_buf_is_valid(item.bufnr) and item.text ~= "" then
@@ -442,43 +533,88 @@ async def run_agent(
                                                     local last_line_idx = line_count - 1
                                                     local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
                                                     local last_column = #(last_line[1] or "")
-                                                    local lines = vim.split(item.text, "\\n", {plain = true})
+                                                    local lines = vim.split(item.text, "\\n", {{plain = true}})
                                                     vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
                                                 end
                                             end
-                                            _G.agent_stream_queue = {}
+                                            _G.agent_stream_queue = {{}}
                                         end
-                                        
-                                        -- Add blank line after LLM text if it doesn't already end with one
-                                        if vim.api.nvim_buf_is_valid(content_bufnr) then
-                                            local line_count = vim.api.nvim_buf_line_count(content_bufnr)
-                                            if line_count > 0 then
-                                                local last_line = vim.api.nvim_buf_get_lines(content_bufnr, line_count - 1, line_count, false)
-                                                -- Check if last line is not empty (has any content, including just a dot)
-                                                if #last_line > 0 and last_line[1] and last_line[1]:gsub("%s", "") ~= "" then
-                                                    -- Last line has content, add blank line
-                                                    vim.api.nvim_buf_set_lines(content_bufnr, line_count, line_count, false, {""})
-                                                end
+                                    end
+                                    
+                                    -- Flush queue initially
+                                    flush_queue()
+                                    
+                                    -- Add blank line after LLM text if it doesn't already end with one
+                                    if vim.api.nvim_buf_is_valid(content_bufnr) then
+                                        local line_count = vim.api.nvim_buf_line_count(content_bufnr)
+                                        if line_count > 0 then
+                                            local last_line = vim.api.nvim_buf_get_lines(content_bufnr, line_count - 1, line_count, false)
+                                            if #last_line > 0 and last_line[1] and last_line[1]:gsub("%s", "") ~= "" then
+                                                vim.api.nvim_buf_set_lines(content_bufnr, line_count, line_count, false, {{""}})
                                             end
                                         end
+                                    end
+                                    
+                                    _G.agent_stream_paused = true
+                                    
+                                    -- Poll until queue is empty and stable
+                                    local poll_count = 0
+                                    local max_polls = 20  -- 20 polls * 50ms = 1 second max wait
+                                    local function check_and_finalize()
+                                        poll_count = poll_count + 1
                                         
-                                        _G.agent_stream_paused = true
-                                        """,
-                                        content_bufnr,
-                                    )
-                                    buffer_manager.append_content(
-                                        thinking_lines, fold=True, fold_error=False, content_type='thinking'
-                                    )
-                                    # Reset agent_response_started so next LLM text adds spacing
-                                    buffer_manager._agent_response_started = False
-                                    # Resume streaming after fold is written
-                                    nvim.exec_lua("_G.agent_stream_paused = false")
+                                        -- Flush any new content that arrived
+                                        flush_queue()
+                                        
+                                        -- Check if queue is empty
+                                        if not _G.agent_stream_queue or #_G.agent_stream_queue == 0 then
+                                            -- Queue is empty, wait one more cycle to ensure stability
+                                            if poll_count >= 3 then
+                                                -- Queue has been empty for at least 3 cycles, safe to finalize
+                                                _G.agent_thinking_ready_to_finalize = true
+                                            else
+                                                -- Check again after a short delay
+                                                vim.defer_fn(check_and_finalize, 50)
+                                            end
+                                        else
+                                            -- Queue still has content, check again
+                                            if poll_count < max_polls then
+                                                vim.defer_fn(check_and_finalize, 50)
+                                            else
+                                                -- Timeout - finalize anyway
+                                                _G.agent_thinking_ready_to_finalize = true
+                                            end
+                                        end
+                                    end
+                                    
+                                    -- Start polling
+                                    vim.defer_fn(check_and_finalize, 100)
+                                    """,
+                                )
+                                
+                                # Schedule finalization with polling-based delay
+                                import threading
+                                def delayed_finalize():
+                                    import time
+                                    # Wait longer to match Lua polling (up to 1 second)
+                                    time.sleep(1.0)
+                                    # Call finalization - this has its own delays for stability checks
+                                    nvim.async_call(do_finalize)
+                                    # Wait longer for finalization to complete (do_finalize has up to 2+ seconds of delays)
+                                    time.sleep(2.5)  # Ensure all stability checks and writes complete
+                                    def resume_streaming():
+                                        buffer_manager._agent_response_started = False
+                                        nvim.exec_lua("_G.agent_stream_paused = false")
+                                        buffer_manager.append_stream_lua_direct(first_delta, content_bufnr)
+                                    nvim.async_call(resume_streaming)
+                                threading.Thread(target=delayed_finalize, daemon=True).start()
+                                # Don't resume streaming here - wait for finalization to complete
 
-                                nvim.async_call(flush_thinking)
-                            thinking_buffer = []
-                            thinking_active = False
-
-                        buffer_manager.append_stream_lua_direct(delta, content_bufnr)
+                            nvim.async_call(finalize_thinking)
+                            thinking_initialized = False
+                        else:
+                            # No thinking content, append LLM text normally
+                            buffer_manager.append_stream_lua_direct(delta, content_bufnr)
 
                 # Process reasoning/thinking text events (for reasoning models like o1, glm-4, etc.)
                 elif data_type in [
@@ -487,8 +623,29 @@ async def run_agent(
                 ]:
                     delta = data.delta
                     if delta:
-                        thinking_active = True
-                        thinking_buffer.append(delta)
+                        # If finalizing, buffer content instead of streaming it
+                        if thinking_finalizing:
+                            logger.debug("Buffering thinking delta - finalization in progress")
+                            thinking_finalize_buffer.append(delta)
+                            continue
+                        
+                        # Initialize thinking section on first delta
+                        if not thinking_initialized:
+                            content_bufnr = (
+                                buffer_manager.content_buf.handle
+                                if hasattr(buffer_manager.content_buf, "handle")
+                                else buffer_manager.content_buf.number
+                            )
+                            buffer_manager.init_thinking_section(content_bufnr)
+                            thinking_initialized = True
+                        
+                        # Stream the delta immediately
+                        content_bufnr = (
+                            buffer_manager.content_buf.handle
+                            if hasattr(buffer_manager.content_buf, "handle")
+                            else buffer_manager.content_buf.number
+                        )
+                        buffer_manager.stream_thinking_content(delta, content_bufnr)
 
                 # Check for tool-related events in responses API
                 elif "Tool" in data_type or "tool" in data_type.lower():
@@ -578,54 +735,74 @@ async def run_agent(
                 # Log other event types for debugging
                 logger.debug(f"Other event type: {event_type}")
 
-        # Flush any remaining thinking content
-        if thinking_buffer:
-            thinking_content = "".join(thinking_buffer).strip()
-            if thinking_content:  # Only show if non-empty after stripping
-                thinking_lines = ["**Thinking**", "``````", thinking_content, "``````", ""]  # Add trailing blank line
-
-                def flush_thinking():
-                    # Flush pending stream content
-                    content_bufnr = buffer_manager.content_buf.number if buffer_manager.content_buf and buffer_manager.content_buf.valid else -1
-                    nvim.exec_lua(
-                        """
-                        local content_bufnr = ...
-                        if _G.agent_stream_queue then
-                            for _, item in ipairs(_G.agent_stream_queue) do
-                                if vim.api.nvim_buf_is_valid(item.bufnr) and item.text ~= "" then
-                                    local line_count = vim.api.nvim_buf_line_count(item.bufnr)
-                                    local last_line_idx = line_count - 1
-                                    local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
-                                    local last_column = #(last_line[1] or "")
-                                    local lines = vim.split(item.text, "\\n", {plain = true})
-                                    vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
-                                end
+        # Finalize any remaining thinking content
+        if thinking_initialized and not thinking_finalizing:
+            thinking_finalizing = True  # Set flag to prevent new thinking content
+            def finalize_thinking():
+                # Flush any buffered thinking content that arrived during finalization
+                content_bufnr = buffer_manager.content_buf.number if buffer_manager.content_buf and buffer_manager.content_buf.valid else -1
+                if thinking_finalize_buffer:
+                    buffered_text = "".join(thinking_finalize_buffer)
+                    # Write directly to buffer at the current end
+                    current_lines = nvim.api.buf_get_lines(buffer_manager.content_buf, 0, -1, False)
+                    end_line = len(current_lines)
+                    # Split text into lines and append
+                    text_lines = buffered_text.split("\n")
+                    if text_lines:
+                        nvim.api.buf_set_lines(buffer_manager.content_buf, end_line, end_line, False, text_lines)
+                    thinking_finalize_buffer.clear()
+                    # Small delay to ensure write completes
+                    import time
+                    time.sleep(0.1)
+                
+                buffer_manager.finalize_thinking_section(content_bufnr)
+                # Stop timer, flush pending stream content, then finalize thinking section
+                content_bufnr = buffer_manager.content_buf.number if buffer_manager.content_buf and buffer_manager.content_buf.valid else -1
+                nvim.exec_lua(
+                    """
+                    local content_bufnr = ...
+                    -- Stop the streaming timer first to prevent new writes
+                    if _G.agent_stream_timer then
+                        _G.agent_stream_timer:stop()
+                        _G.agent_stream_timer = nil
+                    end
+                    
+                    -- Flush all remaining content from the queue immediately
+                    if _G.agent_stream_queue then
+                        for _, item in ipairs(_G.agent_stream_queue) do
+                            if vim.api.nvim_buf_is_valid(item.bufnr) and item.text ~= "" then
+                                local line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                                local last_line_idx = line_count - 1
+                                local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
+                                local last_column = #(last_line[1] or "")
+                                local lines = vim.split(item.text, "\\n", {plain = true})
+                                vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
                             end
-                            _G.agent_stream_queue = {}
                         end
-                        
-                        -- Add blank line after LLM text if it doesn't already end with one
-                        if vim.api.nvim_buf_is_valid(content_bufnr) then
-                            local line_count = vim.api.nvim_buf_line_count(content_bufnr)
-                            if line_count > 0 then
-                                local last_line = vim.api.nvim_buf_get_lines(content_bufnr, line_count - 1, line_count, false)
-                                -- Check if last line is not empty (has any content, including just a dot)
-                                if #last_line > 0 and last_line[1] and last_line[1]:gsub("%s", "") ~= "" then
-                                    -- Last line has content, add blank line
-                                    vim.api.nvim_buf_set_lines(content_bufnr, line_count, line_count, false, {""})
-                                end
+                        _G.agent_stream_queue = {}
+                    end
+                    
+                    -- Add blank line after LLM text if it doesn't already end with one
+                    if vim.api.nvim_buf_is_valid(content_bufnr) then
+                        local line_count = vim.api.nvim_buf_line_count(content_bufnr)
+                        if line_count > 0 then
+                            local last_line = vim.api.nvim_buf_get_lines(content_bufnr, line_count - 1, line_count, false)
+                            -- Check if last line is not empty (has any content, including just a dot)
+                            if #last_line > 0 and last_line[1] and last_line[1]:gsub("%s", "") ~= "" then
+                                -- Last line has content, add blank line
+                                vim.api.nvim_buf_set_lines(content_bufnr, line_count, line_count, false, {""})
                             end
                         end
-                        """,
-                        content_bufnr,
-                    )
-                    buffer_manager.append_content(
-                        thinking_lines, fold=True, fold_error=False, content_type='thinking'
-                    )
-                    # Reset agent_response_started in case more LLM text follows
-                    buffer_manager._agent_response_started = False
+                    end
+                    """,
+                    content_bufnr,
+                )
+                # Now finalize thinking section (add closing fence and create fold)
+                buffer_manager.finalize_thinking_section(content_bufnr)
+                # Reset agent_response_started in case more LLM text follows
+                buffer_manager._agent_response_started = False
 
-                nvim.async_call(flush_thinking)
+            nvim.async_call(finalize_thinking)
 
         # Log stream completion details
         logger.info(f"Stream loop ended after {event_count} events")

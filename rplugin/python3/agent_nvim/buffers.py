@@ -91,10 +91,39 @@ class BufferManager:
             "agent_username_highlight"
         )
         self._tool_fold_ns = nvim.api.create_namespace("agent_tool_fold")
+        # Create transparent highlight groups for tool fold icons
+        self._setup_tool_fold_highlights()
         # Track last output type for consistent spacing
         # Values: None, 'header', 'tool', 'thinking', 'llm'
         # Note: 'thinking' is ONLY for built-in reasoning (o1/glm-4), NOT MCP tools
         self._last_output_type = None
+
+    def _setup_tool_fold_highlights(self):
+        """Create transparent highlight groups for tool fold icons."""
+        try:
+            # Use exec_lua to call nvim_set_hl directly (matches edit_view.lua pattern)
+            # Get foreground colors from existing highlight groups and create transparent versions
+            # Explicitly set bg to nil to ensure transparency
+            self.nvim.exec_lua(
+                """
+                local ok_hl = vim.api.nvim_get_hl(0, { name = "OkMsg", link = false })
+                local err_hl = vim.api.nvim_get_hl(0, { name = "ErrorMsg", link = false })
+                
+                -- Create transparent versions - explicitly set bg to nil for transparency
+                vim.api.nvim_set_hl(0, "AgentToolFoldOk", {
+                    fg = ok_hl.fg,
+                    bg = nil,  -- Explicitly nil for transparency
+                })
+                vim.api.nvim_set_hl(0, "AgentToolFoldError", {
+                    fg = err_hl.fg,
+                    bg = nil,  -- Explicitly nil for transparency
+                })
+                """
+            )
+        except Exception as e:
+            self.logger.warning(f"Could not create transparent tool fold highlights: {e}")
+            # Fallback to regular highlights if transparent setup fails
+            pass
 
     def create_layout(self):
         """Create the agent UI layout with content and prompt buffers."""
@@ -516,6 +545,10 @@ class BufferManager:
         if last_was_header_like:
             return 0
         
+        # Thinking after tool: 1 blank line (user wants spacing between tool and thinking)
+        if content_type == 'thinking' and self._last_output_type == 'tool':
+            return 1
+        
         # Between consecutive tool-like items: no blank line (both end with blank)
         # But exclude thinking from this - thinking always needs spacing after it
         if current_is_tool and last_was_tool and not last_was_thinking:
@@ -583,7 +616,7 @@ class BufferManager:
                         if tool_title_index is not None:
                             processed_tool_title_index = tool_title_index + spacing
                         self._append_and_scroll(
-                            processed, fold=fold, fold_error=fold_error, spacing_lines=spacing, tool_title_index=processed_tool_title_index
+                            processed, fold=fold, fold_error=fold_error, spacing_lines=spacing, tool_title_index=processed_tool_title_index, content_type=content_type
                         )
                     except Exception as e:
                         self.logger.error(f"Error appending content to buffer: {e}")
@@ -597,7 +630,7 @@ class BufferManager:
             self.logger.error(f"Error in append_content: {e}")
             # Don't re-raise to prevent cascading errors during error handling
 
-    def _append_and_scroll(self, processed, fold=False, fold_error=False, spacing_lines=0, tool_title_index=None):
+    def _append_and_scroll(self, processed, fold=False, fold_error=False, spacing_lines=0, tool_title_index=None, content_type='llm'):
         """Helper to append lines and autoscroll content buffer.
 
         Args:
@@ -685,7 +718,7 @@ class BufferManager:
                 fold_start = tool_title_row + 1  # 1-indexed for fold
                 fold_end = end_line
                 self.logger.info(f"Creating fold: start={fold_start}, end={fold_end}, tool_title_row={tool_title_row} (0-indexed), start_line={start_line}, end_line={end_line}")
-                self._create_fold(bufnr, fold_start, fold_end, fold_error=fold_error, tool_title_row=tool_title_row)
+                self._create_fold(bufnr, fold_start, fold_end, fold_error=fold_error, tool_title_row=tool_title_row, content_type=content_type)
 
         except Exception as e:
             self.logger.error(f"Error writing to buffer in _append_and_scroll: {e}")
@@ -732,7 +765,7 @@ class BufferManager:
             except Exception:
                 pass
 
-    def _create_fold(self, bufnr, start_line, end_line, fold_error=False, tool_title_row=None):
+    def _create_fold(self, bufnr, start_line, end_line, fold_error=False, tool_title_row=None, content_type='llm'):
         """Create a fold in the buffer.
 
         Args:
@@ -741,6 +774,7 @@ class BufferManager:
             end_line: End line (1-indexed) for fold
             fold_error: If True, highlight the fold header as an error (red)
             tool_title_row: Row number (0-indexed) where tool title is (for icon placement)
+            content_type: Type of content ('tool', 'thinking', 'llm', etc.) - thinking folds don't get icons
         """
         try:
             # Use tool_title_row if provided (0-indexed), otherwise calculate from start_line
@@ -760,19 +794,7 @@ class BufferManager:
                 bufnr, -1, highlight_group, title_row, 0, -1
             )
 
-            # Add virtual text with icon at the right edge (like edit view toolbar)
-            # Use same Nerd Font icons as edit_view.lua for consistency
-            # ICON_APPLIED = "✓" (U+F05D), ICON_REJECTED = "✗" (U+F05C)
-            if fold_error:
-                icon = "✗"  # Nerd Font X mark (U+F05C)
-            else:
-                icon = "✓"  # Nerd Font checkmark (U+F05D)
-            icon_hl = "ErrorMsg" if fold_error else "OkMsg"
-            
-            # Use extmark with virtual text positioned at right edge
-            # Create synchronously right after writing lines (exactly like edit_view.lua)
-            # Match edit_view.lua line 348: vim.api.nvim_buf_set_extmark(bufnr, ns_id, header_row, 0, {...})
-            # Create fold first, then add icon extmark (order matters)
+            # Create fold first
             self.nvim.exec_lua(
                 "require('agent_nvim.folds').create_fold(...)",
                 bufnr,
@@ -781,29 +803,41 @@ class BufferManager:
                 None,
             )
             
-            # Add debugging to see what's happening
-            end_row_0_indexed = end_line - 1
-            # Log exact values
-            self.logger.info(f"Creating tool fold icon: bufnr={bufnr}, title_row={title_row}, end_row_0_indexed={end_row_0_indexed}, icon={icon!r}, icon_hl={icon_hl}")
-            
-            # Use Python API directly instead of Lua to avoid argument passing issues
-            # Create extmark with virtual text at right edge
-            # Format: virt_text is list of [text, highlight] pairs
-            try:
-                extmark_id = self.nvim.api.buf_set_extmark(
-                    bufnr,
-                    self._tool_fold_ns,
-                    title_row,  # 0-indexed row
-                    0,  # Column 0
-                    {
-                        "virt_text": [[f" {icon} ", icon_hl]],
-                        "virt_text_pos": "right_align",
-                        "end_row": end_row_0_indexed,  # 0-indexed end row
-                    },
-                )
-                self.logger.info(f"Created tool fold icon extmark id={extmark_id} on row {title_row} using Python API")
-            except Exception as e:
-                self.logger.error(f"Error creating tool fold icon extmark: {e}")
+            # Only add icons for tool folds, not thinking folds
+            if content_type != 'thinking':
+                # Add virtual text with icon at the right edge (like edit view toolbar)
+                # Use same Nerd Font icons as edit_view.lua for consistency
+                if fold_error:
+                    icon = ""  # x mark
+                else:
+                    icon = ""  # ok mark
+                # Use transparent highlight groups for icons
+                icon_hl = "AgentToolFoldError" if fold_error else "AgentToolFoldOk"
+                
+                # Add debugging to see what's happening
+                end_row_0_indexed = end_line - 1
+                # Log exact values
+                self.logger.info(f"Creating tool fold icon: bufnr={bufnr}, title_row={title_row}, end_row_0_indexed={end_row_0_indexed}, icon={icon!r}, icon_hl={icon_hl}")
+                
+                # Use Python API directly instead of Lua to avoid argument passing issues
+                # Create extmark with virtual text at right edge
+                # Format: virt_text is list of [text, highlight] pairs
+                try:
+                    extmark_id = self.nvim.api.buf_set_extmark(
+                        bufnr,
+                        self._tool_fold_ns,
+                        title_row,  # 0-indexed row
+                        0,  # Column 0
+                        {
+                            "virt_text": [[f" {icon} ", icon_hl]],
+                            "virt_text_pos": "right_align",
+                            "end_row": end_row_0_indexed,  # 0-indexed end row
+                            "hl_mode": "combine",  # Combine with existing highlights for transparency
+                        },
+                    )
+                    self.logger.info(f"Created tool fold icon extmark id={extmark_id} on row {title_row} using Python API")
+                except Exception as e:
+                    self.logger.error(f"Error creating tool fold icon extmark: {e}")
         except Exception as e:
             self.logger.error(f"Error creating fold: {e}")
 
@@ -971,6 +1005,252 @@ class BufferManager:
                     )
         except Exception as e:
             self.logger.debug(f"Error highlighting user prompt: {e}")
+
+    def init_thinking_section(self, bufnr):
+        """Initialize thinking section with header and opening code fence.
+        
+        Args:
+            bufnr: Buffer number
+            
+        Returns:
+            Start line number (1-indexed) where thinking section begins
+        """
+        # Calculate spacing based on what came before
+        spacing = self._calculate_spacing('thinking')
+        
+        # Build header lines
+        header_lines = []
+        for _ in range(spacing):
+            header_lines.append("")
+        header_lines.extend(["**Thinking**", "``````"])
+        
+        # Append header and get start line
+        # Note: This is called from async context, use async_call for thread safety
+        try:
+            def init_sync():
+                current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+                start_line = len(current_lines)
+                
+                # Append header
+                self.nvim.api.buf_set_lines(self.content_buf, -1, -1, False, header_lines)
+                
+                # Update state
+                self._last_output_type = 'thinking'
+                
+                # Store thinking start line for fold creation
+                self._thinking_start_line = start_line + 1  # 1-indexed
+            
+            # Execute in main thread
+            self.nvim.async_call(init_sync)
+            
+            # Calculate start line now (before async append happens)
+            # We'll get the current line count and add spacing + header lines
+            current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+            start_line = len(current_lines) + spacing + 1  # +1 for 1-indexed, spacing already accounted
+            self._thinking_start_line = start_line
+            
+            return start_line
+        except Exception as e:
+            self.logger.error(f"Error initializing thinking section: {e}")
+            return None
+    
+    def stream_thinking_content(self, text, bufnr):
+        """Stream thinking content incrementally using Lua animation.
+        
+        Args:
+            text: Text delta to append to thinking section
+            bufnr: Buffer number
+        """
+        if not text:
+            return
+            
+        # Escape text for Lua string
+        escaped_text = (
+            text.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("'", "\\'")
+        )
+        
+        # Use same streaming mechanism as LLM text
+        lua_code = f"""
+        local bufnr = {bufnr}
+        local text = "{escaped_text}"
+
+        -- Initialize animation queue if it doesn't exist
+        if not _G.agent_stream_queue then
+            _G.agent_stream_queue = {{}}
+            _G.agent_stream_timer = nil
+            _G.agent_stream_paused = false
+        end
+
+        -- Add text to queue
+        table.insert(_G.agent_stream_queue, {{bufnr = bufnr, text = text}})
+
+        -- Start timer if not already running
+        if not _G.agent_stream_timer then
+            local function timer_callback()
+                -- Check if streaming is paused (tool output being written)
+                if _G.agent_stream_paused then
+                    return  -- Skip this tick, will try again on next interval
+                end
+
+                if #_G.agent_stream_queue == 0 then
+                    if _G.agent_stream_timer then
+                        _G.agent_stream_timer:stop()
+                        _G.agent_stream_timer = nil
+                    end
+                    return
+                end
+
+                local item = _G.agent_stream_queue[1]
+                if not vim.api.nvim_buf_is_valid(item.bufnr) then
+                    table.remove(_G.agent_stream_queue, 1)
+                    return
+                end
+
+                -- Vary characters written: more natural variation
+                local rand = math.random()
+                local chars_to_write = 3
+                if rand < 0.1 then
+                    chars_to_write = 1  -- 10% very slow
+                elseif rand < 0.25 then
+                    chars_to_write = 2  -- 15% slow
+                elseif rand < 0.6 then
+                    chars_to_write = 3  -- 35% normal
+                elseif rand < 0.8 then
+                    chars_to_write = 4  -- 20% fast
+                else
+                    chars_to_write = 5  -- 20% very fast
+                end
+
+                local chunk = item.text:sub(1, chars_to_write)
+                item.text = item.text:sub(chars_to_write + 1)
+
+                if chunk ~= "" then
+                    local line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                    local last_line_idx = line_count - 1
+                    local last_line = vim.api.nvim_buf_get_lines(item.bufnr, last_line_idx, last_line_idx + 1, false)
+                    local last_column = #(last_line[1] or "")
+
+                    local lines = vim.split(chunk, "\\n", {{plain = true}})
+                    vim.api.nvim_buf_set_text(item.bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
+
+                    -- Autoscroll only if autoscroll is enabled for this buffer
+                    local autoscroll_enabled = 1
+                    local ok, result = pcall(function()
+                        return vim.api.nvim_buf_get_var(item.bufnr, "agent_autoscroll_enabled")
+                    end)
+                    if ok and result == 0 then
+                        autoscroll_enabled = 0
+                    end
+
+                    if autoscroll_enabled == 1 then
+                        for _, win in ipairs(vim.api.nvim_list_wins()) do
+                            if vim.api.nvim_win_get_buf(win) == item.bufnr then
+                                local new_line_count = vim.api.nvim_buf_line_count(item.bufnr)
+                                pcall(vim.api.nvim_win_set_cursor, win, {{new_line_count, 0}})
+                            end
+                        end
+                    end
+                end
+
+                -- Remove item if all text written
+                if item.text == "" then
+                    table.remove(_G.agent_stream_queue, 1)
+                end
+            end
+
+            _G.agent_stream_timer = vim.loop.new_timer()
+            -- Start with random delay and keep repeating with slight variation
+            local base_interval = 8
+            _G.agent_stream_timer:start(math.random(5, 10), base_interval, vim.schedule_wrap(timer_callback))
+        end
+        """
+        try:
+            self.nvim.async_call(self.nvim.exec_lua, lua_code)
+        except Exception as e:
+            self.logger.error(f"Error streaming thinking content: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+    
+    def capture_thinking_end_line(self, bufnr):
+        """Capture the current end line of thinking content.
+        
+        This should be called when LLM content is first detected, BEFORE any LLM
+        content is written to the buffer. This ensures the fold ends at the correct
+        location.
+        
+        Args:
+            bufnr: Buffer number
+        """
+        try:
+            # Capture the current end of thinking content (0-indexed)
+            current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+            self._thinking_end_line = len(current_lines)  # 0-indexed
+            self.logger.debug(f"Captured thinking end line: {self._thinking_end_line} (0-indexed)")
+        except Exception as e:
+            self.logger.error(f"Error capturing thinking end line: {e}")
+    
+    def finalize_thinking_section(self, bufnr):
+        """Finalize thinking section by adding closing fence, blank line, and creating fold.
+        
+        Args:
+            bufnr: Buffer number
+            
+        Note: This method should be called from async_call context (it's called from
+        finalize_thinking() which is already wrapped in async_call).
+        """
+        try:
+            # Use the captured thinking end line if available, otherwise calculate it
+            # This ensures we use the line captured BEFORE any LLM content was written
+            if hasattr(self, '_thinking_end_line') and self._thinking_end_line is not None:
+                thinking_end_line = self._thinking_end_line  # 0-indexed
+                self.logger.debug(f"Using captured thinking end line: {thinking_end_line} (0-indexed)")
+            else:
+                # Fallback: calculate from current buffer state
+                # This should only happen if capture_thinking_end_line wasn't called
+                import time
+                time.sleep(0.05)  # Small delay to catch any last-minute writes
+                current_lines = self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False)
+                thinking_end_line = len(current_lines)  # 0-indexed
+                self.logger.warning(f"Using calculated thinking end line (capture not called): {thinking_end_line} (0-indexed)")
+            
+            # Add closing fence at the exact end of thinking content
+            closing_fence = ["``````"]
+            # Insert at the exact line where thinking content ends (thinking_end_line is 0-indexed)
+            self.nvim.api.buf_set_lines(self.content_buf, thinking_end_line, thinking_end_line, False, closing_fence)
+            
+            # Get the line number of the closing fence (this is where the fold should end)
+            # The closing fence is at thinking_end_line (0-indexed), so fold_end is thinking_end_line + 1 (1-indexed)
+            closing_fence_line = thinking_end_line + 1  # 1-indexed for fold
+            
+            # Create fold if we have a start line (fold includes closing fence but not blank line)
+            if hasattr(self, '_thinking_start_line') and self._thinking_start_line:
+                fold_start = self._thinking_start_line  # Already 1-indexed
+                # Fold end should be exactly the line with the closing fence
+                fold_end = closing_fence_line  # This is the line with the closing fence (1-indexed)
+                tool_title_row = self._thinking_start_line - 1  # Convert to 0-indexed
+                self._create_fold(bufnr, fold_start, fold_end, fold_error=False, tool_title_row=tool_title_row, content_type='thinking')
+            
+            # Add blank line AFTER the fold (at the line after the closing fence)
+            # Use -1 to append at the very end to ensure it's after everything
+            current_end = len(self.nvim.api.buf_get_lines(self.content_buf, 0, -1, False))
+            self.nvim.api.buf_set_lines(self.content_buf, current_end, current_end, False, [""])
+            
+            # Update state - thinking is done, next content will be LLM
+            # This ensures proper spacing for the next content
+            self._last_output_type = 'thinking'
+            
+            # Clear thinking tracking lines
+            if hasattr(self, '_thinking_start_line'):
+                delattr(self, '_thinking_start_line')
+            if hasattr(self, '_thinking_end_line'):
+                delattr(self, '_thinking_end_line')
+        except Exception as e:
+            self.logger.error(f"Error finalizing thinking section: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
 
     def append_stream_lua_direct(self, text, bufnr):
         """Append text using Lua animation for smooth typing effect.
