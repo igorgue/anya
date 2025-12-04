@@ -489,12 +489,69 @@ async def run_agent(
 
                 # Debug: Log all data types in responses
                 logger.info(f"Responses data type: {data_type}")
-                if hasattr(data, "__dict__"):
-                    logger.info(f"Data attributes: {data.__dict__.keys()}")
+                
+                # Enhanced debug logging for OpenRouter thinking content detection
+                if event_count <= 20:
+                    # Log all data attributes for first 20 events
+                    if hasattr(data, "__dict__"):
+                        logger.info(f"Data attributes: {data.__dict__.keys()}")
+                        # Log specific attributes that might indicate thinking content
+                        for attr in ['type', 'content_type', 'index', 'content_index', 'part']:
+                            if hasattr(data, attr):
+                                logger.info(f"  {attr}: {getattr(data, attr)}")
+                        # Log full dict for analysis
+                        logger.info(f"  Full data: {data.__dict__}")
+                    else:
+                        logger.info(f"Data (no __dict__): {data}")
 
                 # Process text output events
                 if data_type == "ResponseTextDeltaEvent":
                     delta = data.delta
+                    
+                    # Check for OpenRouter thinking content type
+                    # OpenRouter may use 'type', 'content_type', or 'index' to indicate thinking
+                    is_thinking_content = False
+                    content_type_attr = getattr(data, 'type', None) or getattr(data, 'content_type', None)
+                    content_index = getattr(data, 'index', None) or getattr(data, 'content_index', None)
+                    
+                    # Log thinking content detection
+                    if event_count <= 20:
+                        logger.info(f"ResponseTextDeltaEvent - checking for thinking: type={content_type_attr}, index={content_index}")
+                    
+                    # Detect thinking content by type attribute
+                    if content_type_attr and 'thinking' in str(content_type_attr).lower():
+                        is_thinking_content = True
+                        logger.info(f"Thinking content detected via type attribute: {content_type_attr}")
+                    
+                    # Handle thinking content - route to thinking handler
+                    if is_thinking_content and delta:
+                        # If finalizing, buffer content instead of streaming it
+                        if thinking_finalizing:
+                            logger.debug("Buffering thinking delta (from ResponseTextDeltaEvent) - finalization in progress")
+                            thinking_finalize_buffer.append(delta)
+                            continue
+                        
+                        # Initialize thinking section on first delta
+                        if not thinking_initialized:
+                            content_bufnr = (
+                                buffer_manager.content_buf.handle
+                                if hasattr(buffer_manager.content_buf, "handle")
+                                else buffer_manager.content_buf.number
+                            )
+                            buffer_manager.init_thinking_section(content_bufnr)
+                            thinking_initialized = True
+                            logger.info("Thinking section initialized (from ResponseTextDeltaEvent thinking content)")
+                        
+                        # Stream thinking content
+                        content_bufnr = (
+                            buffer_manager.content_buf.handle
+                            if hasattr(buffer_manager.content_buf, "handle")
+                            else buffer_manager.content_buf.number
+                        )
+                        buffer_manager.stream_thinking_content(delta, content_bufnr)
+                        logger.debug(f"Streaming thinking delta: {len(delta)} chars")
+                        continue
+                    
                     if delta:
                         # Flush thinking content BEFORE the first LLM text delta
                         # This ensures thinking appears before the response
@@ -784,12 +841,17 @@ async def run_agent(
                             )
 
                 # Process reasoning/thinking text events (for reasoning models like o1, glm-4, etc.)
+                # Also check for OpenRouter-specific thinking event types
                 elif data_type in [
                     "ResponseReasoningSummaryTextDeltaEvent",
                     "ResponseReasoningTextDeltaEvent",
+                    "ResponseThinkingDeltaEvent",  # Potential OpenRouter thinking event
+                    "ResponseThinkingTextDeltaEvent",  # Potential OpenRouter thinking event
                 ]:
-                    delta = data.delta
+                    logger.info(f"Thinking/reasoning event detected: {data_type}")
+                    delta = getattr(data, 'delta', None) or getattr(data, 'text', None)
                     if delta:
+                        logger.info(f"Thinking delta received: {len(delta)} chars")
                         # If finalizing, buffer content instead of streaming it
                         if thinking_finalizing:
                             logger.debug(
@@ -807,6 +869,7 @@ async def run_agent(
                             )
                             buffer_manager.init_thinking_section(content_bufnr)
                             thinking_initialized = True
+                            logger.info(f"Thinking section initialized (from {data_type})")
 
                         # Stream the delta immediately
                         content_bufnr = (
@@ -815,6 +878,43 @@ async def run_agent(
                             else buffer_manager.content_buf.number
                         )
                         buffer_manager.stream_thinking_content(delta, content_bufnr)
+                        logger.debug(f"Streaming thinking delta: {len(delta)} chars")
+                
+                # Handle ResponseContentPartDeltaEvent - OpenRouter may use this for multi-part content
+                elif data_type == "ResponseContentPartDeltaEvent":
+                    logger.info(f"ResponseContentPartDeltaEvent detected")
+                    # Check for thinking content in part
+                    part = getattr(data, 'part', None)
+                    part_type = getattr(part, 'type', None) if part else getattr(data, 'type', None)
+                    logger.info(f"  part_type: {part_type}, part: {part}")
+                    
+                    if part_type and 'thinking' in str(part_type).lower():
+                        delta = getattr(data, 'delta', None) or getattr(part, 'text', None) or getattr(data, 'text', None)
+                        if delta:
+                            logger.info(f"Thinking content from ResponseContentPartDeltaEvent: {len(delta)} chars")
+                            # If finalizing, buffer content
+                            if thinking_finalizing:
+                                thinking_finalize_buffer.append(delta)
+                                continue
+                            
+                            # Initialize thinking section if needed
+                            if not thinking_initialized:
+                                content_bufnr = (
+                                    buffer_manager.content_buf.handle
+                                    if hasattr(buffer_manager.content_buf, "handle")
+                                    else buffer_manager.content_buf.number
+                                )
+                                buffer_manager.init_thinking_section(content_bufnr)
+                                thinking_initialized = True
+                                logger.info("Thinking section initialized (from ResponseContentPartDeltaEvent)")
+                            
+                            # Stream thinking content
+                            content_bufnr = (
+                                buffer_manager.content_buf.handle
+                                if hasattr(buffer_manager.content_buf, "handle")
+                                else buffer_manager.content_buf.number
+                            )
+                            buffer_manager.stream_thinking_content(delta, content_bufnr)
 
                 # Check for tool-related events in responses API
                 elif "Tool" in data_type or "tool" in data_type.lower():
@@ -854,8 +954,14 @@ async def run_agent(
                         set_waiting_fn=set_waiting_fn,
                     )
                 else:
-                    # Log unknown types for debugging
-                    logger.debug(f"Other responses event: {data_type}")
+                    # Log unknown types for debugging - more verbose for first 30 events
+                    if event_count <= 30:
+                        logger.info(f"Other responses event: {data_type}")
+                        # Log full event data for unknown types to help identify thinking content
+                        if hasattr(data, "__dict__"):
+                            logger.info(f"  Unknown event data: {data.__dict__}")
+                    else:
+                        logger.debug(f"Other responses event: {data_type}")
 
             # NOTE: RawChatCompletionsStreamEvent does not exist in the SDK.
             # The SDK internally converts chat completions events to Responses API
