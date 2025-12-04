@@ -1133,51 +1133,33 @@ class BufferManager:
                 )
                 num_lines_before = len(current_lines)
 
-                # Write header to buffer FIRST
+                # Write header to buffer
                 self.nvim.api.buf_set_lines(
                     self.content_buf, -1, -1, False, header_lines
                 )
 
-                # Get all lines after appending to see what happened
+                # Find where **thinking** actually is in the buffer
+                # (calculation can be off due to trailing blank lines)
                 all_lines_after = self.nvim.api.buf_get_lines(
                     self.content_buf, 0, -1, False
                 )
-                num_lines_after = len(all_lines_after)
-
-                # Find where **thinking** actually is
-                thinking_actual_line = None
+                start_line = None
                 for i, line in enumerate(all_lines_after):
                     if "**thinking**" in line:
-                        thinking_actual_line = i + 1  # Convert to 1-indexed
+                        start_line = i + 1  # Convert to 1-indexed
                         break
 
-                # The **thinking** line should be at: num_lines_before + spacing + 1 (1-indexed)
-                # But let's use the actual position we found
-                if thinking_actual_line:
-                    start_line = thinking_actual_line
-                else:
-                    # Fallback to calculated position
+                # Fallback to calculated position if not found
+                if not start_line:
                     start_line = num_lines_before + spacing + 1
 
                 start_line_result[0] = start_line
                 self._thinking_start_line = start_line
-
-                # Update state
                 self._last_output_type = "thinking"
 
-                # Log detailed info
                 self.logger.info(
-                    f"Thinking section initialized: lines_before={num_lines_before}, lines_after={num_lines_after}, "
-                    f"spacing={spacing}, header_lines={header_lines}, "
-                    f"calculated_line={num_lines_before + spacing + 1}, actual_thinking_line={thinking_actual_line}, "
-                    f"using start_line={start_line} (1-indexed)"
+                    f"Thinking section initialized at line {start_line} (1-indexed)"
                 )
-                # Log last few lines of buffer for debugging
-                if num_lines_after > 0:
-                    last_lines = all_lines_after[max(0, num_lines_before - 2) :]
-                    self.logger.info(
-                        f"Buffer lines from {max(0, num_lines_before - 2)} onwards: {last_lines}"
-                    )
             except Exception as e:
                 self.logger.error(f"Error in do_init: {e}")
                 import traceback
