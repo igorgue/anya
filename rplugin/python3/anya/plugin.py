@@ -46,7 +46,6 @@ class AnyaPlugin(object):
             self.nvim.err_write("output_text requires a text argument.\n")
             return
 
-        self.nvim.err_write("called.\n")
         text = args[0]
         # Optional: pass buffer number and fold flag
         bufnr = int(args[1]) if len(args) > 1 else None
@@ -85,5 +84,5 @@ class AnyaPlugin(object):
             bufnr = self.nvim.current.buffer.number
 
         self.nvim.exec_lua(
-            "require('anya').streaming.output_text(...)", bufnr, text, fold
+            'require("anya").streaming.output_text(...)', bufnr, text, fold,
         )
