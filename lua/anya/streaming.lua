@@ -12,11 +12,15 @@ end
 -- Queue text for animated output
 -- @param bufnr number: Buffer number to write to
 -- @param text string: Text to output (can contain newlines)
--- @param fold boolean: Whether to create a fold (currently unused)
+-- @param fold boolean: Whether to create a fold around the inserted text
 function M.output_text(bufnr, text, fold)
-  -- Escape text for Lua string if needed (though we receive it already escaped)
-  -- Add text to queue
-  table.insert(_G.anya_stream_queue, { bufnr = bufnr, text = text, fold = fold or false })
+  -- Add text to queue - fold_start_line will be set when processing begins
+  table.insert(_G.anya_stream_queue, {
+    bufnr = bufnr,
+    text = text,
+    fold = fold or false,
+    fold_start_line = nil, -- Set when this item starts processing
+  })
 
   -- Start timer if not already running
   M._ensure_timer_running()
@@ -46,6 +50,11 @@ function M._ensure_timer_running()
       return
     end
 
+    -- Record fold start line when item begins processing (not when queued)
+    if item.fold and item.fold_start_line == nil then
+      item.fold_start_line = vim.api.nvim_buf_line_count(item.bufnr)
+    end
+
     -- Vary characters written for natural effect
     local rand = math.random()
     local chars_to_write = 3
@@ -71,6 +80,10 @@ function M._ensure_timer_running()
 
     -- Remove item if all text written
     if item.text == "" then
+      -- Create fold if requested
+      if item.fold and item.fold_start_line then
+        M._create_fold(item.bufnr, item.fold_start_line)
+      end
       table.remove(_G.anya_stream_queue, 1)
     end
   end
@@ -98,6 +111,41 @@ function M._autoscroll_to_bottom(bufnr)
     if vim.api.nvim_win_get_buf(win) == bufnr then
       local new_line_count = vim.api.nvim_buf_line_count(bufnr)
       pcall(vim.api.nvim_win_set_cursor, win, { new_line_count, 0 })
+    end
+  end
+end
+
+-- Create a manual fold from start_line to current end of buffer
+-- @param bufnr number: Buffer number
+-- @param start_line number: Line number where fold should start (1-indexed)
+function M._create_fold(bufnr, start_line)
+  local end_line = vim.api.nvim_buf_line_count(bufnr)
+
+  -- Only create fold if there's more than one line
+  if end_line <= start_line then
+    return
+  end
+
+  -- Find a window displaying this buffer to create the fold
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(win) == bufnr then
+      -- Save current cursor position
+      local cursor = vim.api.nvim_win_get_cursor(win)
+
+      -- Ensure foldmethod is manual for this buffer
+      vim.api.nvim_set_option_value("foldmethod", "manual", { win = win })
+
+      -- Create the fold using vim command in the context of the window
+      vim.api.nvim_win_call(win, function()
+        -- Create fold from start_line to end_line
+        pcall(vim.cmd, string.format("%d,%dfold", start_line, end_line))
+      end)
+
+      -- Restore cursor position
+      pcall(vim.api.nvim_win_set_cursor, win, cursor)
+
+      -- Only need to create fold in one window
+      break
     end
   end
 end
