@@ -260,7 +260,6 @@ def rebuild_buffer_content(conversation: dict[str, Any], messages: list[dict[str
     """
     lines: list[str] = []
     lines.append(markers.make_conversation_marker(conversation["id"], conversation["created_at"]))
-    lines.append("")
 
     for msg in messages:
         if msg["role"] == "user":
@@ -288,6 +287,5 @@ def rebuild_buffer_content(conversation: dict[str, Any], messages: list[dict[str
             lines.append(msg["content"])
             if msg["ended_at"]:
                 lines.append(markers.make_message_end(msg["id"], msg["ended_at"]))
-        lines.append("")
 
     return "\n".join(lines)
