@@ -4,11 +4,9 @@ import pynvim
 import asyncio
 import threading
 
-VERSION = "0.0.1"
+from . import buffers
 
-CHAT_TITLE = "Chat"
-PROMPT_TITLE = "Prompt"
-PROMPT_HEIGHT = 8
+VERSION = "0.0.1"
 
 
 @pynvim.plugin
@@ -51,57 +49,8 @@ class AnyaPlugin:
             self.send(text)
 
     def _open_interface(self):
-        """Create the Anya UI layout with chat and prompt buffers."""
-        chat_buf = None
-        prompt_buf = None
-
-        for buf in self.nvim.buffers:
-            if buf.name.endswith(CHAT_TITLE):
-                chat_buf = buf
-            elif buf.name.endswith(PROMPT_TITLE):
-                prompt_buf = buf
-
-        if not chat_buf or not chat_buf.valid:
-            chat_buf = self.nvim.api.create_buf(False, True)
-            self.nvim.api.buf_set_name(chat_buf, CHAT_TITLE)
-            self.nvim.api.buf_set_option(chat_buf, "filetype", "anya-chat")
-            self.nvim.api.buf_set_option(chat_buf, "buftype", "nofile")
-            self.nvim.api.buf_set_option(chat_buf, "swapfile", False)
-
-        if not prompt_buf or not prompt_buf.valid:
-            prompt_buf = self.nvim.api.create_buf(False, True)
-            self.nvim.api.buf_set_name(prompt_buf, PROMPT_TITLE)
-            self.nvim.api.buf_set_option(prompt_buf, "filetype", "anya-prompt")
-            self.nvim.api.buf_set_option(prompt_buf, "buftype", "nofile")
-            self.nvim.api.buf_set_option(prompt_buf, "swapfile", False)
-
-        self.nvim.command("enew")
-
-        if len(self.nvim.api.list_wins()) > 1:
-            self.nvim.command("only")
-
-        chat_win = self.nvim.api.get_current_win()
-
-        self.nvim.api.win_set_buf(chat_win, chat_buf)
-        self.nvim.api.win_set_option(chat_win, "wrap", True)
-        self.nvim.api.win_set_option(chat_win, "linebreak", True)
-
-        self.nvim.command("botright split")
-        self.nvim.command(f"resize {PROMPT_HEIGHT}")
-        self.nvim.api.win_set_buf(0, prompt_buf)
-
-        self.chat_buf = chat_buf
-        self.prompt_buf = prompt_buf
-
-    def _help_text(self):
-        return f"""anya v{VERSION}
-
-Usage:
-    :Anya                Open the Anya interface
-    :Anya help           Show this help message
-    :Anya open           Open the Anya interface
-    :Anya send <prompt>  Send a prompt to the agent
-"""
+        """Open the Anya interface with chat and prompt buffers."""
+        self.chat_buf, self.prompt_buf = buffers.new(self.nvim)
 
     def send(self, text):
         """Send a prompt to the code agent and display the response."""
@@ -127,3 +76,13 @@ Usage:
                 self.nvim.async_call(self.nvim.err_write, f"Agent error: {e}\n")
 
         asyncio.run_coroutine_threadsafe(run_agent(), loop)
+
+    def _help_text(self):
+        return f"""anya v{VERSION}
+
+Usage:
+    :Anya                Open the Anya interface
+    :Anya help           Show this help message
+    :Anya open           Open the Anya interface
+    :Anya send <prompt>  Send a prompt to the agent
+"""
