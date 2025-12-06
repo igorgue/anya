@@ -17,15 +17,15 @@ M.edit_rejected = "edit_rejected"
 M.edit_failed = "edit_failed"
 M.thinking = "thinking"
 
-M.PREFIX = "<!-- anya:"
+M.PREFIX = "<!-- anya__markers:"
 M.SUFFIX = "-->"
 
--- Pattern to match marker lines: <!-- anya: ... -->
-M.PATTERN = "^<!%-%- anya: (.+) %-%->$"
+-- Pattern to match marker lines: <!-- anya__markers: ... -->
+M.PATTERN = "^<!%-%- anya__markers: (.+) %-%->$"
 
 --- Create a marker line with the given marker names
 --- @param ... string One or more marker names to include
---- @return string A marker line like '<!-- anya: fold_start, tool_pending -->'
+--- @return string A marker line like '<!-- anya__markers: fold_start, tool_pending -->'
 function M.make_marker(...)
   local names = { ... }
   return M.PREFIX .. " " .. table.concat(names, ", ") .. " " .. M.SUFFIX
