@@ -25,75 +25,51 @@ if not _G.anya_edit_extmarks then
   _G.anya_edit_extmarks = {}
 end
 
--- Setup highlight groups (transparent background variants)
+-- Helper to create highlight with fg from source but transparent bg for combining
+local function set_hl_fg_only(name, source, extra)
+  local hl = vim.api.nvim_get_hl(0, { name = source, link = false })
+  local opts = {
+    fg = hl.fg,
+    bg = "NONE",
+    sp = hl.sp,
+    blend = 0, -- Fully opaque fg, transparent bg for hl_mode="combine"
+  }
+  if extra then
+    for k, v in pairs(extra) do
+      opts[k] = v
+    end
+  end
+  vim.api.nvim_set_hl(0, name, opts)
+end
+
+-- Setup highlight groups (fg inherited, bg transparent)
 local function setup_highlights()
-  -- Get base highlight colors
-  local comment = vim.api.nvim_get_hl(0, { name = "Comment", link = false })
-  local ok_msg = vim.api.nvim_get_hl(0, { name = "OkMsg", link = false })
-  local err_msg = vim.api.nvim_get_hl(0, { name = "ErrorMsg", link = false })
+  -- Success: green (from OkMsg)
+  set_hl_fg_only("AnyaToolSuccess", "OkMsg")
 
-  -- Success: green checkmark (from OkMsg)
-  vim.api.nvim_set_hl(0, "AnyaToolSuccess", {
-    fg = ok_msg.fg,
-    bg = "NONE",
-  })
+  -- Failure: red (from ErrorMsg)
+  set_hl_fg_only("AnyaToolFailure", "ErrorMsg")
 
-  -- Failure: red X (from ErrorMsg)
-  vim.api.nvim_set_hl(0, "AnyaToolFailure", {
-    fg = err_msg.fg,
-    bg = "NONE",
-  })
-
-  -- Pending: subtle comment color (from Comment)
-  vim.api.nvim_set_hl(0, "AnyaToolPending", {
-    fg = comment.fg,
-    bg = "NONE",
-  })
+  -- Pending: subtle (from Comment)
+  set_hl_fg_only("AnyaToolPending", "Comment")
 
   -- Thinking: gray for reasoning text (from Comment)
-  vim.api.nvim_set_hl(0, "AnyaThinking", {
-    fg = comment.fg,
-    bg = "NONE",
-  })
+  set_hl_fg_only("AnyaThinking", "Comment")
 
   -- Edit tool highlight groups
   -- Diff indicators
-  vim.api.nvim_set_hl(0, "AnyaEditAdd", {
-    fg = ok_msg.fg,
-    bg = "NONE",
-  })
-
-  local warn_msg = vim.api.nvim_get_hl(0, { name = "WarningMsg", link = false })
-  vim.api.nvim_set_hl(0, "AnyaEditChange", {
-    fg = warn_msg.fg,
-    bg = "NONE",
-  })
-
-  vim.api.nvim_set_hl(0, "AnyaEditDelete", {
-    fg = err_msg.fg,
-    bg = "NONE",
-  })
+  set_hl_fg_only("AnyaEditAdd", "OkMsg")
+  set_hl_fg_only("AnyaEditChange", "WarningMsg")
+  set_hl_fg_only("AnyaEditDelete", "ErrorMsg")
 
   -- Filename (from Constant)
-  local constant = vim.api.nvim_get_hl(0, { name = "Constant", link = false })
-  vim.api.nvim_set_hl(0, "AnyaEditFilename", {
-    fg = constant.fg,
-    bg = "NONE",
-  })
+  set_hl_fg_only("AnyaEditFilename", "Constant")
 
   -- Widget text (from Normal)
-  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
-  vim.api.nvim_set_hl(0, "AnyaEditWidget", {
-    fg = normal.fg,
-    bg = "NONE",
-  })
+  set_hl_fg_only("AnyaEditWidget", "Normal")
 
   -- Widget text bold variant (for selected action)
-  vim.api.nvim_set_hl(0, "AnyaEditWidgetBold", {
-    fg = normal.fg,
-    bg = "NONE",
-    bold = true,
-  })
+  set_hl_fg_only("AnyaEditWidgetBold", "Normal", { bold = true })
 end
 
 -- Ensure highlights are set up

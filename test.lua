@@ -58,6 +58,12 @@ local text_with_markers = [[<!-- anya__conversation: ee236a3d-c40a-4901-bbea-b04
 + local new_code = "something else"
 ```
 <!-- anya__markers: fold_end -->
+**exec | ls ~/**
+<!-- anya__markers: fold_start, tool_success -->
+ `````
+ Android	 Documents  'Pasted image (2).png'   Public	  bin				 hoppydays	     package.json      todo.md
+ `````
+<!-- anya__markers: fold_end -->
 
 > 15s
 <!-- anya__message: f13e20, end, 2024-06-27T14:30:15Z -->
