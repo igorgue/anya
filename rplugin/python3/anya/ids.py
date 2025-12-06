@@ -9,15 +9,20 @@ data_dir = os.environ.get("XDG_DATA_HOME")
 generated_ids: dict[str, int] = dict()
 
 
-def new(salt: str | None = None) -> str:
+def new(
+    salt: str | None = None, conversation: str | None = None, min_length: int = 6
+) -> str:
     """Generate a new unique hashid for a conversation or message identified by the given salt."""
     if not salt:
         salt = get_or_create_salt()
 
+    if conversation:
+        salt = f"{salt}-{conversation}"
+
     global generated_ids
     generated_ids = load()
 
-    hashids = Hashids(salt=salt, min_length=6)
+    hashids = Hashids(salt=salt, min_length=min_length)
 
     n = generated_ids.get(salt, 0) + 1
     generated_ids[salt] = n
