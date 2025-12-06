@@ -53,21 +53,21 @@ local function set_conversation_id(chat_buf, conv_id)
   vim.api.nvim_buf_set_var(chat_buf, CONVERSATION_ID_VAR, conv_id)
 end
 
---- Get the user's name for message attribution
---- @return string The user's name
-local function get_user_name()
-  -- Try git config first
-  local handle = io.popen("git config user.name 2>/dev/null")
-  if handle then
-    local result = handle:read("*a")
-    handle:close()
-    if result and result ~= "" then
-      return vim.trim(result)
-    end
-  end
+--- Titlecase a string (capitalize first letter of each word)
+--- @param str string The string to titlecase
+--- @return string The titlecased string
+local function titlecase(str)
+  return str:gsub("(%a)([%w]*)", function(first, rest)
+    return first:upper() .. rest:lower()
+  end)
+end
 
+--- Get the user's name for message attribution
+--- @return string The user's name (titlecased)
+local function get_user_name()
   -- Fall back to system username
-  return os.getenv("USER") or os.getenv("USERNAME") or "User"
+  local name = os.getenv("USERNAME") or os.getenv("USER") or "User"
+  return titlecase(name)
 end
 
 --- Check if the chat buffer is empty or only contains whitespace

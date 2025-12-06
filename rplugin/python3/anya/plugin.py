@@ -82,7 +82,7 @@ class AnyaPlugin:
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         agent_name = code.name.lower()
 
-        header = f"# {code.name}\n"
+        header = "# Anya\n"
         header += markers.make_agent_message_start(
             msg_id, agent_name, DEFAULT_MODEL, timestamp
         )
