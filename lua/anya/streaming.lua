@@ -4,11 +4,28 @@
 local M = {}
 local markers = require("anya.markers")
 
+-- Namespace for extmarks
+local ns_id = vim.api.nvim_create_namespace("anya_markers")
+
 -- Initialize global state if not exists
 if not _G.anya_stream_queue then
   _G.anya_stream_queue = {}
   _G.anya_stream_timer = nil
 end
+
+-- Setup highlight groups (based on OkMsg but without background)
+local function setup_highlights()
+  -- Get OkMsg colors and create variant without background
+  local ok_msg = vim.api.nvim_get_hl(0, { name = "OkMsg" })
+  vim.api.nvim_set_hl(0, "AnyaToolSuccess", {
+    fg = ok_msg.fg,
+    bold = ok_msg.bold,
+    -- bg intentionally omitted (nil)
+  })
+end
+
+-- Ensure highlights are set up
+setup_highlights()
 
 -- Inject markers into text
 -- If markers include "fold", inserts fold_start after first line and fold_end at end
@@ -112,7 +129,7 @@ function M._ensure_timer_running()
 
     -- Vary characters written for natural effect
     local rand = math.random()
-    local chars_to_write = 3
+    local chars_to_write
     if rand < 0.1 then
       chars_to_write = 1 -- 10% very slow
     elseif rand < 0.25 then
@@ -168,9 +185,10 @@ function M._autoscroll_to_bottom(bufnr)
   end
 end
 
--- Process marker lines in buffer and create folds
--- Scans for fold_start/fold_end marker lines and creates corresponding folds
--- fold_start affects line above it, fold_end is included in the fold
+-- Process marker lines in buffer and create folds/extmarks
+-- Scans for markers and applies corresponding UI elements:
+-- - fold_start/fold_end: creates manual folds
+-- - tool_success: highlights header line with OkMsg
 -- @param bufnr number: Buffer number to process
 function M._process_markers(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -192,6 +210,9 @@ function M._process_markers(bufnr)
               M._create_fold_range(bufnr, fold_start_line, fold_end_line)
             end
             fold_start_line = nil
+          elseif marker_name == markers.tool_success then
+            -- Highlight the header line (line above marker) with checkmark icon
+            M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", "✓")
           end
         end
       end
@@ -226,6 +247,42 @@ function M._create_fold_range(bufnr, start_line, end_line)
       break
     end
   end
+end
+
+-- Apply highlight and icon to a header line using extmarks
+-- @param bufnr number: Buffer number
+-- @param line_num number: Line number to highlight (1-indexed)
+-- @param hl_group string: Highlight group to apply
+-- @param icon string|nil: Optional icon to display at right edge of window
+function M._apply_header_highlight(bufnr, line_num, hl_group, icon)
+  if line_num < 1 then
+    return
+  end
+
+  -- Convert to 0-indexed for API
+  local line_idx = line_num - 1
+
+  -- Get the line content to determine end column
+  local lines = vim.api.nvim_buf_get_lines(bufnr, line_idx, line_idx + 1, false)
+  if #lines == 0 then
+    return
+  end
+
+  local line_content = lines[1]
+
+  -- Build extmark options
+  local opts = {
+    end_col = #line_content,
+    hl_group = hl_group,
+  }
+
+  -- Add right-aligned icon if provided
+  if icon then
+    opts.virt_text = { { " " .. icon .. " ", hl_group } }
+    opts.virt_text_pos = "right_align"
+  end
+
+  vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, 0, opts)
 end
 
 -- Clear the streaming queue and stop timer
