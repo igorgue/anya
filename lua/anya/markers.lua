@@ -79,7 +79,7 @@ end
 --- Agent message format: <!-- anya__message: id, start, agent_type, model, timestamp -->
 --- End format: <!-- anya__message: id, end, timestamp -->
 --- @param line string The line to parse
---- @return table|nil Parsed message info: { id, type ("start"/"end"), is_agent, name/agent_type, model (if agent), timestamp }
+--- @return table|nil Parsed info: { id, type, is_agent, name/agent_type, model, timestamp }
 function M.parse_message_marker(line)
   local content = line:match(M.MESSAGE_PATTERN)
   if not content then
