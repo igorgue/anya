@@ -9,8 +9,11 @@ data_dir = os.environ.get("XDG_DATA_HOME")
 generated_ids: dict[str, int] = dict()
 
 
-def new(salt: str) -> str:
+def new(salt: str | None = None) -> str:
     """Generate a new unique hashid for a conversation or message identified by the given salt."""
+    if not salt:
+        salt = get_or_create_salt()
+
     global generated_ids
     generated_ids = load()
 
@@ -24,7 +27,7 @@ def new(salt: str) -> str:
     return hashids.encode(n)
 
 
-def salt() -> str:
+def get_or_create_salt() -> str:
     """Load or generate a completely random salt"""
     salt_file = _get_salt_file()
     salt_file.parent.mkdir(parents=True, exist_ok=True)
