@@ -7,6 +7,7 @@ $XDG_DATA_HOME/anya/conversations.db or ~/.local/share/anya/conversations.db
 import os
 import pathlib
 import sqlite3
+from datetime import datetime
 from typing import Any
 
 from . import markers

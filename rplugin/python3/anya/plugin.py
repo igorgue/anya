@@ -4,6 +4,7 @@ import pynvim
 import asyncio
 import threading
 import os
+import time
 from datetime import datetime, timezone
 
 from . import buffers
@@ -107,6 +108,9 @@ class AnyaPlugin:
         collected_content: list[str] = []
 
         try:
+            # Record start time
+            start_time = time.time()
+
             result = Runner.run_streamed(
                 starting_agent=code,
                 input=llm_history,
@@ -123,6 +127,18 @@ class AnyaPlugin:
                         self.nvim.async_call(
                             self._stream_text_to_buffer, chat_bufnr, delta
                         )
+
+            # Calculate duration
+            end_time = time.time()
+            duration_seconds = end_time - start_time
+
+            # Format duration
+            if duration_seconds >= 60:
+                minutes = int(duration_seconds // 60)
+                seconds = duration_seconds % 60
+                duration_str = f"{minutes}m{seconds:.1f}s"
+            else:
+                duration_str = f"{duration_seconds:.1f}s"
 
             end_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"

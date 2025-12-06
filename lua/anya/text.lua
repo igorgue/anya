@@ -299,6 +299,75 @@ function M._apply_message_info(bufnr, line_num, msg_info)
   })
 end
 
+-- Apply duration info extmark (right-aligned virtual text below the content)
+-- Shows the LLM response time (e.g., "> 13.4s")
+-- @param bufnr number: Buffer number
+-- @param line_num number: Line number to apply extmark to (1-indexed, the line above the marker)
+-- @param duration string: Duration string (e.g., "13.4s")
+function M._apply_duration_info(bufnr, line_num, duration)
+  if line_num < 1 then
+    return
+  end
+
+  -- Create right-aligned virtual text with duration
+  vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_num - 1, 0, {
+    virt_text = { { duration .. " 󰾩 ", "Comment" } },
+    virt_text_pos = "right_align",
+    hl_mode = "combine",
+  })
+end
+
+-- Calculate duration between two ISO 8601 timestamps
+-- @param start_timestamp string ISO 8601 UTC timestamp
+-- @param end_timestamp string ISO 8601 UTC timestamp
+-- @return string|nil Formatted duration string (e.g., "13.4s", "1m23.5s")
+function M._calculate_duration(start_timestamp, end_timestamp)
+  -- Parse ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ
+  local start_year, start_month, start_day, start_hour, start_min, start_sec =
+    start_timestamp:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
+  local end_year, end_month, end_day, end_hour, end_min, end_sec =
+    end_timestamp:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
+
+  if not start_year or not end_year then
+    return nil
+  end
+
+  -- Create epoch timestamps
+  local start_ts = os.time({
+    year = tonumber(start_year),
+    month = tonumber(start_month),
+    day = tonumber(start_day),
+    hour = tonumber(start_hour),
+    min = tonumber(start_min),
+    sec = tonumber(start_sec),
+    isdst = false,
+  })
+
+  local end_ts = os.time({
+    year = tonumber(end_year),
+    month = tonumber(end_month),
+    day = tonumber(end_day),
+    hour = tonumber(end_hour),
+    min = tonumber(end_min),
+    sec = tonumber(end_sec),
+    isdst = false,
+  })
+
+  local duration_seconds = end_ts - start_ts
+  if duration_seconds < 0 then
+    return nil
+  end
+
+  -- Format duration
+  if duration_seconds >= 60 then
+    local minutes = math.floor(duration_seconds / 60)
+    local seconds = duration_seconds % 60
+    return string.format("%dm%.1fs", minutes, seconds)
+  else
+    return string.format("%.1fs", duration_seconds)
+  end
+end
+
 -- Hide a marker line by replacing it with empty virtual text
 -- @param bufnr number: Buffer number
 -- @param line_num number: Line number to hide (1-indexed)
@@ -332,6 +401,8 @@ function M._process_markers(bufnr)
   local fold_start_line = nil
   -- Track message fold starts by id: { [id] = line_number }
   local message_fold_starts = {}
+  -- Track message start info for duration calculation: { [id] = { timestamp, is_agent } }
+  local message_start_info = {}
 
   for i, line in ipairs(lines) do
     -- Check for conversation markers (hide them)
@@ -348,13 +419,29 @@ function M._process_markers(bufnr)
           M._apply_message_info(bufnr, i - 1, msg_info)
           -- Record fold start: the header line (line above marker)
           message_fold_starts[msg_info.id] = i - 1
+          -- Store start info for duration calculation
+          message_start_info[msg_info.id] = {
+            timestamp = msg_info.timestamp,
+            is_agent = msg_info.is_agent,
+          }
         elseif msg_info.type == "end" then
           -- Create fold from start to this end marker (open by default)
           local start_line = message_fold_starts[msg_info.id]
           if start_line and i > start_line then
             M._create_fold_range(bufnr, start_line, i, true)
           end
+
+          -- Calculate and apply duration for agent messages
+          local start_info = message_start_info[msg_info.id]
+          if start_info and start_info.is_agent then
+            local duration = M._calculate_duration(start_info.timestamp, msg_info.timestamp)
+            if duration then
+              M._apply_duration_info(bufnr, i - 1, duration)
+            end
+          end
+
           message_fold_starts[msg_info.id] = nil
+          message_start_info[msg_info.id] = nil
         end
       end
     elseif markers.is_marker_line(line) then
