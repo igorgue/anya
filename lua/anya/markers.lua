@@ -15,6 +15,7 @@ M.edit_pending = "edit_pending"
 M.edit_applied = "edit_applied"
 M.edit_rejected = "edit_rejected"
 M.edit_failed = "edit_failed"
+M.thinking = "thinking"
 
 M.PREFIX = "<!-- anya:"
 M.SUFFIX = "-->"

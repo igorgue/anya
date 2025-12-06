@@ -42,6 +42,12 @@ local function setup_highlights()
     fg = comment.fg,
     bg = "NONE",
   })
+
+  -- Thinking: gray for reasoning text (from Comment)
+  vim.api.nvim_set_hl(0, "AnyaThinking", {
+    fg = comment.fg,
+    bg = "NONE",
+  })
 end
 
 -- Ensure highlights are set up
@@ -239,6 +245,9 @@ function M._process_markers(bufnr)
           elseif marker_name == markers.tool_pending then
             -- Highlight the header line (line above marker) with pending icon
             M._apply_header_highlight(bufnr, i - 1, "AnyaToolPending", icons.pending)
+          elseif marker_name == markers.thinking then
+            -- Highlight the header line (line above marker) with thinking icon
+            M._apply_header_highlight(bufnr, i - 1, "AnyaThinking", icons.thinking)
           end
         end
       end
