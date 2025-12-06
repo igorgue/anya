@@ -394,6 +394,7 @@ function M._create_fold_range(bufnr, start_line, end_line, open)
         pcall(vim.cmd, string.format("%d,%dfold", start_line, end_line))
         -- Open the fold if requested
         if open then
+          ---@diagnostic disable-next-line: param-type-mismatch
           pcall(vim.cmd, string.format("%dfoldopen", start_line))
         end
       end)
