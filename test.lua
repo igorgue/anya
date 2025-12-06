@@ -11,13 +11,30 @@
 -- `````
 -- <!-- anya: fold_end -->]]
 
-local text_with_markers = [[**thinking**
-<!-- anya: fold_start, thinking -->
-The user asks a question or makes a statement that requires thoughtful consideration or analysis. This marker indicates that the response should involve deeper reflection, reasoning, or exploration of ideas.
+-- local text_with_markers = [[**thinking**
+-- <!-- anya: fold_start, thinking -->
+-- The user asks a question or makes a statement that requires thoughtful consideration or analysis. This marker indicates that the response should involve deeper reflection, reasoning, or exploration of ideas.
+-- <!-- anya: fold_end -->]]
+
+-- Test: edit tool with diff info and accept/reject widget
+-- Header format: "27+ 2~ 30- | filename.ext"
+-- The diff info is parsed from the header line, not encoded in the marker
+
+local text_with_markers = [[27+ 2~ 30- | lua/anya/streaming.lua
+<!-- anya: fold_start, edit_applied -->
+```diff
+- local old_code = "something"
++ local new_code = "something else"
+```
 <!-- anya: fold_end -->]]
 
 local bufnr = vim.api.nvim_get_current_buf()
 
 require("anya").streaming.output_text(bufnr, text_with_markers, {})
+
+-- Test keymap: press 1 to accept, 2 to reject
+-- After running this test, you can test the state update with:
+-- :lua require("anya").streaming.update_edit_state_at_cursor("accepted")
+-- :lua require("anya").streaming.update_edit_state_at_cursor("rejected")
 
 -- vim: wrap :

@@ -20,6 +20,11 @@ if not _G.anya_stream_queue then
   _G.anya_stream_timer = nil
 end
 
+-- Track edit extmarks for state updates: { [extmark_id] = { bufnr, line_num, state, diff_info } }
+if not _G.anya_edit_extmarks then
+  _G.anya_edit_extmarks = {}
+end
+
 -- Setup highlight groups (transparent background variants)
 local function setup_highlights()
   -- Success: green checkmark (from OkMsg)
@@ -47,6 +52,44 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "AnyaThinking", {
     fg = comment.fg,
     bg = "NONE",
+  })
+
+  -- Edit tool highlight groups
+  -- Diff indicators
+  vim.api.nvim_set_hl(0, "AnyaEditAdd", {
+    fg = ok_msg.fg,
+    bg = "NONE",
+  })
+
+  local warn_msg = vim.api.nvim_get_hl(0, { name = "WarningMsg", link = false })
+  vim.api.nvim_set_hl(0, "AnyaEditChange", {
+    fg = warn_msg.fg,
+    bg = "NONE",
+  })
+
+  vim.api.nvim_set_hl(0, "AnyaEditDelete", {
+    fg = err_msg.fg,
+    bg = "NONE",
+  })
+
+  -- Filename (from Constant)
+  local constant = vim.api.nvim_get_hl(0, { name = "Constant", link = false })
+  vim.api.nvim_set_hl(0, "AnyaEditFilename", {
+    fg = constant.fg,
+    bg = "NONE",
+  })
+
+  -- Widget text (from Comment, normal weight)
+  vim.api.nvim_set_hl(0, "AnyaEditWidget", {
+    fg = comment.fg,
+    bg = "NONE",
+  })
+
+  -- Widget text bold variant (for selected action)
+  vim.api.nvim_set_hl(0, "AnyaEditWidgetBold", {
+    fg = comment.fg,
+    bg = "NONE",
+    bold = true,
   })
 end
 
@@ -211,6 +254,34 @@ function M._autoscroll_to_bottom(bufnr)
   end
 end
 
+-- Parse edit header line to extract diff info
+-- Format: "27+ 2~ 30- | README.md"
+-- @param line string: The header line content
+-- @return table: { added = number, changed = number, deleted = number, filename = string }
+local function parse_edit_header(line)
+  local diff_info = {}
+
+  -- Parse diff indicators: "27+" "2~" "30-"
+  for num, indicator in line:gmatch("(%d+)([+~-])") do
+    local n = tonumber(num) or 0
+    if indicator == "+" then
+      diff_info.added = n
+    elseif indicator == "~" then
+      diff_info.changed = n
+    elseif indicator == "-" then
+      diff_info.deleted = n
+    end
+  end
+
+  -- Parse filename after "|"
+  local filename = line:match("|%s*(.+)%s*$")
+  if filename then
+    diff_info.filename = vim.trim(filename)
+  end
+
+  return diff_info
+end
+
 -- Process marker lines in buffer and create folds/extmarks
 -- Scans for markers and applies corresponding UI elements:
 -- - fold_start/fold_end: creates manual folds
@@ -248,6 +319,21 @@ function M._process_markers(bufnr)
           elseif marker_name == markers.thinking then
             -- Highlight the header line (line above marker) with thinking icon
             M._apply_header_highlight(bufnr, i - 1, "AnyaThinking", icons.thinking)
+          elseif
+            marker_name == markers.edit_pending
+            or marker_name == markers.edit_applied
+            or marker_name == markers.edit_rejected
+            or marker_name == markers.edit_failed
+          then
+            -- Parse diff info from header line (line above marker)
+            local header_line_idx = i - 2 -- 0-indexed, line above marker
+            if header_line_idx >= 0 then
+              local header_line = lines[i - 1] -- 1-indexed
+              local diff_info = parse_edit_header(header_line)
+              -- Map marker name to state
+              local state = marker_name:match("^edit_(.+)$") or "pending"
+              M._apply_edit_header(bufnr, i - 1, state, diff_info)
+            end
           end
         end
       end
@@ -319,6 +405,199 @@ function M._apply_header_highlight(bufnr, line_num, hl_group, icon)
   end
 
   vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, 0, opts)
+end
+
+-- Build virtual text for edit tool widget (right-aligned)
+-- Format: "1: accept | 2: reject [icon]"
+-- @param state string: "pending", "applied", or "rejected"
+-- @return table: Array of {text, hl_group} tuples for virt_text
+local function build_edit_virt_text(state)
+  local virt_text = {}
+
+  -- Widget: "1: accept | 2: reject"
+  local accept_hl = state == "applied" and "AnyaEditWidgetBold" or "AnyaEditWidget"
+  local reject_hl = state == "rejected" and "AnyaEditWidgetBold" or "AnyaEditWidget"
+
+  table.insert(virt_text, { "1: ", "AnyaEditWidget" })
+  table.insert(virt_text, { "accept", accept_hl })
+  table.insert(virt_text, { " | ", "AnyaEditWidget" })
+  table.insert(virt_text, { "2: ", "AnyaEditWidget" })
+  table.insert(virt_text, { "reject ", reject_hl })
+
+  -- Icon based on state
+  local icon, icon_hl
+  if state == "applied" then
+    icon = icons.success
+    icon_hl = "AnyaToolSuccess"
+  elseif state == "rejected" then
+    icon = icons.failure
+    icon_hl = "AnyaToolFailure"
+  else
+    icon = icons.pending
+    icon_hl = "AnyaToolPending"
+  end
+  table.insert(virt_text, { icon .. " ", icon_hl })
+
+  return virt_text
+end
+
+-- Apply inline highlights to edit header line for diff indicators and filename
+-- Format: "27+ 2~ 30- | README.md"
+-- @param bufnr number: Buffer number
+-- @param line_idx number: Line index (0-indexed)
+-- @param line_content string: The header line content
+-- @param diff_info table: Parsed diff info (used for validation)
+local function apply_edit_header_highlights(bufnr, line_idx, line_content, diff_info)
+  -- Highlight diff indicators: "27+" "2~" "30-"
+  for start_pos, num, indicator, end_pos in line_content:gmatch("()(%d+)([+~-])()") do
+    local hl_group
+    if indicator == "+" then
+      hl_group = "AnyaEditAdd"
+    elseif indicator == "~" then
+      hl_group = "AnyaEditChange"
+    elseif indicator == "-" then
+      hl_group = "AnyaEditDelete"
+    end
+
+    if hl_group then
+      vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, start_pos - 1, {
+        end_col = end_pos - 1,
+        hl_group = hl_group,
+        hl_mode = "combine",
+      })
+    end
+  end
+
+  -- Highlight filename after "|"
+  local pipe_pos = line_content:find("|")
+  if pipe_pos and diff_info.filename then
+    local filename_start = line_content:find(diff_info.filename, pipe_pos, true)
+    if filename_start then
+      vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, filename_start - 1, {
+        end_col = filename_start - 1 + #diff_info.filename,
+        hl_group = "AnyaEditFilename",
+        hl_mode = "combine",
+      })
+    end
+  end
+end
+
+-- Apply edit tool header with diff info and accept/reject widget
+-- @param bufnr number: Buffer number
+-- @param line_num number: Line number to highlight (1-indexed)
+-- @param state string: "pending", "applied", or "rejected"
+-- @param diff_info table: { added = number, changed = number, deleted = number, filename = string }
+-- @return number|nil: Extmark ID for later updates
+function M._apply_edit_header(bufnr, line_num, state, diff_info)
+  if line_num < 1 then
+    return nil
+  end
+
+  -- Convert to 0-indexed for API
+  local line_idx = line_num - 1
+
+  -- Get the line content
+  local lines = vim.api.nvim_buf_get_lines(bufnr, line_idx, line_idx + 1, false)
+  if #lines == 0 then
+    return nil
+  end
+
+  local line_content = lines[1]
+
+  -- Apply inline highlights for diff indicators and filename
+  apply_edit_header_highlights(bufnr, line_idx, line_content, diff_info)
+
+  -- Build virtual text for widget only
+  local virt_text = build_edit_virt_text(state)
+
+  -- Build extmark options for the widget
+  local opts = {
+    virt_text = virt_text,
+    virt_text_pos = "right_align",
+    hl_mode = "combine",
+  }
+
+  local extmark_id = vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, 0, opts)
+
+  -- Store for later updates
+  _G.anya_edit_extmarks[extmark_id] = {
+    bufnr = bufnr,
+    line_num = line_num,
+    state = state,
+    diff_info = diff_info,
+  }
+
+  return extmark_id
+end
+
+-- Update an existing edit extmark's state (called when user presses 1 or 2)
+-- @param extmark_id number: The extmark ID to update
+-- @param new_state string: "accepted" or "rejected"
+function M.update_edit_state(extmark_id, new_state)
+  local edit_data = _G.anya_edit_extmarks[extmark_id]
+  if not edit_data then
+    return
+  end
+
+  local bufnr = edit_data.bufnr
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    _G.anya_edit_extmarks[extmark_id] = nil
+    return
+  end
+
+  -- Get current extmark position (it may have moved)
+  local extmark = vim.api.nvim_buf_get_extmark_by_id(bufnr, ns_id, extmark_id, {})
+  if #extmark == 0 then
+    _G.anya_edit_extmarks[extmark_id] = nil
+    return
+  end
+
+  local line_idx = extmark[1]
+
+  -- Build new virtual text with updated state
+  local virt_text = build_edit_virt_text(new_state)
+
+  -- Update the extmark
+  vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, 0, {
+    id = extmark_id,
+    virt_text = virt_text,
+    virt_text_pos = "right_align",
+    hl_mode = "combine",
+  })
+
+  -- Update stored state
+  edit_data.state = new_state
+end
+
+-- Get edit extmark at a specific line (for keymap handling)
+-- @param bufnr number: Buffer number
+-- @param line_num number: Line number (1-indexed)
+-- @return number|nil: Extmark ID if found
+function M.get_edit_extmark_at_line(bufnr, line_num)
+  local line_idx = line_num - 1
+  local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns_id, { line_idx, 0 }, { line_idx, -1 }, {})
+
+  for _, extmark in ipairs(extmarks) do
+    local extmark_id = extmark[1]
+    if _G.anya_edit_extmarks[extmark_id] then
+      return extmark_id
+    end
+  end
+
+  return nil
+end
+
+-- Update edit state at current cursor position (for keymap use)
+-- @param new_state string: "accepted" or "rejected"
+function M.update_edit_state_at_cursor(new_state)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local line_num = cursor[1]
+
+  local extmark_id = M.get_edit_extmark_at_line(bufnr, line_num)
+  if extmark_id then
+    M.update_edit_state(extmark_id, new_state)
+  end
 end
 
 -- Clear the streaming queue and stop timer
