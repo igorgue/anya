@@ -133,7 +133,9 @@ class AnyaPlugin:
         self.nvim.api.buf_set_option(bufnr, "modifiable", True)
         lines = text.split("\n")
         line_count = self.nvim.api.buf_line_count(bufnr)
-        last_line = self.nvim.api.buf_get_lines(bufnr, line_count - 1, line_count, False)
+        last_line = self.nvim.api.buf_get_lines(
+            bufnr, line_count - 1, line_count, False
+        )
         last_col = len(last_line[0]) if last_line else 0
         self.nvim.api.buf_set_text(
             bufnr, line_count - 1, last_col, line_count - 1, last_col, lines
