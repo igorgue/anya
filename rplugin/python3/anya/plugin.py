@@ -395,3 +395,17 @@ Usage:
         if not data:
             return None
         return db.rebuild_buffer_content(data["conversation"], data["messages"])
+
+    @pynvim.function("AnyaCompleteAsync", sync=False)
+    def anya_complete_async(self, args):
+        """Provide async file path completions for @mentions.
+
+        Args:
+            args[0]: Base path to complete
+            args[1]: Callback ID
+        """
+        if len(args) < 2:
+            self.nvim.err_write("AnyaCompleteAsync requires base and callback_id.\n")
+            return
+        base, callback_id = args
+        buffers.get_file_completions_async(self.nvim, base, callback_id)

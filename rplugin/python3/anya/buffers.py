@@ -1,3 +1,4 @@
+import os
 from pynvim import Nvim
 
 CHAT_TITLE = "Chat"
@@ -79,3 +80,91 @@ def new(nvim: Nvim) -> tuple[object]:
     )
 
     return (chat_buf, prompt_buf)
+
+
+def get_file_completions_async(nvim: Nvim, base: str, callback_id: str):
+    """Get file completions and call back to Lua.
+
+    Args:
+        nvim: Neovim instance
+        base: Base path to complete from
+        callback_id: Callback ID to pass back to Lua
+    """
+    matches = []
+    limit = 50
+
+    # Handle empty base - show files in current directory
+    if base == "":
+        base = ""
+
+    # Determine the directory to search and the prefix to match
+    dir_part = ""
+    prefix = base
+
+    if "/" in base:
+        # Path contains directory separator
+        parts = base.rsplit("/", 1)
+        if len(parts) == 2:
+            dir_part = parts[0]
+            prefix = parts[1]
+
+    # Convert to absolute path for scanning
+    if dir_part == "":
+        search_dir = nvim.funcs.getcwd()
+    elif dir_part.startswith("/"):
+        search_dir = dir_part
+    else:
+        search_dir = os.path.join(nvim.funcs.getcwd(), dir_part)
+
+    # Remove trailing slash for directory scanning
+    if search_dir.endswith("/"):
+        search_dir = search_dir[:-1]
+
+    # Walk the directory tree
+    try:
+        count = 0
+        for root, dirs, files in os.walk(search_dir):
+            # Skip hidden directories and .git
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d != ".git"]
+
+            # Check for matching files in current directory
+            all_items = dirs + files
+
+            for name in all_items:
+                if count >= limit:
+                    break
+
+                # Skip hidden files
+                if name.startswith("."):
+                    continue
+
+                # Check if the name matches our prefix
+                if prefix == "" or name.lower().startswith(prefix.lower()):
+                    display_name = name
+
+                    # For directories, add trailing slash
+                    if name in dirs:
+                        display_name = name + "/"
+
+                    # Reconstruct the completion path
+                    completion = dir_part + display_name if dir_part else display_name
+                    matches.append(completion)
+                    count += 1
+
+            if count >= limit:
+                break
+
+            # Limit depth to avoid scanning too deep
+            level = root[len(search_dir):].count(os.sep)
+            if level >= 3:
+                dirs[:] = []  # Don't recurse further
+
+    except (OSError, PermissionError):
+        # Handle permission errors gracefully
+        pass
+
+    # Sort results: directories first, then files, alphabetically
+    matches.sort(key=lambda x: (not x.endswith("/"), x.lower()))
+
+    # Call back to Lua with the results
+    nvim.exec_lua("ananya_blink_file_completion_callback(...)", [matches, callback_id])
