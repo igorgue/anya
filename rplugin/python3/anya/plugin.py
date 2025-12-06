@@ -21,6 +21,14 @@ class AnyaPlugin(object):
 
     def __init__(self, nvim: Nvim) -> None:
         self.nvim = nvim
+        self.loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._loop_thread.start()
+
+    def _run_loop(self):
+        """Run the event loop forever in a background thread."""
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
 
     @command("Anya", nargs="*", range="")
     def main_cmd(self, args: list[str], _range: list[int]) -> None:
@@ -84,29 +92,21 @@ class AnyaPlugin(object):
         # Create context with nvim instance
         context = NvimPluginContext(nvim=self.nvim)
 
-        def run_agent():
-            """Run agent in a separate thread with its own event loop."""
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        async def run_agent():
+            """Run agent asynchronously."""
             try:
-                result = loop.run_until_complete(
-                    Runner.run(
-                        starting_agent=code,
-                        input=text,
-                        context=context,
-                    )
+                result = await Runner.run(
+                    starting_agent=code,
+                    input=text,
+                    context=context,
                 )
                 response = result.final_output or "[No response from agent]"
-                # Callback to main thread with result
                 self.nvim.async_call(self.nvim.out_write, f"\n{response}\n")
             except Exception as e:
                 self.nvim.async_call(self.nvim.err_write, f"Agent error: {e}\n")
-            finally:
-                loop.close()
 
-        # Start agent in background thread (non-blocking)
-        thread = threading.Thread(target=run_agent, daemon=True)
-        thread.start()
+        # Schedule coroutine on the persistent loop (thread-safe)
+        asyncio.run_coroutine_threadsafe(run_agent(), self.loop)
 
     def output_text(
         self, text: str, bufnr: int | None = None, markers: list[str] | None = None
