@@ -50,11 +50,7 @@ def salt() -> str:
 
 def save() -> None:
     """saves the current state of generated_ids to a file for persistence across sessions."""
-    if data_dir:
-        state_file = pathlib.Path(data_dir) / "anya" / "ids.json"
-    else:
-        state_file = pathlib.Path.home() / ".local" / "share" / "anya" / "ids.json"
-
+    state_file = _get_state_file()
     state_file.parent.mkdir(parents=True, exist_ok=True)
 
     with open(state_file, "w") as f:
@@ -63,13 +59,18 @@ def save() -> None:
 
 def load() -> dict[str, int]:
     """loads the state of generated_ids from a file if it exists."""
-    if data_dir:
-        state_file = pathlib.Path(data_dir) / "anya" / "ids.json"
-    else:
-        state_file = pathlib.Path.home() / ".local" / "share" / "anya" / "ids.json"
+    state_file = _get_state_file()
 
     if state_file.exists():
         with open(state_file, "r") as f:
             return json.load(f)
     else:
         return {}
+
+
+def _get_state_file():
+    """Helper function to get the state file path."""
+    if data_dir:
+        return pathlib.Path(data_dir) / "anya" / "ids.json"
+    else:
+        return pathlib.Path.home() / ".local" / "share" / "anya" / "ids.json"
