@@ -2,6 +2,7 @@
 -- Handles queuing and animated text output to buffers
 
 local M = {}
+local markers = require("anya.markers")
 
 -- Initialize global state if not exists
 if not _G.anya_stream_queue then
@@ -9,17 +10,66 @@ if not _G.anya_stream_queue then
   _G.anya_stream_timer = nil
 end
 
+-- Inject fold markers into text
+-- Inserts fold_start marker after first line and fold_end at the end
+-- @param text string: Original text
+-- @param extra_markers string[]: Additional markers to include with fold_start
+-- @return string: Text with marker lines injected
+function M._inject_fold_markers(text, extra_markers)
+  local lines = vim.split(text, "\n", { plain = true })
+  if #lines == 0 then
+    return text
+  end
+
+  -- Build start marker with fold_start + any extra markers
+  local start_names = { markers.fold_start }
+  if extra_markers then
+    for _, m in ipairs(extra_markers) do
+      table.insert(start_names, m)
+    end
+  end
+
+  -- Insert fold_start after first line, fold_end at the end
+  local result = { lines[1], markers.make_marker(unpack(start_names)) }
+  for i = 2, #lines do
+    table.insert(result, lines[i])
+  end
+  table.insert(result, markers.make_marker(markers.fold_end))
+
+  return table.concat(result, "\n")
+end
+
 -- Queue text for animated output
+-- Text may contain marker lines which will be processed after streaming completes
+-- If the text starts with a marker line and the previous queued item ends with
+-- a blank line, the blank line is replaced to avoid consecutive empty lines.
 -- @param bufnr number: Buffer number to write to
--- @param text string: Text to output (can contain newlines)
--- @param fold boolean: Whether to create a fold around the inserted text
+-- @param text string: Text to output (can contain newlines and marker lines)
+-- @param fold boolean|nil: If true, wrap text with fold markers
 function M.output_text(bufnr, text, fold)
-  -- Add text to queue - fold_start_line will be set when processing begins
+  local final_text = text
+
+  -- Inject fold markers if requested
+  if fold then
+    final_text = M._inject_fold_markers(text)
+  end
+
+  -- Check if text starts with a marker line
+  local first_line = final_text:match("^([^\n]*)")
+  local starts_with_marker = first_line and markers.is_marker_line(first_line)
+
+  -- If starting with marker, check if previous queue item ends with blank line
+  if starts_with_marker and #_G.anya_stream_queue > 0 then
+    local prev_item = _G.anya_stream_queue[#_G.anya_stream_queue]
+    if prev_item.bufnr == bufnr and prev_item.text:match("\n$") then
+      -- Remove trailing newline from previous item
+      prev_item.text = prev_item.text:gsub("\n$", "")
+    end
+  end
+
   table.insert(_G.anya_stream_queue, {
     bufnr = bufnr,
-    text = text,
-    fold = fold or false,
-    fold_start_line = nil, -- Set when this item starts processing
+    text = final_text,
   })
 
   -- Start timer if not already running
@@ -50,11 +100,6 @@ function M._ensure_timer_running()
       return
     end
 
-    -- Record fold start line when item begins processing (not when queued)
-    if item.fold and item.fold_start_line == nil then
-      item.fold_start_line = vim.api.nvim_buf_line_count(item.bufnr)
-    end
-
     -- Vary characters written for natural effect
     local rand = math.random()
     local chars_to_write = 3
@@ -80,10 +125,8 @@ function M._ensure_timer_running()
 
     -- Remove item if all text written
     if item.text == "" then
-      -- Create fold if requested
-      if item.fold and item.fold_start_line then
-        M._create_fold(item.bufnr, item.fold_start_line)
-      end
+      -- Process markers and create folds from buffer content
+      M._process_markers(item.bufnr)
       table.remove(_G.anya_stream_queue, 1)
     end
   end
@@ -115,17 +158,42 @@ function M._autoscroll_to_bottom(bufnr)
   end
 end
 
--- Create a manual fold from start_line to current end of buffer
+-- Process marker lines in buffer and create folds
+-- Scans for fold_start/fold_end marker lines and creates corresponding folds
+-- fold_start affects line above it, fold_end is included in the fold
+-- @param bufnr number: Buffer number to process
+function M._process_markers(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local fold_start_line = nil
+
+  for i, line in ipairs(lines) do
+    if markers.is_marker_line(line) then
+      local found_markers = markers.parse_marker(line)
+
+      if found_markers then
+        for _, marker_name in ipairs(found_markers) do
+          if marker_name == markers.fold_start then
+            -- fold_start affects line above (i-1 in 1-indexed)
+            fold_start_line = i - 1
+          elseif marker_name == markers.fold_end and fold_start_line then
+            -- fold_end line is included in the fold
+            local fold_end_line = i
+            if fold_end_line > fold_start_line then
+              M._create_fold_range(bufnr, fold_start_line, fold_end_line)
+            end
+            fold_start_line = nil
+          end
+        end
+      end
+    end
+  end
+end
+
+-- Create a manual fold for a specific range
 -- @param bufnr number: Buffer number
 -- @param start_line number: Line number where fold should start (1-indexed)
-function M._create_fold(bufnr, start_line)
-  local end_line = vim.api.nvim_buf_line_count(bufnr)
-
-  -- Only create fold if there's more than one line
-  if end_line <= start_line then
-    return
-  end
-
+-- @param end_line number: Line number where fold should end (1-indexed)
+function M._create_fold_range(bufnr, start_line, end_line)
   -- Find a window displaying this buffer to create the fold
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     if vim.api.nvim_win_get_buf(win) == bufnr then
@@ -137,7 +205,6 @@ function M._create_fold(bufnr, start_line)
 
       -- Create the fold using vim command in the context of the window
       vim.api.nvim_win_call(win, function()
-        -- Create fold from start_line to end_line
         pcall(vim.cmd, string.format("%d,%dfold", start_line, end_line))
       end)
 

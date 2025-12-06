@@ -10,8 +10,9 @@ local text = [[-- Lorem ipsum dolor sit amet, consectetur adipiscing elit. In li
 
 local bufnr = vim.api.nvim_get_current_buf()
 
-vim.fn.AnyaOutputText(text, bufnr, true)
+-- Call Lua directly for testing (bypasses Python)
+require("anya").streaming.output_text(bufnr, text, true)
 
--- vim: wrap
+-- vim: wrap :
 
 

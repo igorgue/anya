@@ -71,18 +71,20 @@ class AnyaPlugin(object):
     def send(self, text: str):
         self.nvim.out_write(f"Sending text: {text}\n")
 
-    def output_text(self, text: str, bufnr: int = None, fold: bool = False):
+    def output_text(self, text: str, bufnr: int | None = None, fold: bool = False):
         """Output text with streaming animation effect using Lua module.
 
+        Text may contain marker lines (from anya.markers) which will be
+        processed to create folds. If fold=True, markers are injected automatically.
+
         Args:
-            text: Text to output
+            text: Text to output (may contain marker lines)
             bufnr: Buffer number (defaults to current buffer)
-            fold: Whether to create a fold (currently unused but kept for future compatibility)
+            fold: If True, wrap text with fold markers
         """
         if bufnr is None:
-            # Get current buffer number
             bufnr = self.nvim.current.buffer.number
 
         self.nvim.exec_lua(
-            'require("anya").streaming.output_text(...)', bufnr, text, fold,
+            'require("anya").streaming.output_text(...)', bufnr, text, fold
         )
