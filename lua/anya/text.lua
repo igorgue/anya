@@ -487,6 +487,7 @@ end
 -- @param diff_info table: Parsed diff info (used for validation)
 local function apply_edit_header_highlights(bufnr, line_idx, line_content, diff_info)
   -- Highlight diff indicators: "27+" "2~" "30-"
+  ---@diagnostic disable-next-line: unused-local
   for start_pos, num, indicator, end_pos in line_content:gmatch("()(%d+)([+~-])()") do
     local hl_group
     if indicator == "+" then

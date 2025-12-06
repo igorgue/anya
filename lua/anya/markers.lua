@@ -141,8 +141,11 @@ function M.utc_to_local_time(iso_timestamp)
 
   -- Create UTC time table
   local utc_time = os.time({
+    ---@diagnostic disable-next-line: assign-type-mismatch
     year = tonumber(year),
+    ---@diagnostic disable-next-line: assign-type-mismatch
     month = tonumber(month),
+    ---@diagnostic disable-next-line: assign-type-mismatch
     day = tonumber(day),
     hour = tonumber(hour),
     min = tonumber(min),
@@ -155,7 +158,9 @@ function M.utc_to_local_time(iso_timestamp)
   local utc_table = os.date("!*t", utc_time)
 
   -- Calculate offset in seconds
+  ---@diagnostic disable-next-line: param-type-mismatch
   local local_ts = os.time(local_time)
+  ---@diagnostic disable-next-line: param-type-mismatch
   local utc_ts = os.time(utc_table)
   local offset = local_ts - utc_ts
 
