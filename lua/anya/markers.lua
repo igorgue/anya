@@ -17,11 +17,11 @@ M.edit_rejected = "edit_rejected"
 M.edit_failed = "edit_failed"
 M.thinking = "thinking"
 
-M.PREFIX = "<!-- anya__markers:"
+M.PREFIX = "<!-- anya__tools:"
 M.SUFFIX = "-->"
 
--- Pattern to match marker lines: <!-- anya__markers: ... -->
-M.PATTERN = "^<!%-%- anya__markers: (.+) %-%->$"
+-- Pattern to match tool marker lines: <!-- anya__tools: ... -->
+M.TOOLS_PATTERN = "^<!%-%- anya__tools: (.+) %-%->$"
 
 -- Pattern to match message markers: <!-- anya__message: id, start/end, ... -->
 -- User message: <!-- anya__message: 604c2d, start, Igor, 2024-06-27T14:30:00Z -->
@@ -40,7 +40,7 @@ end
 --- @param line string The line to parse
 --- @return string[]|nil List of marker names, or nil if not a marker line
 function M.parse_marker(line)
-  local content = line:match(M.PATTERN)
+  local content = line:match(M.TOOLS_PATTERN)
   if not content then
     return nil
   end
@@ -61,7 +61,7 @@ end
 --- @param line string The line to check
 --- @return boolean True if the line is a marker line
 function M.is_marker_line(line)
-  return line:match(M.PATTERN) ~= nil
+  return line:match(M.TOOLS_PATTERN) ~= nil
 end
 
 --- Check if a line is a message marker line
