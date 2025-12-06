@@ -1,7 +1,9 @@
 import threading
 
+from pynvim import Nvim
 
-def nvim_call_sync(nvim, func):
+
+def nvim_call_sync(nvim: Nvim, func: callable) -> any:
     """Call a function on the main Neovim thread and wait for result."""
     result = [None]
     error = [None]
