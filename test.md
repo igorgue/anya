@@ -13,7 +13,7 @@
 ```
 <!-- anya__markers: fold_end -->
 
-> 15s
+> took 15s
 <!-- anya__message: f13e20, end, 2024-06-27T14:30:15Z -->
 # Igor
 <!-- anya__message: 604c2d, start, 2024-06-27T14:30:00Z -->
