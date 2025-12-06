@@ -133,8 +133,7 @@ end
 --- @return string Local time formatted as "2:30pm"
 function M.utc_to_local_time(iso_timestamp)
   -- Parse ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ
-  local year, month, day, hour, min, sec =
-    iso_timestamp:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
+  local year, month, day, hour, min, sec = iso_timestamp:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
 
   if not year then
     return iso_timestamp -- Return original if parsing fails
