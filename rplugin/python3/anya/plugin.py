@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timezone
 
 from . import buffers
+from . import db
 from . import ids
 from . import markers
 from . import history
@@ -24,6 +25,7 @@ class AnyaPlugin:
         self.prompt_buf = None
         self._loop = None
         self._loop_thread = None
+        self._db_initialized = False
 
     def _ensure_loop(self):
         """Ensure the asyncio event loop is running (lazy initialization)."""
@@ -37,6 +39,12 @@ class AnyaPlugin:
         """Run the event loop forever in a background thread."""
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
+
+    def _ensure_db(self):
+        """Ensure the database is initialized (lazy initialization)."""
+        if not self._db_initialized:
+            db.init_db()
+            self._db_initialized = True
 
     @pynvim.command("Anya", nargs="*", range="", sync=False)
     def main_cmd(self, args, _range):
@@ -226,3 +234,128 @@ Usage:
     :Anya open           Open the Anya interface
     :Anya send <prompt>  Send a prompt to the agent
 """
+
+    @pynvim.function("AnyaSaveConversation", sync=True)
+    def save_conversation(self, args):
+        """Save a new conversation to the database.
+
+        Args:
+            args[0]: Conversation ID
+            args[1]: Timestamp (ISO 8601)
+        """
+        if len(args) < 2:
+            self.nvim.err_write("AnyaSaveConversation requires (id, timestamp).\n")
+            return False
+        self._ensure_db()
+        return db.save_conversation(args[0], args[1])
+
+    @pynvim.function("AnyaSaveMessage", sync=True)
+    def save_message(self, args):
+        """Save a message to the database.
+
+        Args:
+            args[0]: Message ID
+            args[1]: Conversation ID
+            args[2]: Role ('user' or 'assistant')
+            args[3]: Content
+            args[4]: Author (optional)
+            args[5]: Model (optional)
+            args[6]: Created at timestamp (optional)
+            args[7]: Ended at timestamp (optional)
+        """
+        if len(args) < 4:
+            self.nvim.err_write(
+                "AnyaSaveMessage requires (msg_id, conv_id, role, content).\n"
+            )
+            return False
+        self._ensure_db()
+        return db.save_message_dict(
+            msg_id=args[0],
+            conversation_id=args[1],
+            role=args[2],
+            content=args[3],
+            author=args[4] if len(args) > 4 else None,
+            model=args[5] if len(args) > 5 else None,
+            created_at=args[6] if len(args) > 6 else None,
+            ended_at=args[7] if len(args) > 7 else None,
+        )
+
+    @pynvim.function("AnyaListConversations", sync=True)
+    def list_conversations(self, args):
+        """List recent conversations.
+
+        Args:
+            args[0]: Limit (optional, default 50)
+            args[1]: Offset (optional, default 0)
+
+        Returns:
+            List of {id, title, created_at, updated_at}
+        """
+        self._ensure_db()
+        limit = args[0] if args else 50
+        offset = args[1] if len(args) > 1 else 0
+        return db.list_conversations(limit, offset)
+
+    @pynvim.function("AnyaLoadConversation", sync=True)
+    def load_conversation(self, args):
+        """Load a full conversation with messages.
+
+        Args:
+            args[0]: Conversation ID
+
+        Returns:
+            {conversation: {...}, messages: [...]} or None
+        """
+        if not args:
+            self.nvim.err_write("AnyaLoadConversation requires a conversation ID.\n")
+            return None
+        self._ensure_db()
+        return db.load_conversation(args[0])
+
+    @pynvim.function("AnyaUpdateConversationTitle", sync=True)
+    def update_conversation_title(self, args):
+        """Update a conversation's title.
+
+        Args:
+            args[0]: Conversation ID
+            args[1]: Title
+        """
+        if len(args) < 2:
+            self.nvim.err_write(
+                "AnyaUpdateConversationTitle requires (id, title).\n"
+            )
+            return False
+        self._ensure_db()
+        return db.update_conversation_title(args[0], args[1])
+
+    @pynvim.function("AnyaDeleteConversation", sync=True)
+    def delete_conversation(self, args):
+        """Delete a conversation and its messages.
+
+        Args:
+            args[0]: Conversation ID
+        """
+        if not args:
+            self.nvim.err_write("AnyaDeleteConversation requires a conversation ID.\n")
+            return False
+        self._ensure_db()
+        return db.delete_conversation(args[0])
+
+    @pynvim.function("AnyaRebuildBufferContent", sync=True)
+    def rebuild_buffer_content(self, args):
+        """Rebuild buffer content from a conversation ID.
+
+        Args:
+            args[0]: Conversation ID
+
+        Returns:
+            Buffer content string or None
+        """
+        if not args:
+            self.nvim.err_write("AnyaRebuildBufferContent requires a conversation ID.\n")
+            return None
+        self._ensure_db()
+        data = db.load_conversation(args[0])
+        if not data:
+            return None
+        return db.rebuild_buffer_content(data["conversation"], data["messages"])
