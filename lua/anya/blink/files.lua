@@ -89,43 +89,72 @@ local function get_project_root()
   return cwd
 end
 
--- Recursively collect all files in directory
-local function collect_files(dir, root, collected, limit)
-  local uv = vim.loop
-  local handle = uv.fs_scandir(dir)
+-- Collect files using fd if available, fallback to Lua implementation
+local function collect_files(root, collected, limit)
+  -- Try to use fd first (much faster and respects gitignore)
+  local fd_cmd = "fd -tf --type f --hidden --exclude .git . " .. vim.fn.shellescape(root)
+  local handle = io.popen(fd_cmd)
 
-  if not handle then
+  if handle then
+    for line in handle:lines() do
+      if #collected >= limit then
+        break
+      end
+      -- Remove root path and leading slash
+      local relative_path = line:sub(#root + 2)
+      table.insert(collected, relative_path)
+    end
+    handle:close()
+
+    -- If we found files with fd, we're done
+    if #collected > 0 then
+      return
+    end
+  end
+
+  -- Fallback to Lua implementation
+  local uv = vim.loop
+  local dir_handle = uv.fs_scandir(root)
+
+  if not dir_handle then
     return
   end
 
-  while #collected < limit do
-    local name, type = uv.fs_scandir_next(handle)
-    if not name then
-      break
+  local function collect_recursive(dir)
+    local handle = uv.fs_scandir(dir)
+    if not handle then
+      return
     end
 
-    -- Skip hidden files and common ignored directories
-    if
-      name:sub(1, 1) ~= "."
-      and name ~= "node_modules"
-      and name ~= "__pycache__"
-      and name ~= "target"
-      and name ~= "build"
-      and name ~= "dist"
-      and name ~= "venv"
-      and name ~= ".venv"
-      and name ~= "vendor"
-    then
-      local full_path = dir .. "/" .. name
-      local relative_path = full_path:sub(#root + 2) -- +2 for the leading slash
+    while #collected < limit do
+      local name, type = uv.fs_scandir_next(handle)
+      if not name then
+        break
+      end
 
-      if type == "directory" then
-        collect_files(full_path, root, collected, limit)
-      else
-        table.insert(collected, relative_path)
+      -- Skip hidden files and common ignore patterns
+      if name:sub(1, 1) ~= "."
+         and name ~= "node_modules"
+         and name ~= "__pycache__"
+         and name ~= "target"
+         and name ~= "build"
+         and name ~= "dist"
+         and name ~= "venv"
+         and name ~= ".venv"
+         and name ~= "vendor" then
+        local full_path = dir .. "/" .. name
+        local relative_path = full_path:sub(#root + 2)
+
+        if type == "directory" then
+          collect_recursive(full_path)
+        else
+          table.insert(collected, relative_path)
+        end
       end
     end
   end
+
+  collect_recursive(root)
 end
 
 function files.new(opts)
@@ -163,7 +192,7 @@ function files.new(opts)
       if file_cache == nil or cache_root ~= project_root then
         file_cache = {}
         cache_root = project_root
-        collect_files(project_root, project_root, file_cache, 5000)
+        collect_files(project_root, file_cache, 5000)
       end
 
       local items = {}
