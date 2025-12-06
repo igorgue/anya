@@ -156,6 +156,16 @@ function M.make_message_end(id, timestamp)
   return "<!-- anya__message: " .. id .. ", end, " .. timestamp .. " -->"
 end
 
+--- Create a message start marker line for an agent message
+--- @param id string The message ID
+--- @param agent_type string The agent type (e.g., "code", "plan")
+--- @param model string The model name (e.g., "gpt-4.1")
+--- @param timestamp string ISO 8601 UTC timestamp
+--- @return string A marker line like '<!-- anya__message: f13e20, start, code, gpt-4.1, 2024-06-27T14:30:00Z -->'
+function M.make_agent_message_start(id, agent_type, model, timestamp)
+  return "<!-- anya__message: " .. id .. ", start, " .. agent_type .. ", " .. model .. ", " .. timestamp .. " -->"
+end
+
 --- Check if a line is a conversation marker line
 --- @param line string The line to check
 --- @return boolean True if the line is a conversation marker line

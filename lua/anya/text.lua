@@ -299,6 +299,25 @@ function M._apply_message_info(bufnr, line_num, msg_info)
   })
 end
 
+-- Hide a marker line by replacing it with empty virtual text
+-- @param bufnr number: Buffer number
+-- @param line_num number: Line number to hide (1-indexed)
+function M._hide_line(bufnr, line_num)
+  if line_num < 1 then
+    return
+  end
+  local line_idx = line_num - 1
+  local lines = vim.api.nvim_buf_get_lines(bufnr, line_idx, line_idx + 1, false)
+  if #lines == 0 then
+    return
+  end
+  -- Use extmark to hide the entire line content
+  vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, 0, {
+    end_col = #lines[1],
+    conceal = "",
+  })
+end
+
 -- Process marker lines in buffer and create folds/extmarks
 -- Scans for markers and applies corresponding UI elements:
 -- - fold_start/fold_end: creates manual folds
@@ -306,6 +325,9 @@ end
 -- - anya__message: displays time or agent info, creates message folds
 -- @param bufnr number: Buffer number to process
 function M._process_markers(bufnr)
+  -- Clear existing extmarks to avoid duplicates
+  vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
+
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local fold_start_line = nil
   -- Track message fold starts by id: { [id] = line_number }
@@ -314,6 +336,8 @@ function M._process_markers(bufnr)
   for i, line in ipairs(lines) do
     -- Check for message markers first (different pattern)
     if markers.is_message_marker(line) then
+      -- Hide the marker line
+      M._hide_line(bufnr, i)
       local msg_info = markers.parse_message_marker(line)
       if msg_info then
         if msg_info.type == "start" then
@@ -331,6 +355,8 @@ function M._process_markers(bufnr)
         end
       end
     elseif markers.is_marker_line(line) then
+      -- Hide the marker line
+      M._hide_line(bufnr, i)
       local found_markers = markers.parse_marker(line)
 
       if found_markers then

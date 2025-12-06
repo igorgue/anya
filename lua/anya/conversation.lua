@@ -201,6 +201,9 @@ function M.send_message()
   -- Scroll chat buffer to bottom
   text._autoscroll_to_bottom(chat_buf)
 
+  -- Send to agent for response (async)
+  vim.fn.AnyaSend(prompt_text, conv_id)
+
   return true
 end
 

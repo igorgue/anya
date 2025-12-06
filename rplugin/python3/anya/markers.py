@@ -32,6 +32,34 @@ def make_marker(*names: str) -> str:
     return f"{PREFIX} {', '.join(names)} {SUFFIX}"
 
 
+def make_agent_message_start(msg_id: str, agent_type: str, model: str, timestamp: str) -> str:
+    """Create a message start marker line for an agent message.
+
+    Args:
+        msg_id: The message ID
+        agent_type: The agent type (e.g., "code", "plan")
+        model: The model name (e.g., "gpt-4.1")
+        timestamp: ISO 8601 UTC timestamp
+
+    Returns:
+        A marker line like '<!-- anya__message: f13e20, start, code, gpt-4.1, 2024-06-27T14:30:00Z -->'
+    """
+    return f"<!-- anya__message: {msg_id}, start, {agent_type}, {model}, {timestamp} -->"
+
+
+def make_message_end(msg_id: str, timestamp: str) -> str:
+    """Create a message end marker line.
+
+    Args:
+        msg_id: The message ID
+        timestamp: ISO 8601 UTC timestamp
+
+    Returns:
+        A marker line like '<!-- anya__message: 604c2d, end, 2024-06-27T14:30:00Z -->'
+    """
+    return f"<!-- anya__message: {msg_id}, end, {timestamp} -->"
+
+
 def with_markers(text: str, marker_list: list[str]) -> str:
     """Inject markers into text.
 
