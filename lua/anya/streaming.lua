@@ -205,6 +205,7 @@ function M._create_fold_range(bufnr, start_line, end_line)
 
       -- Create the fold using vim command in the context of the window
       vim.api.nvim_win_call(win, function()
+        ---@diagnostic disable-next-line: param-type-mismatch
         pcall(vim.cmd, string.format("%d,%dfold", start_line, end_line))
       end)
 

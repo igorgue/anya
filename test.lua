@@ -1,4 +1,5 @@
-local text = [[-- Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ligula nisi, faucibus vel orci quis, faucibus mattis urna. Vivamus malesuada erat nisi. Proin accumsan magna quis orci hendrerit, ac molestie sapien commodo. Suspendisse hendrerit metus vitae diam ullamcorper, nec accumsan metus aliquam. Pellentesque congue, nulla vel porttitor varius, nibh mauris congue justo, et semper ligula ipsum eu arcu. Fusce ac elit non metus egestas vestibulum bibendum sit amet est. Praesent consectetur ex nisl, non scelerisque mi lacinia sed.
+local text =
+  [[-- Lorem ipsum dolor sit amet, consectetur adipiscing elit. In ligula nisi, faucibus vel orci quis, faucibus mattis urna. Vivamus malesuada erat nisi. Proin accumsan magna quis orci hendrerit, ac molestie sapien commodo. Suspendisse hendrerit metus vitae diam ullamcorper, nec accumsan metus aliquam. Pellentesque congue, nulla vel porttitor varius, nibh mauris congue justo, et semper ligula ipsum eu arcu. Fusce ac elit non metus egestas vestibulum bibendum sit amet est. Praesent consectetur ex nisl, non scelerisque mi lacinia sed.
 
 -- Morbi sodales auctor velit, sit amet mattis magna venenatis sed. Cras dictum tempus mattis. Aenean et sapien luctus, sodales odio nec, feugiat ante. Integer nec justo neque. Vivamus a enim aliquam, suscipit ex et, suscipit felis. Pellentesque vitae neque et mauris tempor pulvinar. Phasellus ac ornare felis, ac mattis arcu. Quisque tincidunt dolor justo, eget vestibulum eros tincidunt quis. Pellentesque nec est sed nisl rhoncus laoreet. Aliquam blandit lectus a ex finibus, nec scelerisque urna aliquet. Suspendisse semper ex in leo cursus, sit amet ornare eros blandit. Integer turpis enim, viverra id ex id, porta pharetra ligula. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Phasellus sit amet blandit erat, et faucibus metus. Quisque feugiat, massa tristique faucibus interdum, mi tortor aliquet ligula, quis mattis mauris metus sed magna. Morbi eu dui rhoncus, vestibulum quam id, dictum quam.
 
@@ -14,5 +15,3 @@ local bufnr = vim.api.nvim_get_current_buf()
 require("anya").streaming.output_text(bufnr, text, true)
 
 -- vim: wrap :
-
-
