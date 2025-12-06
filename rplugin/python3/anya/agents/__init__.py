@@ -1,6 +1,6 @@
 from .code import CodeAgent
+from .utils import get_instructions
 
-_ = CodeAgent
-_ = None
+code = CodeAgent(name="Code", instructions=get_instructions("code.md"))
 
-__all__ = ["CodeAgent"]
+__all__ = ["code"]
