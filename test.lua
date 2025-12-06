@@ -62,7 +62,7 @@ local text_with_markers = [[<!-- anya__conversation: ee236a3d-c40a-4901-bbea-b04
 > 15s
 <!-- anya__message: f13e20, end, 2024-06-27T14:30:15Z -->
 # Igor
-<!-- anya__message: 604c2d, start, 2024-06-27T14:30:00Z -->
+<!-- anya__message: 604c2d, start, Igor, 2024-06-27T14:30:00Z -->
 > thanks!
 <!-- anya__message: 604c2d, end, 2024-06-27T14:30:00Z -->]]
 
