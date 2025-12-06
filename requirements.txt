@@ -1,3 +1,4 @@
 pynvim
 openai
 openai-agents
+hashids
