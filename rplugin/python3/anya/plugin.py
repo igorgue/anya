@@ -2,6 +2,14 @@
 
 from pynvim import Nvim, plugin, command, function, autocmd
 import textwrap
+import asyncio
+import threading
+
+from agents import Runner
+
+from .agents import code
+from .agents.context import NvimPluginContext
+
 
 NAME = "anya"
 VERSION = "0.0.1"
@@ -63,13 +71,42 @@ class AnyaPlugin(object):
             {NAME} v{VERSION}
 
             Usage:
-                :Anya help        Show this help message
-                :Anya <command>   Execute a specific command
+                :Anya help              Show this help message
+                :Anya send <prompt>     Send a prompt to the code agent
+                :Anya open              Open the Anya interface
             """
         ).lstrip()
 
     def send(self, text: str):
-        self.nvim.out_write(f"Sending text: {text}\n")
+        """Send a prompt to the code agent and display the response."""
+        self.nvim.out_write(f"Sending: {text}\n")
+
+        # Create context with nvim instance
+        context = NvimPluginContext(nvim=self.nvim)
+
+        def run_agent():
+            """Run agent in a separate thread with its own event loop."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    Runner.run(
+                        starting_agent=code,
+                        input=text,
+                        context=context,
+                    )
+                )
+                response = result.final_output or "[No response from agent]"
+                # Callback to main thread with result
+                self.nvim.async_call(self.nvim.out_write, f"\n{response}\n")
+            except Exception as e:
+                self.nvim.async_call(self.nvim.err_write, f"Agent error: {e}\n")
+            finally:
+                loop.close()
+
+        # Start agent in background thread (non-blocking)
+        thread = threading.Thread(target=run_agent, daemon=True)
+        thread.start()
 
     def output_text(
         self, text: str, bufnr: int | None = None, markers: list[str] | None = None

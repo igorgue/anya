@@ -1,13 +1,13 @@
 from agents import Agent
 
-from .context import PluginContext
+from .context import NvimPluginContext
 from .utils import get_instructions
 from ..tools.buffer_name import buffer_name
 
-code = Agent[PluginContext](
+code = Agent[NvimPluginContext](
     name="Code",
     instructions=get_instructions("code.md"),
     tools=[buffer_name],
 )
 
-__all__ = ["code"]
+__all__ = ["code", "NvimPluginContext"]
