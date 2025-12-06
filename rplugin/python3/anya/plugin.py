@@ -6,7 +6,6 @@ import threading
 
 VERSION = "0.0.1"
 
-# Buffer configuration
 CHAT_TITLE = "Chat"
 PROMPT_TITLE = "Prompt"
 PROMPT_HEIGHT = 8
@@ -18,7 +17,6 @@ class AnyaPlugin:
         self.nvim = nvim
         self.chat_buf = None
         self.prompt_buf = None
-        # Lazy-initialized for async operations
         self._loop = None
         self._loop_thread = None
 
@@ -79,11 +77,11 @@ class AnyaPlugin:
 
         self.nvim.command("enew")
 
-        # Close other windows if there are multiple
         if len(self.nvim.api.list_wins()) > 1:
             self.nvim.command("only")
 
         chat_win = self.nvim.api.get_current_win()
+
         self.nvim.api.win_set_buf(chat_win, chat_buf)
         self.nvim.api.win_set_option(chat_win, "wrap", True)
         self.nvim.api.win_set_option(chat_win, "linebreak", True)
