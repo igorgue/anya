@@ -28,6 +28,6 @@ local text_with_markers = [[<!-- anya__conversation: 67f169, 2024-06-27T14:30:00
 
 local bufnr = vim.api.nvim_get_current_buf()
 
-require("anya").streaming.output_text_sync(bufnr, text_with_markers, {})
+require("anya").text.output(bufnr, text_with_markers, {})
 
 -- vim: wrap :

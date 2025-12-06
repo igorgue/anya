@@ -121,7 +121,7 @@ end
 -- @param bufnr number: Buffer number to write to
 -- @param text string: Text to output (can contain newlines and marker lines)
 -- @param marker_list string[]|nil: List of markers to inject (e.g., {"fold", "tool_success"})
-function M.output_text(bufnr, text, marker_list)
+function M.output(bufnr, text, marker_list)
   local final_text = text
 
   -- Inject markers if requested
@@ -643,7 +643,7 @@ end
 -- @param bufnr number: Buffer number to write to
 -- @param text string: Text to output (can contain newlines and marker lines)
 -- @param marker_list string[]|nil: List of markers to inject (e.g., {"fold", "tool_success"})
-function M.output_text_sync(bufnr, text, marker_list)
+function M.output_sync(bufnr, text, marker_list)
   -- Validate buffer
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return

@@ -88,5 +88,5 @@ class AnyaPlugin(object):
             bufnr = self.nvim.current.buffer.number
 
         self.nvim.exec_lua(
-            'require("anya").streaming.output_text(...)', bufnr, text, markers
+            'require("anya").text.output_text(...)', bufnr, text, markers
         )

@@ -1,7 +1,7 @@
 local markers = require("anya.markers")
-local streaming = require("anya.streaming")
+local text = require("anya.text")
 
 return {
   markers = markers,
-  streaming = streaming,
+  text = text,
 }
