@@ -293,25 +293,7 @@ function M._apply_message_info(bufnr, line_num, msg_info)
 
   -- Create right-aligned virtual text
   vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, 0, {
-    virt_text = { { display_text .. " ", "AnyaToolSuccess" } },
-    virt_text_pos = "right_align",
-    hl_mode = "combine",
-  })
-end
-
--- Apply duration info extmark (right-aligned virtual text below the content)
--- Shows the LLM response time (e.g., "> 13.4s")
--- @param bufnr number: Buffer number
--- @param line_num number: Line number to apply extmark to (1-indexed, the line above the marker)
--- @param duration string: Duration string (e.g., "13.4s")
-function M._apply_duration_info(bufnr, line_num, duration)
-  if line_num < 1 then
-    return
-  end
-
-  -- Create right-aligned virtual text with duration
-  vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_num - 1, 0, {
-    virt_text = { { duration .. " 󰾩 ", "Comment" } },
+    virt_text = { { display_text, "AnyaToolSuccess" } },
     virt_text_pos = "right_align",
     hl_mode = "combine",
   })
@@ -387,6 +369,32 @@ function M._hide_line(bufnr, line_num)
   })
 end
 
+-- Hide a marker line and show duration at the end
+-- @param bufnr number: Buffer number
+-- @param line_num number: Line number to hide (1-indexed)
+-- @param duration string: Duration string to show
+function M._hide_line_with_duration(bufnr, line_num, duration)
+  if line_num < 1 then
+    return
+  end
+  local line_idx = line_num - 1
+  local lines = vim.api.nvim_buf_get_lines(bufnr, line_idx, line_idx + 1, false)
+  if #lines == 0 then
+    return
+  end
+  -- Use extmark to hide the entire line content and add duration at the end
+  vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, 0, {
+    end_col = #lines[1],
+    conceal = "",
+  })
+  -- Add duration as right-aligned text after the concealed marker
+  vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, #lines[1], {
+    virt_text = { { duration .. " 󰾩 ", "Comment" } },
+    virt_text_pos = "right_align",
+    hl_mode = "combine",
+  })
+end
+
 -- Process marker lines in buffer and create folds/extmarks
 -- Scans for markers and applies corresponding UI elements:
 -- - fold_start/fold_end: creates manual folds
@@ -436,8 +444,11 @@ function M._process_markers(bufnr)
           if start_info and start_info.is_agent then
             local duration = M._calculate_duration(start_info.timestamp, msg_info.timestamp)
             if duration then
-              M._apply_duration_info(bufnr, i - 1, duration)
+              M._hide_line_with_duration(bufnr, i, duration)
             end
+          else
+            -- Hide the marker line normally for non-agent messages
+            M._hide_line(bufnr, i)
           end
 
           message_fold_starts[msg_info.id] = nil
