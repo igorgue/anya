@@ -86,7 +86,7 @@ class AnyaPlugin:
         header += markers.make_agent_message_start(
             msg_id, agent_name, DEFAULT_MODEL, timestamp
         )
-        header += "\n\n"
+        header += "\n"
 
         self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, header)
 
@@ -108,9 +108,8 @@ class AnyaPlugin:
                         )
 
             end_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            footer = "\n\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
-            self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, footer)
-            self.nvim.async_call(self._process_markers, chat_bufnr)
+            footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
+            self.nvim.async_call(self._stream_text_to_buffer, chat_bufnr, footer)
 
         except Exception as e:
             self.nvim.async_call(

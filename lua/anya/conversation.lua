@@ -170,13 +170,22 @@ function M.send_message()
     -- Replace the empty buffer content
     insert_line = 0
   else
+    -- Remove trailing blank lines before adding new message
+    local was_modifiable = vim.api.nvim_get_option_value("modifiable", { buf = chat_buf })
+    vim.api.nvim_set_option_value("modifiable", true, { buf = chat_buf })
+    local line_count = vim.api.nvim_buf_line_count(chat_buf)
+    while line_count > 0 do
+      local last_line = vim.api.nvim_buf_get_lines(chat_buf, line_count - 1, line_count, false)[1] or ""
+      if last_line == "" then
+        vim.api.nvim_buf_set_lines(chat_buf, line_count - 1, line_count, false, {})
+        line_count = line_count - 1
+      else
+        break
+      end
+    end
+    vim.api.nvim_set_option_value("modifiable", was_modifiable, { buf = chat_buf })
     -- Append after existing content
     insert_line = vim.api.nvim_buf_line_count(chat_buf)
-    -- Add a blank line separator if the last line isn't empty
-    local last_line = vim.api.nvim_buf_get_lines(chat_buf, -2, -1, false)[1] or ""
-    if last_line ~= "" then
-      table.insert(output_lines, 1, "")
-    end
   end
 
   -- Make buffer modifiable, insert lines, then restore
