@@ -1,7 +1,7 @@
-from .base import BaseAgent
+from .base import AnyaAgent
 
 
-class CodeAgent(BaseAgent):
+class CodeAgent(AnyaAgent):
     """Agent for code-related tasks, the default agent."""
 
     pass
