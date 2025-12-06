@@ -120,51 +120,92 @@ def get_file_completions_async(nvim: Nvim, base: str, callback_id: str):
     if search_dir.endswith("/"):
         search_dir = search_dir[:-1]
 
-    # Walk the directory tree
+    # Try to use fd first (much faster and respects gitignore)
+    import subprocess
     try:
-        count = 0
-        for root, dirs, files in os.walk(search_dir):
-            # Skip hidden directories and .git
-            dirs[:] = [d for d in dirs if not d.startswith(".") and d != ".git"]
+        # Use fd to get files and directories
+        cmd = ["fd", "--max-depth", "3", "--type", "f", "--type", "d", ".", search_dir]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=2,  # 2 second timeout
+        )
 
-            # Check for matching files in current directory
-            all_items = dirs + files
+        if result.returncode == 0:
+            # Process fd output
+            for line in result.stdout.strip().split('\n'):
+                if not line or len(matches) >= limit:
+                    break
 
-            for name in all_items:
+                # Convert to relative path
+                if line.startswith(search_dir):
+                    relative = line[len(search_dir):]
+                    if relative.startswith('/'):
+                        relative = relative[1:]
+                else:
+                    relative = line
+
+                # Check if it matches our prefix
+                name = relative.split('/')[-1]
+                if prefix == "" or name.lower().startswith(prefix.lower()):
+                    display_name = relative
+                    # Add trailing slash for directories
+                    if line.strip().endswith('/'):
+                        display_name = relative + "/"
+                    completion = dir_part + display_name if dir_part else display_name
+                    matches.append(completion)
+
+            # Sort results: directories first, then files, alphabetically
+            matches.sort(key=lambda x: (not x.endswith("/"), x.lower()))
+        else:
+            raise Exception("fd command failed")
+
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        # Fallback to os.walk if fd is not available or fails
+        try:
+            count = 0
+            for root, dirs, files in os.walk(search_dir):
+                # Skip hidden directories and .git
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d != ".git"]
+                # Also skip common ignore patterns
+                dirs[:] = [d for d in dirs if d not in ["node_modules", "__pycache__", "target", "build", "dist", "venv", ".venv", "vendor"]]
+
+                # Process directories first
+                all_items = [(d, "directory") for d in dirs] + [(f, "file") for f in files]
+
+                for name, item_type in all_items:
+                    if count >= limit:
+                        break
+
+                    # Skip hidden files
+                    if name.startswith("."):
+                        continue
+
+                    # Check if the name matches our prefix
+                    if prefix == "" or name.lower().startswith(prefix.lower()):
+                        display_name = name
+
+                        # For directories, add trailing slash
+                        if item_type == "directory":
+                            display_name = name + "/"
+
+                        # Reconstruct the completion path
+                        completion = dir_part + display_name if dir_part else display_name
+                        matches.append(completion)
+                        count += 1
+
                 if count >= limit:
                     break
 
-                # Skip hidden files
-                if name.startswith("."):
-                    continue
+                # Limit depth to avoid scanning too deep
+                level = root[len(search_dir):].count(os.sep)
+                if level >= 3:
+                    dirs[:] = []  # Don't recurse further
 
-                # Check if the name matches our prefix
-                if prefix == "" or name.lower().startswith(prefix.lower()):
-                    display_name = name
-
-                    # For directories, add trailing slash
-                    if name in dirs:
-                        display_name = name + "/"
-
-                    # Reconstruct the completion path
-                    completion = dir_part + display_name if dir_part else display_name
-                    matches.append(completion)
-                    count += 1
-
-            if count >= limit:
-                break
-
-            # Limit depth to avoid scanning too deep
-            level = root[len(search_dir):].count(os.sep)
-            if level >= 3:
-                dirs[:] = []  # Don't recurse further
-
-    except (OSError, PermissionError):
-        # Handle permission errors gracefully
-        pass
-
-    # Sort results: directories first, then files, alphabetically
-    matches.sort(key=lambda x: (not x.endswith("/"), x.lower()))
+        except (OSError, PermissionError):
+            # Handle permission errors gracefully
+            pass
 
     # Call back to Lua with the results
     nvim.exec_lua("ananya_blink_file_completion_callback(...)", [matches, callback_id])
