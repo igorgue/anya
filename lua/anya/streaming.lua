@@ -4,9 +4,12 @@
 local M = {}
 local markers = require("anya.markers")
 
-local icon_pending = "" -- Circle for pending
-local icon_success = "" -- Checkmark for success
-local icon_failure = "" -- Cross for failure
+local icons = {
+  pending = "", -- Circle for pending
+  success = "", -- Checkmark for success
+  failure = "", -- Cross for failure
+  thinking = "󰧑", -- Thinking brain for thinking reasoning text
+}
 
 -- Namespace for extmarks
 local ns_id = vim.api.nvim_create_namespace("anya_markers")
@@ -229,13 +232,13 @@ function M._process_markers(bufnr)
             fold_start_line = nil
           elseif marker_name == markers.tool_success then
             -- Highlight the header line (line above marker) with checkmark icon
-            M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", icon_success)
+            M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", icons.success)
           elseif marker_name == markers.tool_failure then
             -- Highlight the header line (line above marker) with X icon
-            M._apply_header_highlight(bufnr, i - 1, "AnyaToolFailure", icon_failure)
+            M._apply_header_highlight(bufnr, i - 1, "AnyaToolFailure", icons.failure)
           elseif marker_name == markers.tool_pending then
             -- Highlight the header line (line above marker) with pending icon
-            M._apply_header_highlight(bufnr, i - 1, "AnyaToolPending", icon_pending)
+            M._apply_header_highlight(bufnr, i - 1, "AnyaToolPending", icons.pending)
           end
         end
       end
