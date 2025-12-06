@@ -1,10 +1,10 @@
 # AGENTS.md
 
-This file provides guidance to WARP (warp.dev) when working with code in this repository.
+This file provides guidance to an agent when working with code in this repository.
 
 ## Project Overview
 
-agent.nvim is a Neovim plugin that integrates OpenAI's Agents SDK, providing an AI assistant with file system access, code editing capabilities, and context awareness. It's a Python remote plugin that communicates with Neovim via pynvim.
+Anya is a Neovim plugin that integrates OpenAI's Agents SDK, providing an AI assistant with file system access, code editing capabilities, and context awareness. It's a Python remote plugin that communicates with Neovim via pynvim.
 
 ## Architecture
 
