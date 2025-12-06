@@ -13,13 +13,27 @@ if not _G.anya_stream_queue then
   _G.anya_stream_timer = nil
 end
 
--- Setup highlight groups (based on OkMsg but without background)
+-- Setup highlight groups (transparent background variants)
 local function setup_highlights()
-  -- Get OkMsg colors and create variant without background
+  -- Success: green checkmark (from OkMsg)
   local ok_msg = vim.api.nvim_get_hl(0, { name = "OkMsg", link = false })
   vim.api.nvim_set_hl(0, "AnyaToolSuccess", {
     fg = ok_msg.fg,
-    bg = "NONE", -- Transparent background
+    bg = "NONE",
+  })
+
+  -- Failure: red X (from ErrorMsg)
+  local err_msg = vim.api.nvim_get_hl(0, { name = "ErrorMsg", link = false })
+  vim.api.nvim_set_hl(0, "AnyaToolFailure", {
+    fg = err_msg.fg,
+    bg = "NONE",
+  })
+
+  -- Pending: subtle comment color (from Comment)
+  local comment = vim.api.nvim_get_hl(0, { name = "Comment", link = false })
+  vim.api.nvim_set_hl(0, "AnyaToolPending", {
+    fg = comment.fg,
+    bg = "NONE",
   })
 end
 
@@ -211,7 +225,13 @@ function M._process_markers(bufnr)
             fold_start_line = nil
           elseif marker_name == markers.tool_success then
             -- Highlight the header line (line above marker) with checkmark icon
-            M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", "")
+            M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", "󰄬")
+          elseif marker_name == markers.tool_failure then
+            -- Highlight the header line (line above marker) with X icon
+            M._apply_header_highlight(bufnr, i - 1, "AnyaToolFailure", "󰅖")
+          elseif marker_name == markers.tool_pending then
+            -- Highlight the header line (line above marker) with pending icon
+            M._apply_header_highlight(bufnr, i - 1, "AnyaToolPending", "󰦖")
           end
         end
       end
