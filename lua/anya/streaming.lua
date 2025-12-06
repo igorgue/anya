@@ -27,22 +27,24 @@ end
 
 -- Setup highlight groups (transparent background variants)
 local function setup_highlights()
-  -- Success: green checkmark (from OkMsg)
+  -- Get base highlight colors
+  local comment = vim.api.nvim_get_hl(0, { name = "Comment", link = false })
   local ok_msg = vim.api.nvim_get_hl(0, { name = "OkMsg", link = false })
+  local err_msg = vim.api.nvim_get_hl(0, { name = "ErrorMsg", link = false })
+
+  -- Success: green checkmark (from OkMsg)
   vim.api.nvim_set_hl(0, "AnyaToolSuccess", {
     fg = ok_msg.fg,
     bg = "NONE",
   })
 
   -- Failure: red X (from ErrorMsg)
-  local err_msg = vim.api.nvim_get_hl(0, { name = "ErrorMsg", link = false })
   vim.api.nvim_set_hl(0, "AnyaToolFailure", {
     fg = err_msg.fg,
     bg = "NONE",
   })
 
   -- Pending: subtle comment color (from Comment)
-  local comment = vim.api.nvim_get_hl(0, { name = "Comment", link = false })
   vim.api.nvim_set_hl(0, "AnyaToolPending", {
     fg = comment.fg,
     bg = "NONE",
@@ -282,17 +284,57 @@ local function parse_edit_header(line)
   return diff_info
 end
 
+-- Apply message info extmark (right-aligned virtual text)
+-- For user messages: displays local time (e.g., "2:30pm")
+-- For agent messages: displays "agent_type | model" (e.g., "code | gpt-4.1")
+-- @param bufnr number: Buffer number
+-- @param line_num number: Line number to apply extmark to (1-indexed, the line above the marker)
+-- @param msg_info table: Parsed message info from markers.parse_message_marker
+function M._apply_message_info(bufnr, line_num, msg_info)
+  if line_num < 1 then
+    return
+  end
+
+  -- Convert to 0-indexed for API
+  local line_idx = line_num - 1
+
+  -- Build the display text
+  local display_text
+  if msg_info.is_agent then
+    -- Agent message: "code | gpt-4.1"
+    display_text = msg_info.agent_type .. " | " .. msg_info.model
+  else
+    -- User message: convert UTC timestamp to local time
+    display_text = markers.utc_to_local_time(msg_info.timestamp)
+  end
+
+  -- Create right-aligned virtual text
+  vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, 0, {
+    virt_text = { { display_text .. " ", "AnyaToolSuccess" } },
+    virt_text_pos = "right_align",
+    hl_mode = "combine",
+  })
+end
+
 -- Process marker lines in buffer and create folds/extmarks
 -- Scans for markers and applies corresponding UI elements:
 -- - fold_start/fold_end: creates manual folds
 -- - tool_success: highlights header line with OkMsg
+-- - anya__message: displays time or agent info
 -- @param bufnr number: Buffer number to process
 function M._process_markers(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local fold_start_line = nil
 
   for i, line in ipairs(lines) do
-    if markers.is_marker_line(line) then
+    -- Check for message markers first (different pattern)
+    if markers.is_message_marker(line) then
+      local msg_info = markers.parse_message_marker(line)
+      if msg_info and msg_info.type == "start" then
+        -- Apply extmark to the line above the marker (the header line)
+        M._apply_message_info(bufnr, i - 1, msg_info)
+      end
+    elseif markers.is_marker_line(line) then
       local found_markers = markers.parse_marker(line)
 
       if found_markers then
