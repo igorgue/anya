@@ -59,6 +59,7 @@ def new(nvim: Nvim) -> tuple[object]:
 
     nvim.command("botright split")
     nvim.command(f"resize {PROMPT_HEIGHT}")
+    nvim.api.win_set_option(0, "winfixheight", True)
     nvim.api.win_set_buf(0, prompt_buf)
 
     # Set up keymaps for the prompt buffer
