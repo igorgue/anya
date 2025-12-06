@@ -103,6 +103,9 @@ class AnyaPlugin:
 
         self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, header)
 
+        # Collect streamed content for saving
+        collected_content: list[str] = []
+
         try:
             result = Runner.run_streamed(
                 starting_agent=code,
@@ -116,6 +119,7 @@ class AnyaPlugin:
                 ):
                     delta = event.data.delta
                     if delta:
+                        collected_content.append(delta)
                         self.nvim.async_call(
                             self._stream_text_to_buffer, chat_bufnr, delta
                         )
@@ -123,6 +127,22 @@ class AnyaPlugin:
             end_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
             self.nvim.async_call(self._stream_text_to_buffer, chat_bufnr, footer)
+
+            # Save agent message to database
+            self._ensure_db()
+            full_content = "".join(collected_content)
+            db.save_message_dict(
+                msg_id=msg_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=full_content,
+                author=agent_name,
+                model=DEFAULT_MODEL,
+                created_at=timestamp,
+                ended_at=end_timestamp,
+            )
+            # Update conversation timestamp
+            db.update_conversation_timestamp(conversation_id, end_timestamp)
 
         except Exception as e:
             self.nvim.async_call(

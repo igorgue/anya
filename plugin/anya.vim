@@ -7,3 +7,6 @@ if exists('g:loaded_anya')
 endif
 
 let g:loaded_anya = 1
+
+" Command to open the conversation history picker
+command! AnyaHistory lua require('anya.picker').open()

@@ -210,6 +210,12 @@ function M.send_message()
   -- Scroll chat buffer to bottom
   text._autoscroll_to_bottom(chat_buf)
 
+  -- Save to database
+  if is_new_conversation then
+    vim.fn.AnyaSaveConversation(conv_id, timestamp)
+  end
+  vim.fn.AnyaSaveMessage(msg_id, conv_id, "user", prompt_text, user_name, nil, timestamp, timestamp)
+
   -- Send to agent for response (async)
   vim.fn.AnyaSend(prompt_text, conv_id)
 
