@@ -1,4 +1,4 @@
-anya 0.0.1 | model: gpt-4.1 | compact: glm-4.5-flash | agent: code                                                                                                                                  24% of 250k tok
+anya 0.0.1 | code | gpt-4.1                                                                                                                                                                         23% of 250k tok
 <!-- anya__conversation: ee236a3d-c40a-4901-bbea-b04b5467f169, 2024-06-27T14:30:00Z -->
 # Igor
 <!-- anya__message: 604c2d, start, Igor, 2024-06-27T14:30:00Z -->

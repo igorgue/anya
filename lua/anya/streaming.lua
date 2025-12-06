@@ -81,15 +81,16 @@ local function setup_highlights()
     bg = "NONE",
   })
 
-  -- Widget text (from Comment, normal weight)
+  -- Widget text (from Normal)
+  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
   vim.api.nvim_set_hl(0, "AnyaEditWidget", {
-    fg = comment.fg,
+    fg = normal.fg,
     bg = "NONE",
   })
 
   -- Widget text bold variant (for selected action)
   vim.api.nvim_set_hl(0, "AnyaEditWidgetBold", {
-    fg = comment.fg,
+    fg = normal.fg,
     bg = "NONE",
     bold = true,
   })
