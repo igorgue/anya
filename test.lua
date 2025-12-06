@@ -59,7 +59,7 @@ local text_with_markers = [[<!-- anya__conversation: ee236a3d-c40a-4901-bbea-b04
 ```
 <!-- anya__markers: fold_end -->
 **exec | ls ~/**
-<!-- anya__markers: fold_start, tool_success -->
+<!-- anya__markers: fold_start, tool_failure -->
  `````
  Android	 Documents  'Pasted image (2).png'   Public	  bin				 hoppydays	     package.json      todo.md
  `````
