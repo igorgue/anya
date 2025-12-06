@@ -211,7 +211,7 @@ function M._process_markers(bufnr)
             fold_start_line = nil
           elseif marker_name == markers.tool_success then
             -- Highlight the header line (line above marker) with checkmark icon
-            M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", "󰄬")
+            M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", "")
           end
         end
       end
