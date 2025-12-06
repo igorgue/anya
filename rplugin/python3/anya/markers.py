@@ -32,29 +32,41 @@ def make_marker(*names: str) -> str:
     return f"{PREFIX} {', '.join(names)} {SUFFIX}"
 
 
-def with_fold(text: str, *extra_markers: str) -> str:
-    """Wrap text with fold markers.
+def with_markers(text: str, marker_list: list[str]) -> str:
+    """Inject markers into text.
 
-    Inserts a fold_start marker line after the first line and a fold_end
-    marker line at the end. The markers affect the lines above them.
+    If marker_list includes "fold", inserts fold_start after first line
+    and fold_end at the end. All markers are combined into a single
+    marker line after the first line.
 
     Args:
-        text: Text to wrap with fold markers
-        *extra_markers: Additional markers to include with fold_start
+        text: Text to inject markers into
+        marker_list: List of marker names (e.g., ["fold", "tool_success"])
 
     Returns:
-        Text with fold marker lines inserted
+        Text with marker lines inserted
     """
     lines = text.split("\n")
-    if not lines:
+    if not lines or not marker_list:
         return text
 
-    # Combine fold_start with any extra markers
-    start_markers = [FOLD_START] + list(extra_markers)
+    # Check if fold is requested and build start markers
+    has_fold = False
+    start_markers = []
 
-    # Insert fold_start after first line, fold_end at the end
+    for m in marker_list:
+        if m == "fold":
+            has_fold = True
+            start_markers.append(FOLD_START)
+        else:
+            start_markers.append(m)
+
+    # Insert marker line after first line
     result = [lines[0], make_marker(*start_markers)]
     result.extend(lines[1:])
-    result.append(make_marker(FOLD_END))
+
+    # Add fold_end if fold was requested
+    if has_fold:
+        result.append(make_marker(FOLD_END))
 
     return "\n".join(result)

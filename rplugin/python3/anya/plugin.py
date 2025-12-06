@@ -41,17 +41,17 @@ class AnyaPlugin(object):
         self.nvim.out_write("Anya main executed!\n")
 
     @function("AnyaOutputText", sync=True)
-    def output_text_fn(self, args: list[str]) -> None:
+    def output_text_fn(self, args: list) -> None:
         if not args:
             self.nvim.err_write("output_text requires a text argument.\n")
             return
 
         text = args[0]
-        # Optional: pass buffer number and fold flag
+        # Optional: pass buffer number and markers list
         bufnr = int(args[1]) if len(args) > 1 else None
-        fold = bool(args[2]) if len(args) > 2 else False
+        markers = args[2] if len(args) > 2 else None
 
-        self.output_text(text, bufnr, fold)
+        self.output_text(text, bufnr, markers)
 
     @autocmd("BufEnter", pattern="anya_chat", eval='expand("<afile>")', sync=True)
     def on_bufenter(self, filename: str):
@@ -71,20 +71,22 @@ class AnyaPlugin(object):
     def send(self, text: str):
         self.nvim.out_write(f"Sending text: {text}\n")
 
-    def output_text(self, text: str, bufnr: int | None = None, fold: bool = False):
+    def output_text(
+        self, text: str, bufnr: int | None = None, markers: list[str] | None = None
+    ):
         """Output text with streaming animation effect using Lua module.
 
         Text may contain marker lines (from anya.markers) which will be
-        processed to create folds. If fold=True, markers are injected automatically.
+        processed to create folds and other UI elements.
 
         Args:
             text: Text to output (may contain marker lines)
             bufnr: Buffer number (defaults to current buffer)
-            fold: If True, wrap text with fold markers
+            markers: List of markers to inject (e.g., ["fold", "tool_success"])
         """
         if bufnr is None:
             bufnr = self.nvim.current.buffer.number
 
         self.nvim.exec_lua(
-            'require("anya").streaming.output_text(...)', bufnr, text, fold
+            'require("anya").streaming.output_text(...)', bufnr, text, markers
         )

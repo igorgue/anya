@@ -10,31 +10,41 @@ if not _G.anya_stream_queue then
   _G.anya_stream_timer = nil
 end
 
--- Inject fold markers into text
--- Inserts fold_start marker after first line and fold_end at the end
+-- Inject markers into text
+-- If markers include "fold", inserts fold_start after first line and fold_end at end
+-- All markers are combined into a single marker line after the first line
 -- @param text string: Original text
--- @param extra_markers string[]: Additional markers to include with fold_start
+-- @param marker_list string[]: List of marker names (e.g., {"fold", "tool_success"})
 -- @return string: Text with marker lines injected
-function M._inject_fold_markers(text, extra_markers)
+function M._inject_markers(text, marker_list)
   local lines = vim.split(text, "\n", { plain = true })
-  if #lines == 0 then
+  if #lines == 0 or not marker_list or #marker_list == 0 then
     return text
   end
 
-  -- Build start marker with fold_start + any extra markers
-  local start_names = { markers.fold_start }
-  if extra_markers then
-    for _, m in ipairs(extra_markers) do
-      table.insert(start_names, m)
+  -- Check if fold is requested
+  local has_fold = false
+  local start_markers = {}
+
+  for _, m in ipairs(marker_list) do
+    if m == "fold" then
+      has_fold = true
+      table.insert(start_markers, markers.fold_start)
+    else
+      table.insert(start_markers, m)
     end
   end
 
-  -- Insert fold_start after first line, fold_end at the end
-  local result = { lines[1], markers.make_marker(unpack(start_names)) }
+  -- Build result with marker line after first line
+  local result = { lines[1], markers.make_marker(unpack(start_markers)) }
   for i = 2, #lines do
     table.insert(result, lines[i])
   end
-  table.insert(result, markers.make_marker(markers.fold_end))
+
+  -- Add fold_end if fold was requested
+  if has_fold then
+    table.insert(result, markers.make_marker(markers.fold_end))
+  end
 
   return table.concat(result, "\n")
 end
@@ -45,13 +55,13 @@ end
 -- a blank line, the blank line is replaced to avoid consecutive empty lines.
 -- @param bufnr number: Buffer number to write to
 -- @param text string: Text to output (can contain newlines and marker lines)
--- @param fold boolean|nil: If true, wrap text with fold markers
-function M.output_text(bufnr, text, fold)
+-- @param marker_list string[]|nil: List of markers to inject (e.g., {"fold", "tool_success"})
+function M.output_text(bufnr, text, marker_list)
   local final_text = text
 
-  -- Inject fold markers if requested
-  if fold then
-    final_text = M._inject_fold_markers(text)
+  -- Inject markers if requested
+  if marker_list and #marker_list > 0 then
+    final_text = M._inject_markers(text, marker_list)
   end
 
   -- Check if text starts with a marker line
