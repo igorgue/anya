@@ -16,11 +16,10 @@ end
 -- Setup highlight groups (based on OkMsg but without background)
 local function setup_highlights()
   -- Get OkMsg colors and create variant without background
-  local ok_msg = vim.api.nvim_get_hl(0, { name = "OkMsg" })
+  local ok_msg = vim.api.nvim_get_hl(0, { name = "OkMsg", link = false })
   vim.api.nvim_set_hl(0, "AnyaToolSuccess", {
     fg = ok_msg.fg,
-    bold = ok_msg.bold,
-    -- bg intentionally omitted (nil)
+    bg = "NONE", -- Transparent background
   })
 end
 
@@ -212,7 +211,7 @@ function M._process_markers(bufnr)
             fold_start_line = nil
           elseif marker_name == markers.tool_success then
             -- Highlight the header line (line above marker) with checkmark icon
-            M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", "✓")
+            M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", "󰄬")
           end
         end
       end
@@ -280,6 +279,7 @@ function M._apply_header_highlight(bufnr, line_num, hl_group, icon)
   if icon then
     opts.virt_text = { { " " .. icon .. " ", hl_group } }
     opts.virt_text_pos = "right_align"
+    opts.hl_mode = "combine" -- Combine with underlying highlights (e.g., fold background)
   end
 
   vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, 0, opts)
