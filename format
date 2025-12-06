@@ -12,6 +12,8 @@ if [[ "$1" == "--check" ]]; then
   ruff format . --check
   print_formatter stylua
   stylua --check .
+  print_formatter luacheck
+  luacheck lua/ ftplugin/
 else
   print_formatter ruff
   ruff format .

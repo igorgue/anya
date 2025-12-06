@@ -4,375 +4,291 @@ This file provides guidance to an agent when working with code in this repositor
 
 ## Project Overview
 
-Anya is a Neovim plugin that integrates OpenAI's Agents SDK, providing an AI assistant with file system access, code editing capabilities, and context awareness. It's a Python remote plugin that communicates with Neovim via pynvim.
+Anya is a Neovim plugin that integrates OpenAI's Agents SDK, providing an AI assistant with conversation persistence and context awareness. It's a Python remote plugin that communicates with Neovim via pynvim.
+
+Named after Anya Forger from Spy x Family - she can read minds, this plugin reads your code.
 
 ## Architecture
 
 ### Key Components
 
-**Python Remote Plugin** (`rplugin/python3/agent_nvim/plugin.py`)
+**Python Remote Plugin** (`rplugin/python3/anya/plugin.py`)
 - Main plugin logic using `@pynvim.plugin` decorator
-- Manages virtual environment at `~/.local/share/agent.nvim/venv`
-- Handles async operations via asyncio for agent execution
-- Implements tools: file reading, directory listing, repo search, and code editing
-- Includes token tracking and budget management to prevent context overflow
+- `AnyaPlugin` class handles all commands and functions
+- Async agent execution via background asyncio event loop
+- Streaming responses with Lua animation integration
 
-**Vim Layer** (`plugin/agent.vim`)
-- Bootstrap script for `:AgentInstall` command
-- Provides installation without requiring remote plugin to be loaded first
-- Hardcoded path to `scripts/install.py`
+**Vim Layer** (`plugin/anya.vim`)
+- Bootstrap script that sets `g:loaded_anya`
+- Provides `:AnyaHistory` command for conversation browser
 
-**Buffer Management** (`rplugin/python3/agent_nvim/buffers.py`)
-- `AgentContent`: Markdown buffer for chat history and responses
-- `AgentPrompt`: Special filetype buffer for user input with custom completion
-- Streaming responses with Lua animation for smooth typing effect
+**Buffer Management** (`rplugin/python3/anya/buffers.py`)
+- Creates split layout with chat and prompt buffers
+- Chat buffer: `anya-chat` filetype for conversation display
+- Prompt buffer: `anya-prompt` filetype for user input
+- Streaming responses via Lua animation
+
+**Database** (`rplugin/python3/anya/db.py`)
+- SQLite database for conversation persistence
+- Stores conversations and messages with metadata
+- Located at `~/.local/share/anya/conversations.db`
+
+**History Parsing** (`rplugin/python3/anya/history.py`)
+- Parses buffer content to extract conversation history
+- Builds LLM-compatible message history from markers
+- Supports conversation and message markers
+
+**Marker System** (`rplugin/python3/anya/markers.py`)
+- Hidden HTML comment markers track message boundaries
+- Markers include: `fold_start`, `fold_end`, `tool_pending`, `tool_success`, `tool_failure`
+- Edit markers: `edit_pending`, `edit_applied`, `edit_rejected`, `edit_failed`
+
+**ID Generation** (`rplugin/python3/anya/ids.py`)
+- Uses hashids library for unique conversation/message IDs
+- Per-installation random salt stored at `~/.local/share/anya/salt.txt`
 
 **File Type Configuration**
-- `ftplugin/agent-prompt.vim`: Maps Enter to submit, sets completefunc, toolbar keymaps
-- `ftplugin/agent-prompt.lua`: Placeholder display and toolbar initialization
-- `ftplugin/agent-content.vim`: Configures wrapping, fold settings, and smart autoscroll
-- `syntax/agent-prompt.vim`: Highlights slash commands and `@` mentions
+- `ftplugin/anya-chat.lua`: Chat buffer settings (wrap, fold, conceal markers)
+- `ftplugin/anya-prompt.lua`: Prompt buffer settings with Enter keymap
+- `syntax/anya-chat.vim`: Syntax highlighting for markers
 
-**Configuration Management** (`rplugin/python3/agent_nvim/config.py`)
-- Persists agent and mode settings to `~/.config/agent.nvim/config.json`
-- Integrates with Lua toolbar for state synchronization
-- Provides get/set interface for configuration values
+**Lua Modules** (`lua/anya/`)
+- `init.lua`: Module entry point, exports all submodules
+- `conversation.lua`: Conversation management and message sending
+- `text.lua`: Streaming text animation and marker processing
+- `markers.lua`: Marker parsing and creation utilities
+- `picker.lua`: Conversation history browser (requires snacks.nvim)
+- `foldtext.lua`: Custom fold text display
 
-**Toolbar UI** (`lua/agent_nvim/toolbar.lua`)
-- Shows current agent and mode in bottom right of prompt buffer
-- Supports toggling between main agents (CODER, PLAN)
-- Supports toggling between modes (ASK, YOLO)
-- Picker for specialized agents (REVIEWER, VERIFIER, COMPACT)
-- Color-coded indicators with customizable highlights
+**Agent Definitions** (`rplugin/python3/anya/agents/`)
+- `__init__.py`: Creates the `code` agent with tools
+- `context.py`: `NvimPluginContext` dataclass for tool access
+- `utils.py`: Helper to load prompt files
 
-**Folding System** (`lua/agent_nvim/folds.lua`)
-- Manages manual folds for tool calls and results
-- Tool calls and results are automatically folded when displayed
-- Use `za` to toggle folds, `zo` to open, `zc` to close
-- Fold summaries show tool name or result indicator when collapsed
-
-**MCP Support** (`rplugin/python3/agent_nvim/mcp.py`)
-- Manages Model Context Protocol servers
-- Supports stdio, HTTP, SSE, and hosted MCP servers
-- Configured via `~/.config/agent.nvim/mcp/servers.json`
+**Tools** (`rplugin/python3/anya/tools/`)
+- `buffer_name.py`: Get current buffer name
+- `parrot.py`: Test tool that echoes in uppercase
+- `utils.py`: `nvim_call_sync` helper for thread-safe Neovim calls
 
 ### Data Flow
 
-1. User opens interface with `:AgentOpen` → creates split layout with content/prompt buffers
-2. User types in prompt buffer → mentions (`@filename`) trigger file path completion
-3. Enter key → `AgentSubmit` command resolves mentions and sends to agent
-4. Agent execution → runs in executor thread to avoid blocking Neovim
-5. Agent uses tools → `read_file`, `list_files`, `search_repo`, `edit`
-6. Responses stream → appended to content buffer via Lua animation
-7. Code edits → applied via SEARCH/REPLACE blocks
+1. User opens interface with `:Anya` -> creates split layout with chat/prompt buffers
+2. User types in prompt buffer -> presses Enter to send
+3. Lua `conversation.send_message()` -> formats message, calls `AnyaSend`
+4. Python `AnyaSend` -> runs agent in background asyncio loop
+5. Agent streams response -> Lua animation displays text character-by-character
+6. Messages saved to SQLite database with markers
 
-### Project Instructions
+### Marker Format
 
-The plugin looks for `AGENTS.md` or `.agent/instructions.md` in the project root to load custom instructions that are prepended to the agent's system prompt.
+Markers are HTML comments that track message metadata:
+
+```html
+<!-- anya__conversation: {id}, {timestamp} -->
+<!-- anya__message: {id}, start, {role}, {author}, {model}, {timestamp} -->
+<!-- anya__message: {id}, end, {timestamp} -->
+<!-- anya__tools: {marker_names} -->
+```
 
 ## Development Commands
 
-### Installation & Setup
-```bash
-# Install dependencies in isolated venv
-:AgentInstall
+### Running
 
-# Or run installation script directly
-python3 scripts/install.py
+```vim
+" Open Anya interface
+:Anya
 
-# Update remote plugins after code changes
-:UpdateRemotePlugins
+" Show help
+:Anya help
+
+" Send a prompt directly
+:Anya send <text>
+
+" Browse conversation history
+:AnyaHistory
 ```
+
+### Keymaps (in prompt buffer)
+
+- `<CR>` (normal mode) - Send message
+- `<CR>` (insert mode) - Exit insert and send message
+
+### After Code Changes
+
+```vim
+" Update remote plugins after Python code changes
+:UpdateRemotePlugins
+" Then restart Neovim
+```
+
+### Formatting and Linting
+
+Run the `./format` script to format and lint the codebase:
+
+```bash
+# Format only
+./format
+
+# Check formatting and run linting (no modifications)
+./format --check
+```
+
+This runs:
+- `ruff format` - Python formatting
+- `stylua` - Lua formatting
+- `luacheck` - Lua linting (only with `--check`)
 
 ### Testing
+
+There are no automated tests for this plugin. Testing requires running Neovim and visually verifying behavior.
+
+However, you can catch many issues before running Neovim:
+
 ```bash
-# Verify dependencies are importable
-:AgentTestImport
+# Check Python syntax
+python -m py_compile rplugin/python3/anya/*.py rplugin/python3/anya/**/*.py
+
+# Check formatting and lint
+./format --check
 ```
-
-### Running
-```bash
-# Open agent interface
-:AgentOpen
-
-# Submit a prompt (mapped to Enter in prompt buffer)
-:AgentSubmit
-
-# Cancel a running request (mapped to Ctrl+C)
-:AgentCancel
-
-# Sync configuration from disk
-:AgentSyncConfig
-```
-
-### Toolbar Keymaps (in prompt buffer)
-- `<localleader>a` - Toggle main agents (CODER ↔ PLAN)
-- `<localleader>y` - Toggle mode (ASK ↔ YOLO)
-- `<localleader>A` - Open picker for specialized agents (REVIEWER, VERIFIER, COMPACT)
 
 ## Dependencies
 
-- Python 3.8+
+- Python >= 3.13
 - `pynvim` - Neovim Python client
 - `openai` - OpenAI Python SDK
 - `openai-agents` - OpenAI Agents SDK
+- `hashids` - ID generation
 
-Dependencies are installed to `~/.local/share/agent.nvim/venv` and injected into sys.path at plugin initialization.
+Optional:
+- `snacks.nvim` - For conversation history picker
 
 ## Environment Variables
 
-- `OPENAI_API_KEY` - Required for agent functionality
-- `AGENT_MODEL` - Model to use (default: gpt-5.1)
-- `AGENT_BASE_URL` - Custom API endpoint (optional)
-- `AGENT_API_KEY` - Alternative API key (optional)
-- `AGENT_API_TYPE` - API type: 'responses' or 'chat_completions' (default: responses)
-- `AGENT_DISABLE_TRACING` - Disable tracing for custom providers (default: 1)
-- `AGENT_MAX_READ_BYTES` - Maximum bytes to read from files (default: 64000)
-- `AGENT_CONTEXT_WINDOW` - Override context window size (optional)
-- `AGENT_COMPACT_MODEL` - Custom model for CompactAgent (default: same as AGENT_MODEL)
-- `AGENT_YOLO` - Enable YOLO mode: auto-apply patches and exec commands without user approval (set to 1, true, or yes)
-- `AGENT_MAX_TURNS` - Maximum number of agent turns before forcing a response (default: 1000, effectively unlimited)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENAI_API_KEY` | (required) | OpenAI API key |
+| `ANYA_MODEL` | `gpt-4.1` | Model to use for the agent |
+
+## Data Storage
+
+| Data | Location |
+|------|----------|
+| Conversations database | `~/.local/share/anya/conversations.db` |
+| ID generation salt | `~/.local/share/anya/salt.txt` |
+| ID state | `~/.local/share/anya/ids.json` |
 
 ## Special Considerations
 
-### Exec Command Permissions
-- Shell commands require user approval before execution via `vim.ui.select`
-- Three options: "Run" (one-time), "Do not run" (deny), "Allow always" (permanent)
-- Allowed commands are stored in `~/.config/agent.nvim/exec_allow_list.txt`
-- YOLO mode (`AGENT_YOLO=1`) bypasses all confirmation prompts
-
-### Path Management
-- The plugin dynamically discovers and injects venv site-packages into sys.path
-- File paths in tools are resolved relative to Neovim's current working directory
-- The `plugin/agent.vim` has a hardcoded path that may need updating if file structure changes
+### Async Execution
+- Agent runs in background asyncio event loop to prevent blocking Neovim
+- Uses `nvim.async_call` for all Neovim API calls from async context
+- Streaming text uses Lua timer for smooth animation
 
 ### Buffer Lifecycle
-- Buffers are reused across `:AgentOpen` invocations
-- Buffer validity is checked before operations
-- Content buffer starts with a welcome message if empty
+- Buffers are created fresh on each `:Anya` invocation
+- Chat buffer validity is checked before operations
+- Conversation ID stored as buffer variable `anya_conversation_id`
 
-### Async Execution
-- Agent runs in executor thread to prevent blocking
-- Uses `nvim.async_call` for all Neovim API calls from async context
-- Logging goes to `~/.local/state/nvim/agent.nvim.log`
+### Marker Concealment
+- Markers are concealed in chat buffer using `conceallevel=2`
+- Cursor on marker line temporarily reveals it
+- Syntax rules in `anya-chat.vim` handle concealment
 
-### Initialization Synchronization
-- Plugin startup initializes MCP servers and agents in a background thread to avoid blocking Neovim
-- `_initialization_complete` threading.Event ensures user requests wait for startup to finish
-- Prevents race condition where requests before startup completion would reinitialize MCP servers
-- `_run_agent_wrapper` polls the event with non-blocking `asyncio.sleep()` calls
-- Uses polling loop with timeout (30s) and per-10-check logging for debugging
-- Cached MCP servers and agents are reused on subsequent requests
-- Threading.Event is thread-safe and works across thread/asyncio boundaries
-
-### Token Management
-- Tracks token usage across requests to prevent context overflow
-- Implements tool budget system to limit file reading/searching
-- Displays token usage in real-time with color-coded highlighting
-- Forces early response when approaching context limits
-
-### Patch Application
-- Creates temporary file for patch content
-- Uses `git apply --ignore-space-change --ignore-whitespace`
-- Runs `checktime` after applying to reload modified buffers
-
-### Completion
-- Custom `AgentComplete` function for file path completion after `@`
-- Triggered with `<C-x><C-u>` in prompt buffer
-- Searches recursively from cwd, excluding `.git` directories
-- Limited to 50 results
-
-### Smart Autoscroll
-- Content buffer automatically scrolls to bottom while LLM is responding (when user is at bottom)
-- Scrolling up during response disables autoscroll, allowing user to read earlier content
-- Scrolling back to the bottom during response re-enables autoscroll
-- Submitting a new prompt resets autoscroll to enabled
-- Implemented via `WinScrolled`/`CursorMoved` autocmds with `b:agent_autoscroll_enabled` flag
-- Both Python append operations and Lua streaming respect the autoscroll state
-
-### Conversation History Preservation
-- **Error/Cancellation Handling**: Failed requests and cancelled responses are preserved in conversation history as error messages, allowing users to continue with context
-  - Captures only the partial LLM response (not buffer headers, welcome message, or user prompts)
-  - Tracks where agent response starts to extract clean output
-  - Preserves error messages with full context for debugging
-- **Tool Context Preservation**: All tool usage (file reads, searches, file listings) is automatically recorded and added to conversation history as system messages
-- **Continuous Context**: Users can use `continue` or add comments to drive the conversation forward without losing prior context
-- **Implementation**: 
-  - `tool_tracker.py` - Records all tool calls and results
-  - `agent_runner.py` - Captures partial LLM output on cancellation or error, tracks response start line
-  - `plugin.py` - Integrates tool tracking into tool wrappers and agent lifecycle
-- **Benefits**: Enables recovery from transient failures, allows iterative refinement, and preserves complex exploration context
+### Conversation Persistence
+- Conversations auto-save to SQLite database
+- Each message has unique hashid
+- Conversation timestamps updated on each message
 
 ## Codebase Context
 
 ### Important Files
-- `rplugin/python3/agent_nvim/` - Modularized plugin Python code
-  - `plugin.py` - Main plugin class
-  - `buffers.py` - Buffer management and UI
-  - `tool_events.py` - Tool call display and formatting with folding
-  - `agent_runner.py` - Agent execution logic with streaming
-  - `tools.py` - Tool implementations with budget tracking
-  - `utils.py` - Utility functions
-  - `token_tracker.py` - Token usage tracking
-  - `tool_budget.py` - Tool budget management
-  - `tool_tracker.py` - Conversation history preservation tracking for tool usage
-  - `mcp.py` - MCP server management
-- `plugin/agent.vim` - Bootstrap installation command
-- `ftplugin/agent-prompt.vim` - Prompt buffer configuration
-- `ftplugin/agent-content.vim` - Content buffer configuration with folding
-- `syntax/agent-prompt.vim` - Syntax highlighting for mentions and commands
-- `lua/agent_nvim/folds.lua` - Fold management for tool calls/results
-- `scripts/install.py` - Standalone installation script
-- `doc/agent.txt` - Vim help documentation
 
-### Directories to Note
-- `avante.nvim/` and `codecompanion.nvim/` - Appear to be separate plugin repositories in the workspace (not part of agent.nvim)
-- `docs/` - Additional documentation directory including folding implementation details
-
-## Slash Commands
-
-- `/clear` - Clear chat history
-- `/cancel` - Cancel current request
-- `/file` - Open Snacks file picker to select and add multiple files to the prompt as `@` references
-- `/compact [instructions]` - Compact conversation context to reduce token usage
-  Examples:
-  - `/compact` - Compact with automatic settings
-  - `/compact aggressively` - Heavy compaction (~30% of original)
-  - `/compact lightly` - Light compaction (~85% of original)
-  - `/compact focus on authentication` - Focus on specific topics
-  - `/compact --tokens=2000` - Target specific token count
-- `/help` - Show help message
-
-### `/file` Command Details
-
-The `/file` slash command provides an interactive file picker to select one or more files and add them to the prompt as `@` references:
-
-1. Type `/file` in the prompt buffer and press Enter
-2. Snacks file picker opens showing files from the project root
-3. Use configured multi-select keybinding (default Ctrl+Space) to select multiple files
-4. Press Enter to confirm and close the picker
-5. Selected files are prepended to the prompt as space-separated `@` references
-6. Files are highlighted with `Directory` highlighting for easy identification
-
-**Examples:**
-- `/file` followed by selecting `src/main.py` and `tests/test.py` results in prompt:
-  ```
-  @src/main.py @tests/test.py
-  ```
-- Adding context after files:
-  ```
-  @src/main.py @tests/test.py Here's my implementation
-  ```
-
-### `/compact` Command Details
-
-The `/compact` slash command provides intelligent conversation context compaction using a specialized CompactAgent:
-
-#### Basic Usage
-- `/compact` - Automatic compaction with smart token targeting
-- `/compact --tokens=2000` - Target specific token count
-
-#### Natural Language Instructions
-The command supports sophisticated natural language instructions for precise control:
-
-**Intensity Control:**
-- `/compact aggressively` - Heavy reduction (~30%)
-- `/compact significantly` - Moderate reduction (~50%)
-- `/compact lightly` - Gentle reduction (~85%)
-
-**Content Filtering:**
-- `/compact focus on authentication flow` - Preserve specific topics
-- `/compact remove debugging sessions` - Remove specific content types
-- `/compact keep only recent discussions` - Temporal filtering
-
-**Complex Instructions:**
 ```
-/compact preserve discussions about database design and API contracts, remove the CSS styling conversations
+rplugin/python3/anya/
+  __init__.py          # Exports AnyaPlugin, VERSION
+  plugin.py            # Main plugin class with commands/functions
+  buffers.py           # Buffer creation and content retrieval
+  db.py                # SQLite database operations
+  history.py           # Buffer content parsing for LLM
+  markers.py           # Marker generation utilities
+  ids.py               # Hashid generation
+  agents/
+    __init__.py        # Agent definition (code agent)
+    context.py         # NvimPluginContext dataclass
+    utils.py           # Prompt loading helpers
+  tools/
+    __init__.py        # Tool exports
+    buffer_name.py     # Get buffer name tool
+    parrot.py          # Test echo tool
+    utils.py           # nvim_call_sync helper
+
+lua/anya/
+  init.lua             # Module entry point
+  conversation.lua     # Message sending and conversation management
+  text.lua             # Streaming animation and marker processing
+  markers.lua          # Marker parsing/creation (Lua side)
+  picker.lua           # Conversation history browser
+  foldtext.lua         # Custom fold text
+
+ftplugin/
+  anya-chat.lua        # Chat buffer configuration
+  anya-prompt.lua      # Prompt buffer configuration
+
+plugin/anya.vim        # Bootstrap and :AnyaHistory command
+syntax/anya-chat.vim   # Marker concealment syntax
+prompts/               # Agent system prompts
+doc/anya.txt           # Vim help documentation
 ```
 
-#### Features
-- **Preview Interface**: Side-by-side comparison with statistics
-- **Smart Targeting**: Automatic token inference from instructions
-- **Selective Preservation**: Maintains active tasks, decisions, file references
-- **User Control**: Edit before accepting, cancel anytime
+### Prompts
 
-#### Configuration
-- `AGENT_COMPACT_MODEL`: Custom model for compaction (default: same as main agent)
-- Requires OpenAI agents SDK and valid API key
+| File | Purpose |
+|------|---------|
+| `code.md` | Main coding agent prompt (currently used) |
+| `chat.md` | General conversation prompt |
+| `plan.md` | Task planning prompt |
+| `review.md` | Code review prompt |
+| `verify.md` | Output verification prompt |
+| `compact.md` | Context compaction prompt |
+| `title.md` | Title generation prompt |
 
-### Tool Details
+## Available Tools
 
-### File Reading
+Currently implemented tools:
 
-The `read_file` tool now supports intelligent line-range reading for large files.
+1. **buffer_name** - Returns the name of the current Neovim buffer
+2. **parrot** - Test tool that echoes the message in uppercase
 
-**Syntax:**
-- `@filename.py` - Read first 100 lines (default truncation for large files)
-- `@filename.py@start-end` - Read entire file
-- `@filename.py@32-234` - Read lines 32-234
-- `@filename.py@start-100` - Read lines 1-100
-- `@filename.py@280-end` - Read from line 280 to end
+## Vim Functions
 
-**Behavior:**
-- Files with ≤100 lines: returned in full
-- Files with >100 lines: first 100 lines returned with metadata showing total line count
-- Metadata always includes:
-  - Total line count and file size
-  - Current line range being displayed
-  - Suggestions for reading more (e.g., "@101-200" to continue)
-- LLM receives full context to know file is too large and can request specific ranges
-- This approach saves tokens by avoiding unnecessary full-file reads while keeping LLM informed
+Functions exposed to Vim/Lua:
 
-**Configuration:**
-- Limited to 64,000 bytes by default (configurable via `AGENT_MAX_READ_BYTES`)
-- Line-based truncation enables efficient exploration of large files
-
-### Reading Multiple Files
-
-The `read_many_files` tool reads multiple files in a single call, supporting the same line-range syntax:
-
-**Usage:**
-```
-read_many_files(["file1.py", "file2.py", "file3.py@50-100", "file4.py@start-end"])
-```
-
-**Benefits:**
-- Batch read multiple files with a single tool call
-- Supports all range specifications for each file independently
-- More token-efficient than multiple `read_file` calls
-- Useful for reading related files together (e.g., interfaces and implementations)
-
-### Directory Listing
-- Recursive search excluding `.git` directories
-- Limited to 100 files to prevent excessive output
-
-### Repository Search
-- Uses ripgrep with fallback to grep
-- Limited to 2,000 characters of output
-- Searches from current working directory
-
-### Patch Application
-- Creates diff buffer for review
-- Uses `git apply` with whitespace tolerance
-- Must be manually applied after review
-
-### Context Compaction
-- Uses specialized CompactAgent with custom system prompt
-- Supports natural language instructions for selective compaction
-- Provides preview interface with before/after statistics
-- Automatically preserves active tasks, decisions, and file references
-- Configurable model via `AGENT_COMPACT_MODEL`
-- Integrates with existing conversation flow seamlessly
+| Function | Sync | Description |
+|----------|------|-------------|
+| `AnyaSend(text, conv_id?)` | async | Send prompt to agent |
+| `AnyaNewConversationId()` | sync | Generate new conversation ID |
+| `AnyaNewMessageId(conv_id?)` | sync | Generate new message ID |
+| `AnyaTimestamp()` | sync | Get current UTC ISO timestamp |
+| `AnyaSaveConversation(id, timestamp)` | sync | Save conversation to DB |
+| `AnyaSaveMessage(...)` | sync | Save message to DB |
+| `AnyaListConversations(limit?, offset?)` | sync | List recent conversations |
+| `AnyaLoadConversation(conv_id)` | sync | Load full conversation |
+| `AnyaUpdateConversationTitle(id, title)` | sync | Update conversation title |
+| `AnyaDeleteConversation(conv_id)` | sync | Delete conversation |
+| `AnyaRebuildBufferContent(conv_id)` | sync | Rebuild buffer from DB |
 
 ## Known Patterns
 
 - All Neovim API calls from async contexts must use `nvim.async_call`
 - String responses are split on newlines before writing to buffers
-- File mentions are resolved before sending to agent but shown as-is to user
-- Error messages are written to stderr via `nvim.err_write`
-- Tool calls and results are automatically folded to reduce interface clutter
-- Streaming is used for agent responses but instant append is used for tool output
+- Markers are HTML comments that get concealed in the UI
+- Streaming uses Lua timer with character-by-character animation
+- Database operations are lazy-initialized on first use
 
 ## Coding Guidelines for Agents
 
 - Do not add color emojis to the codebase. Use only monospace Unicode characters or text-based indicators where visual elements are needed.
+- Follow existing code conventions and formatting
+- Use type hints in Python code
+- Prefer minimal, focused changes over large rewrites

@@ -1,157 +1,171 @@
-# agent.nvim
+# Anya
 
 An AI-powered Neovim plugin built on the OpenAI Agents SDK.
 
-> **Joke**: Why do programmers prefer dark mode? Because light attracts bugs! 🐛
+> Named after Anya Forger from Spy x Family - she can read minds, this plugin reads your code.
 
 ## Features
-- **Chat Interface**: Split-window layout with streaming responses.
-- **Context Awareness**: Reference files using `@filename` (with autocompletion).
-- **Tools**: The agent can read files, list directories, and search the repository.
-- **Edit Tool**: Make precise code edits using Aider-style SEARCH/REPLACE blocks with interactive approval.
-- **Tool Folding**: Tool calls and results are automatically folded to reduce clutter. Use `za` to toggle folds.
-- **Patching**: The agent can propose patches, which you can review and apply.
-- **Project Instructions**: Customize the agent's behavior with `AGENTS.md`.
+
+- **Chat Interface**: Split-window layout with streaming responses
+- **Conversation Persistence**: SQLite database stores conversation history
+- **Conversation Browser**: Browse and load previous conversations with `:AnyaHistory`
+- **Context Awareness**: Conversation history is automatically included in agent context
+- **Streaming Animation**: Smooth character-by-character text animation
+- **Marker System**: Hidden markers track message boundaries and metadata
+- **Tool Support**: Extensible tool system using OpenAI Agents SDK
 
 ## Installation
-
 
 ### Prerequisites
 
 - Neovim >= 0.9.0
-- Python 3.8+
+- Python >= 3.13
 - `pynvim` (installed globally or in your Neovim provider environment)
+- `snacks.nvim` (optional, for conversation picker)
+
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
 
 ```lua
 {
-    "igor/agent.nvim",
+    "igor/anya",
     build = ":UpdateRemotePlugins",
-    cmd = "AgentOpen",
+    cmd = "Anya",
 }
 ```
 
 ### Post-Installation
 
-1.  Start Neovim.
-2.  Run `:UpdateRemotePlugins` (if not done automatically).
-3.  Run `:AgentInstall` to set up the plugin's virtual environment and dependencies.
-4.  Restart Neovim.
+1. Start Neovim.
+2. Run `:UpdateRemotePlugins`.
+3. Restart Neovim.
+
+### Dependencies
+
+Install Python dependencies:
+
+```bash
+pip install pynvim openai openai-agents hashids
+```
+
+Or use the provided requirements file:
+
+```bash
+pip install -r requirements.txt
+```
 
 ## Configuration
 
-Set your OpenAI API key in your environment variables:
+Set your OpenAI API key in your environment:
 
 ```bash
 export OPENAI_API_KEY="sk-..."
-export AGENT_API_KEY=$OPENAI_API_KEY
 ```
 
-### Optional Configuration
+### Environment Variables
 
-You can customize the base URL and model using environment variables:
-
-```bash
-# Use a custom API endpoint (e.g., OpenAI-compatible server)
-export AGENT_BASE_URL="https://your-api-endpoint.com/v1"
-
-# Specify a model (defaults to OpenAI's default)
-export AGENT_MODEL="gpt-4-turbo-preview"
-
-# Custom model for context compaction (defaults to AGENT_MODEL)
-export AGENT_COMPACT_MODEL="gpt-4o-mini"
-
-# Disable tracing for custom providers
-export AGENT_DISABLE_TRACING=1
-```
-
-**Note:** The base URL works with both the Chat Completions API and the Responses API. Streaming is supported on the Chat Completions API.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENAI_API_KEY` | (required) | OpenAI API key |
+| `ANYA_MODEL` | `gpt-4.1` | Model to use for the agent |
 
 ## Usage
 
-1.  Run `:AgentOpen` to open the chat interface.
-2.  Type your message in the bottom prompt window.
-3.  Press `Enter` to send.
+### Commands
 
-### Mentions
+| Command | Description |
+|---------|-------------|
+| `:Anya` | Open the Anya interface |
+| `:Anya open` | Open the Anya interface |
+| `:Anya help` | Show help message |
+| `:Anya send <text>` | Send a prompt directly |
+| `:AnyaHistory` | Open conversation history picker |
 
-Type `@` followed by a filename to include its content in your prompt. Use `<C-x><C-u>` (User Completion) to autocomplete file paths.
+### Basic Workflow
 
-### Tool Folding
+1. Run `:Anya` to open the chat interface
+2. Type your message in the bottom prompt window
+3. Press `Enter` to send
 
-When the agent uses tools (like reading files or searching the repository), the tool calls and their results are displayed in the chat but automatically folded to keep the interface clean. You can:
+### Keymaps (in prompt buffer)
 
-- Press `za` to toggle a fold open/closed
-- Press `zo` to open a fold
-- Press `zc` to close a fold
-- Press `zR` to open all folds
-- Press `zM` to close all folds
+| Key | Mode | Action |
+|-----|------|--------|
+| `<CR>` | Normal | Send message |
+| `<CR>` | Insert | Exit insert mode and send message |
 
-### Edit Tool
+### Conversation History
 
-The agent can make precise code edits using Aider-style SEARCH/REPLACE blocks. When the agent proposes edits:
+Conversations are automatically saved to a SQLite database at `~/.local/share/anya/conversations.db`.
 
-- Edits are displayed directly in the chat with clear visual indicators
-- Each edit block shows the file path, search content, and replacement content
-- Interactive approval buttons (○) allow you to accept or reject individual edits
-- Syntax highlighting distinguishes between removed (red) and added (green) content
-- Fuzzy matching handles minor whitespace differences automatically
+Use `:AnyaHistory` to browse and load previous conversations (requires `snacks.nvim`).
 
-**Edit Block Format:**
-The agent uses SEARCH/REPLACE blocks to propose edits. You review the changes in the chat and can accept or reject each edit before it's applied to your files.
+## Architecture
 
-Example:
+### Buffer Types
+
+- **anya-chat**: Main chat buffer displaying conversation history
+- **anya-prompt**: Input buffer for composing messages
+
+### Data Storage
+
+| Data | Location |
+|------|----------|
+| Conversations database | `~/.local/share/anya/conversations.db` |
+| ID generation salt | `~/.local/share/anya/salt.txt` |
+| ID state | `~/.local/share/anya/ids.json` |
+
+### Available Tools
+
+The agent currently has access to:
+
+- `buffer_name` - Get the name of the current buffer
+- `parrot` - Test tool that echoes messages in uppercase
+
+## Project Instructions
+
+Create an `AGENTS.md` file in your project root to provide custom instructions to the agent. These instructions are prepended to the agent's system prompt.
+
+## Development
+
+### File Structure
+
 ```
-src/utils.py
-<<<<<<< SEARCH
-def calculate_total(items):
-    total = 0
-    for item in items:
-        total += item['price']
-    return total
-=======
-def calculate_total(items):
-    total = 0
-    for item in items:
-        total += item['price'] * item['quantity']
-    return total
->>>>>>> REPLACE
+anya/
+├── rplugin/python3/anya/     # Python remote plugin
+│   ├── plugin.py             # Main plugin class
+│   ├── buffers.py            # Buffer management
+│   ├── db.py                 # SQLite database
+│   ├── history.py            # Conversation parsing
+│   ├── markers.py            # Message markers
+│   ├── ids.py                # ID generation
+│   ├── agents/               # Agent definitions
+│   └── tools/                # Tool implementations
+├── lua/anya/                 # Lua modules
+│   ├── init.lua              # Module entry point
+│   ├── conversation.lua      # Conversation management
+│   ├── text.lua              # Streaming animation
+│   ├── markers.lua           # Marker utilities
+│   ├── picker.lua            # History picker
+│   └── foldtext.lua          # Custom fold text
+├── ftplugin/                 # Filetype configuration
+│   ├── anya-chat.lua         # Chat buffer settings
+│   └── anya-prompt.lua       # Prompt buffer settings
+├── plugin/anya.vim           # Bootstrap commands
+├── syntax/anya-chat.vim      # Syntax highlighting
+├── prompts/                  # Agent system prompts
+└── doc/anya.txt              # Vim help
 ```
 
-The SEARCH block contains the exact code to find (with proper indentation), and the REPLACE block contains the new code. The agent uses fuzzy matching to handle minor whitespace differences.
+### Updating Remote Plugins
 
-### Context Compaction
+After modifying Python code:
 
-When conversations become long, you can use the `/compact` command to intelligently summarize and reduce token usage while preserving essential context:
-
-```bash
-# Basic compaction with automatic settings
-/compact
-
-# Control compaction intensity
-/compact aggressively    # Heavy reduction (~30%)
-/compact lightly        # Gentle reduction (~85%)
-
-# Target specific token count
-/compact --tokens=2000
-
-# Focus on specific topics
-/compact focus on authentication flow
-/compact remove debugging sessions
-
-# Complex natural language instructions
-/compact preserve discussions about database design, API contracts, and user authentication. Remove the CSS styling conversations.
+```vim
+:UpdateRemotePlugins
 ```
 
-**Features:**
-- **Smart Targeting**: Automatically infers token targets from natural language
-- **Preview Interface**: Shows before/after comparison with statistics
-- **Selective Preservation**: Maintains active tasks, decisions, and file references
-- **User Control**: Edit summary before accepting, cancel anytime
+Then restart Neovim.
 
-**Environment Variables:**
-- `AGENT_COMPACT_MODEL`: Custom model for compaction (defaults to `AGENT_MODEL`)
+## License
 
-### Custom Instructions
-
-Create an `AGENTS.md` file in your project root to provide specific instructions to the agent (e.g., coding style, architecture overview).
+MIT

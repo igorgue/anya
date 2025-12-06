@@ -197,7 +197,16 @@ def save_message_dict(
         conn.execute(
             """INSERT INTO messages (id, conversation_id, role, content, author, model, created_at, ended_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (msg_id, conversation_id, role, content, author, model, created_at, ended_at),
+            (
+                msg_id,
+                conversation_id,
+                role,
+                content,
+                author,
+                model,
+                created_at,
+                ended_at,
+            ),
         )
         conn.commit()
         return True
@@ -248,7 +257,9 @@ def load_conversation(id: str) -> dict[str, Any] | None:
     return {"conversation": conversation, "messages": messages}
 
 
-def rebuild_buffer_content(conversation: dict[str, Any], messages: list[dict[str, Any]]) -> str:
+def rebuild_buffer_content(
+    conversation: dict[str, Any], messages: list[dict[str, Any]]
+) -> str:
     """Rebuild buffer content from a conversation and its messages.
 
     Args:
@@ -259,7 +270,9 @@ def rebuild_buffer_content(conversation: dict[str, Any], messages: list[dict[str
         Buffer content string with all markers
     """
     lines: list[str] = []
-    lines.append(markers.make_conversation_marker(conversation["id"], conversation["created_at"]))
+    lines.append(
+        markers.make_conversation_marker(conversation["id"], conversation["created_at"])
+    )
 
     for msg in messages:
         if msg["role"] == "user":
@@ -272,7 +285,9 @@ def rebuild_buffer_content(conversation: dict[str, Any], messages: list[dict[str
             for line in msg["content"].split("\n"):
                 lines.append(f"> {line}")
             lines.append(
-                markers.make_message_end(msg["id"], msg["ended_at"] or msg["created_at"])
+                markers.make_message_end(
+                    msg["id"], msg["ended_at"] or msg["created_at"]
+                )
             )
         else:
             lines.append("# Anya")

@@ -341,9 +341,7 @@ Usage:
             args[1]: Title
         """
         if len(args) < 2:
-            self.nvim.err_write(
-                "AnyaUpdateConversationTitle requires (id, title).\n"
-            )
+            self.nvim.err_write("AnyaUpdateConversationTitle requires (id, title).\n")
             return False
         self._ensure_db()
         return db.update_conversation_title(args[0], args[1])
@@ -372,7 +370,9 @@ Usage:
             Buffer content string or None
         """
         if not args:
-            self.nvim.err_write("AnyaRebuildBufferContent requires a conversation ID.\n")
+            self.nvim.err_write(
+                "AnyaRebuildBufferContent requires a conversation ID.\n"
+            )
             return None
         self._ensure_db()
         data = db.load_conversation(args[0])

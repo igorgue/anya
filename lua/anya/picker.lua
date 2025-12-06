@@ -14,7 +14,11 @@ local function strip_markers(content)
 
   for _, line in ipairs(lines) do
     -- Skip marker lines
-    if not markers.is_marker_line(line) and not markers.is_message_marker(line) and not markers.is_conversation_marker(line) then
+    if
+      not markers.is_marker_line(line)
+      and not markers.is_message_marker(line)
+      and not markers.is_conversation_marker(line)
+    then
       table.insert(result, line)
     end
   end

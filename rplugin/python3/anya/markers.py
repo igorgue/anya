@@ -16,7 +16,7 @@ EDIT_APPLIED = "edit_applied"
 EDIT_REJECTED = "edit_rejected"
 EDIT_FAILED = "edit_failed"
 
-PREFIX = "<!-- anya:"
+PREFIX = "<!-- anya__tools:"
 SUFFIX = "-->"
 
 
@@ -27,7 +27,7 @@ def make_marker(*names: str) -> str:
         *names: One or more marker names to include
 
     Returns:
-        A marker line like '<!-- anya: fold_start, tool_pending -->'
+        A marker line like '<!-- anya__tools: fold_start, tool_pending -->'
     """
     return f"{PREFIX} {', '.join(names)} {SUFFIX}"
 

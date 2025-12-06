@@ -334,8 +334,11 @@ function M._process_markers(bufnr)
   local message_fold_starts = {}
 
   for i, line in ipairs(lines) do
-    -- Check for message markers first (different pattern)
-    if markers.is_message_marker(line) then
+    -- Check for conversation markers (hide them)
+    if markers.is_conversation_marker(line) then
+      M._hide_line(bufnr, i)
+    -- Check for message markers (different pattern)
+    elseif markers.is_message_marker(line) then
       -- Hide the marker line
       M._hide_line(bufnr, i)
       local msg_info = markers.parse_message_marker(line)
@@ -519,8 +522,7 @@ end
 -- @param diff_info table: Parsed diff info (used for validation)
 local function apply_edit_header_highlights(bufnr, line_idx, line_content, diff_info)
   -- Highlight diff indicators: "27+" "2~" "30-"
-  ---@diagnostic disable-next-line: unused-local
-  for start_pos, num, indicator, end_pos in line_content:gmatch("()(%d+)([+~-])()") do
+  for start_pos, _, indicator, end_pos in line_content:gmatch("()(%d+)([+~-])()") do
     local hl_group
     if indicator == "+" then
       hl_group = "AnyaEditAdd"
