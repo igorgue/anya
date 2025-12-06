@@ -45,4 +45,20 @@ def new(nvim: Nvim) -> tuple[object]:
     nvim.command(f"resize {PROMPT_HEIGHT}")
     nvim.api.win_set_buf(0, prompt_buf)
 
+    # Set up keymaps for the prompt buffer
+    nvim.api.buf_set_keymap(
+        prompt_buf,
+        "n",
+        "<CR>",
+        "<cmd>lua require('anya.conversation').send_message()<cr>",
+        {"noremap": True, "silent": True, "desc": "Send message"},
+    )
+    nvim.api.buf_set_keymap(
+        prompt_buf,
+        "i",
+        "<CR>",
+        "<cmd>stopinsert<cr><cmd>lua require('anya.conversation').send_message()<cr>",
+        {"noremap": True, "silent": True, "desc": "Send message"},
+    )
+
     return (chat_buf, prompt_buf)

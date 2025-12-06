@@ -229,6 +229,12 @@ function M._autoscroll_to_bottom(bufnr)
     if vim.api.nvim_win_get_buf(win) == bufnr then
       local new_line_count = vim.api.nvim_buf_line_count(bufnr)
       pcall(vim.api.nvim_win_set_cursor, win, { new_line_count, 0 })
+
+      -- Trigger render-markdown to refresh this buffer
+      local ft = vim.api.nvim_get_option_value("filetype", { buf = bufnr })
+      if ft == "anya-chat" then
+        vim.api.nvim_exec_autocmds("CursorMoved", { buffer = bufnr })
+      end
     end
   end
 end

@@ -3,8 +3,10 @@
 import pynvim
 import asyncio
 import threading
+from datetime import datetime, timezone
 
 from . import buffers
+from . import ids
 
 VERSION = "0.0.1"
 
@@ -76,6 +78,22 @@ class AnyaPlugin:
                 self.nvim.async_call(self.nvim.err_write, f"Agent error: {e}\n")
 
         asyncio.run_coroutine_threadsafe(run_agent(), loop)
+
+    @pynvim.function("AnyaNewConversationId", sync=True)
+    def new_conversation_id(self, args):
+        """Generate a new conversation ID."""
+        return ids.new()
+
+    @pynvim.function("AnyaNewMessageId", sync=True)
+    def new_message_id(self, args):
+        """Generate a new message ID within a conversation."""
+        conversation_id = args[0] if args else None
+        return ids.new(conversation=conversation_id)
+
+    @pynvim.function("AnyaTimestamp", sync=True)
+    def timestamp(self, args):
+        """Get current UTC timestamp in ISO 8601 format."""
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _help_text(self):
         return f"""anya v{VERSION}
