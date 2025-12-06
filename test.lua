@@ -1,4 +1,4 @@
-local text_with_markers = [[<!-- anya__conversation: ee236a3d-c40a-4901-bbea-b04b5467f169, 2024-06-27T14:30:00Z -->
+local text_with_markers = [[<!-- anya__conversation: 67f169, 2024-06-27T14:30:00Z -->
 # Igor
 <!-- anya__message: 604c2d, start, Igor, 2024-06-27T14:30:00Z -->
 > Change the streaming code to say "something else" instead of "something".
@@ -28,6 +28,6 @@ local text_with_markers = [[<!-- anya__conversation: ee236a3d-c40a-4901-bbea-b04
 
 local bufnr = vim.api.nvim_get_current_buf()
 
-require("anya").streaming.output_text(bufnr, text_with_markers, {})
+require("anya").streaming.output_text_sync(bufnr, text_with_markers, {})
 
 -- vim: wrap :

@@ -297,19 +297,32 @@ end
 -- Scans for markers and applies corresponding UI elements:
 -- - fold_start/fold_end: creates manual folds
 -- - tool_success: highlights header line with OkMsg
--- - anya__message: displays time or agent info
+-- - anya__message: displays time or agent info, creates message folds
 -- @param bufnr number: Buffer number to process
 function M._process_markers(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local fold_start_line = nil
+  -- Track message fold starts by id: { [id] = line_number }
+  local message_fold_starts = {}
 
   for i, line in ipairs(lines) do
     -- Check for message markers first (different pattern)
     if markers.is_message_marker(line) then
       local msg_info = markers.parse_message_marker(line)
-      if msg_info and msg_info.type == "start" then
-        -- Apply extmark to the line above the marker (the header line)
-        M._apply_message_info(bufnr, i - 1, msg_info)
+      if msg_info then
+        if msg_info.type == "start" then
+          -- Apply extmark to the line above the marker (the header line)
+          M._apply_message_info(bufnr, i - 1, msg_info)
+          -- Record fold start: the header line (line above marker)
+          message_fold_starts[msg_info.id] = i - 1
+        elseif msg_info.type == "end" then
+          -- Create fold from start to this end marker (open by default)
+          local start_line = message_fold_starts[msg_info.id]
+          if start_line and i > start_line then
+            M._create_fold_range(bufnr, start_line, i, true)
+          end
+          message_fold_starts[msg_info.id] = nil
+        end
       end
     elseif markers.is_marker_line(line) then
       local found_markers = markers.parse_marker(line)
@@ -364,7 +377,8 @@ end
 -- @param bufnr number: Buffer number
 -- @param start_line number: Line number where fold should start (1-indexed)
 -- @param end_line number: Line number where fold should end (1-indexed)
-function M._create_fold_range(bufnr, start_line, end_line)
+-- @param open boolean|nil: If true, open the fold after creating it (default: false)
+function M._create_fold_range(bufnr, start_line, end_line, open)
   -- Find a window displaying this buffer to create the fold
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     if vim.api.nvim_win_get_buf(win) == bufnr then
@@ -378,6 +392,10 @@ function M._create_fold_range(bufnr, start_line, end_line)
       vim.api.nvim_win_call(win, function()
         ---@diagnostic disable-next-line: param-type-mismatch
         pcall(vim.cmd, string.format("%d,%dfold", start_line, end_line))
+        -- Open the fold if requested
+        if open then
+          pcall(vim.cmd, string.format("%dfoldopen", start_line))
+        end
       end)
 
       -- Restore cursor position
@@ -617,6 +635,34 @@ function M.update_edit_state_at_cursor(new_state)
   if extmark_id then
     M.update_edit_state(extmark_id, new_state)
   end
+end
+
+-- Output text synchronously without streaming animation
+-- Text is written immediately to the buffer, bypassing the queue
+-- @param bufnr number: Buffer number to write to
+-- @param text string: Text to output (can contain newlines and marker lines)
+-- @param marker_list string[]|nil: List of markers to inject (e.g., {"fold", "tool_success"})
+function M.output_text_sync(bufnr, text, marker_list)
+  -- Validate buffer
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+
+  local final_text = text
+
+  -- Inject markers if requested
+  if marker_list and #marker_list > 0 then
+    final_text = M._inject_markers(text, marker_list)
+  end
+
+  -- Write all text at once
+  M._append_to_buffer(bufnr, final_text)
+
+  -- Process markers and create folds
+  M._process_markers(bufnr)
+
+  -- Autoscroll to bottom
+  M._autoscroll_to_bottom(bufnr)
 end
 
 -- Clear the streaming queue and stop timer
