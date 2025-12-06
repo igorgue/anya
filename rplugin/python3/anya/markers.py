@@ -51,6 +51,33 @@ def make_agent_message_start(
     )
 
 
+def make_user_message_start(msg_id: str, author: str, timestamp: str) -> str:
+    """Create a message start marker line for a user message.
+
+    Args:
+        msg_id: The message ID
+        author: The user's name
+        timestamp: ISO 8601 UTC timestamp
+
+    Returns:
+        A marker line like '<!-- anya__message: 604c2d, start, Igor, 2024-06-27T14:30:00Z -->'
+    """
+    return f"<!-- anya__message: {msg_id}, start, {author}, {timestamp} -->"
+
+
+def make_conversation_marker(conv_id: str, timestamp: str) -> str:
+    """Create a conversation marker line.
+
+    Args:
+        conv_id: The conversation ID
+        timestamp: ISO 8601 UTC timestamp
+
+    Returns:
+        A marker line like '<!-- anya__conversation: 67f169, 2024-06-27T14:30:00Z -->'
+    """
+    return f"<!-- anya__conversation: {conv_id}, {timestamp} -->"
+
+
 def make_message_end(msg_id: str, timestamp: str) -> str:
     """Create a message end marker line.
 

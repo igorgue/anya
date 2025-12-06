@@ -5,6 +5,22 @@ PROMPT_TITLE = "Prompt"
 PROMPT_HEIGHT = 8
 
 
+def get_buffer_content(nvim: Nvim, bufnr: int) -> str:
+    """Read entire buffer content as a single string with markers intact.
+
+    Args:
+        nvim: Neovim instance
+        bufnr: Buffer number
+
+    Returns:
+        Complete buffer content as a string
+    """
+    if not nvim.api.buf_is_valid(bufnr):
+        return ""
+    lines = nvim.api.buf_get_lines(bufnr, 0, -1, False)
+    return "\n".join(lines)
+
+
 def new(nvim: Nvim) -> tuple[object]:
     """Create the Anya UI layout with chat and prompt buffers."""
     chat_buf = None

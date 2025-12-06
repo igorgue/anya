@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from . import buffers
 from . import ids
 from . import markers
+from . import history
 
 VERSION = "0.0.1"
 
@@ -69,7 +70,7 @@ class AnyaPlugin:
             self._run_agent_streaming(text, conversation_id, chat_buf.number), loop
         )
 
-    async def _run_agent_streaming(self, text, conversation_id, chat_bufnr):
+    async def _run_agent_streaming(self, _text, conversation_id, chat_bufnr):
         """Run the agent with streaming and write to chat buffer."""
         from agents import Runner
         from openai.types.responses import ResponseTextDeltaEvent
@@ -77,6 +78,10 @@ class AnyaPlugin:
         from .agents.context import NvimPluginContext
 
         context = NvimPluginContext(nvim=self.nvim)
+
+        buffer_content = await self._get_buffer_content_async(chat_bufnr)
+        records = history.parse_buffer_content(buffer_content or "")
+        llm_history = history.build_llm_history(records)
 
         msg_id = ids.new(conversation=conversation_id)
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -93,7 +98,7 @@ class AnyaPlugin:
         try:
             result = Runner.run_streamed(
                 starting_agent=code,
-                input=text,
+                input=llm_history,
                 context=context,
             )
 
@@ -125,6 +130,23 @@ class AnyaPlugin:
                 if ft == "anya-chat":
                     return buf
         return None
+
+    async def _get_buffer_content_async(self, bufnr: int) -> str:
+        """Get buffer content from async context using a future."""
+        import concurrent.futures
+
+        future: concurrent.futures.Future[str] = concurrent.futures.Future()
+
+        def get_content():
+            content = buffers.get_buffer_content(self.nvim, bufnr)
+            future.set_result(content)
+
+        self.nvim.async_call(get_content)
+
+        while not future.done():
+            await asyncio.sleep(0.01)
+
+        return future.result()
 
     def _append_to_chat_buffer(self, bufnr, text):
         """Append text to the chat buffer (sync, instant)."""
