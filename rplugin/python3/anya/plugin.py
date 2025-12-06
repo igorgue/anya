@@ -21,6 +21,7 @@ class AnyaPlugin(object):
 
     def __init__(self, nvim: Nvim) -> None:
         self.nvim = nvim
+        self.context = NvimPluginContext(nvim=self.nvim)
         self.loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
         self._loop_thread.start()
@@ -89,16 +90,13 @@ class AnyaPlugin(object):
         """Send a prompt to the code agent and display the response."""
         self.nvim.out_write(f"Sending: {text}\n")
 
-        # Create context with nvim instance
-        context = NvimPluginContext(nvim=self.nvim)
-
         async def run_agent():
             """Run agent asynchronously."""
             try:
                 result = await Runner.run(
                     starting_agent=code,
                     input=text,
-                    context=context,
+                    context=self.context,
                 )
                 response = result.final_output or "[No response from agent]"
                 self.nvim.async_call(self.nvim.out_write, f"\n{response}\n")
