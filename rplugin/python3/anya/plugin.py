@@ -12,6 +12,7 @@ from . import db
 from . import ids
 from . import markers
 from . import history
+from . import fidget
 
 VERSION = "0.0.1"
 
@@ -92,11 +93,17 @@ class AnyaPlugin:
             self.nvim.err_write("Anya: Chat buffer not found.\n")
             return
         loop = self._ensure_loop()
+        request_id = ids.new()
         asyncio.run_coroutine_threadsafe(
-            self._run_agent_streaming(text, conversation_id, chat_buf.number), loop
+            self._run_agent_streaming(
+                text, conversation_id, chat_buf.number, request_id
+            ),
+            loop,
         )
 
-    async def _run_agent_streaming(self, _text, conversation_id, chat_bufnr):
+    async def _run_agent_streaming(
+        self, _text, conversation_id, chat_bufnr, request_id
+    ):
         """Run the agent with streaming and write to chat buffer."""
         from agents import Runner
         from openai.types.responses import ResponseTextDeltaEvent
@@ -104,6 +111,17 @@ class AnyaPlugin:
         from .agents.context import NvimPluginContext
 
         context = NvimPluginContext(nvim=self.nvim)
+
+        # Emit fidget start event
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaRequestStarted",
+            {
+                "id": request_id,
+                "message": "thinking",
+                "model": DEFAULT_MODEL,
+            },
+        )
 
         buffer_content = await self._get_buffer_content_async(chat_bufnr)
         records = history.parse_buffer_content(buffer_content or "")
@@ -177,11 +195,31 @@ class AnyaPlugin:
             # Update conversation timestamp
             db.update_conversation_timestamp(conversation_id, end_timestamp)
 
+            # Emit fidget finish event
+            fidget.emit_user_event(
+                self.nvim,
+                "AnyaRequestFinished",
+                {
+                    "id": request_id,
+                    "status": "success",
+                },
+            )
+
         except Exception as e:
             self.nvim.async_call(
                 self._append_to_chat_buffer, chat_bufnr, f"\n\n**Error:** {e}\n"
             )
             self.nvim.async_call(self.nvim.err_write, f"Agent error: {e}\n")
+
+            # Emit fidget error event
+            fidget.emit_user_event(
+                self.nvim,
+                "AnyaRequestFinished",
+                {
+                    "id": request_id,
+                    "status": "error",
+                },
+            )
 
     def _get_chat_buffer(self):
         """Find the chat buffer by filetype."""
