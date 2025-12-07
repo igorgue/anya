@@ -46,9 +46,7 @@ def make_agent_message_start(
     Returns:
         A marker line like '<!-- am: f13e20, start, code, gpt-4.1, 2024-06-27T14:30:00Z -->'
     """
-    return (
-        f"<!-- am: {msg_id}, start, {agent_type}, {model}, {timestamp} -->"
-    )
+    return f"<!-- am: {msg_id}, start, {agent_type}, {model}, {timestamp} -->"
 
 
 def make_user_message_start(msg_id: str, author: str, timestamp: str) -> str:

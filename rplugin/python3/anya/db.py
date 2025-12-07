@@ -37,7 +37,7 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Create tables if they don't exist."""
+    """Create tables if they don't exist and add new columns if missing."""
     conn = get_connection()
     try:
         conn.executescript("""
@@ -57,6 +57,7 @@ def init_db() -> None:
                 model TEXT,
                 created_at TEXT NOT NULL,
                 ended_at TEXT,
+                markers JSON,
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             );
 
@@ -64,6 +65,15 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
         """)
         conn.commit()
+
+        # Migration: Add markers column if it doesn't exist
+        cursor = conn.execute("PRAGMA table_info(messages)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "markers" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN markers TEXT")
+            # Set all existing messages to have empty marker list
+            conn.execute("UPDATE messages SET markers = '[]' WHERE markers IS NULL")
+            conn.commit()
     finally:
         conn.close()
 
@@ -154,15 +164,26 @@ def delete_conversation(id: str) -> bool:
 
 def save_message(record: MessageRecord) -> bool:
     """Insert a message from a MessageRecord."""
+    import json
+
     conn = get_connection()
     try:
         content = record.content
         if record.role == "user":
             content = strip_blockquote(content)
 
+        markers_json = None
+        if record.markers:
+            markers_json = json.dumps(
+                [
+                    {"name": m.ids[0] if m.ids else m.type, "pos": m.pos}
+                    for m in record.markers
+                ]
+            )
+
         conn.execute(
-            """INSERT INTO messages (id, conversation_id, role, content, author, model, created_at, ended_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO messages (id, conversation_id, role, content, author, model, created_at, ended_at, markers)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record.id,
                 record.conversation_id,
@@ -172,6 +193,7 @@ def save_message(record: MessageRecord) -> bool:
                 record.model,
                 record.timestamp,
                 record.end_timestamp,
+                markers_json,
             ),
         )
         conn.commit()
@@ -191,13 +213,14 @@ def save_message_dict(
     model: str | None = None,
     created_at: str | None = None,
     ended_at: str | None = None,
+    markers: str | None = None,
 ) -> bool:
     """Insert a message from individual fields."""
     conn = get_connection()
     try:
         conn.execute(
-            """INSERT INTO messages (id, conversation_id, role, content, author, model, created_at, ended_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO messages (id, conversation_id, role, content, author, model, created_at, ended_at, markers)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 msg_id,
                 conversation_id,
@@ -207,6 +230,7 @@ def save_message_dict(
                 model,
                 created_at,
                 ended_at,
+                markers,
             ),
         )
         conn.commit()
@@ -222,7 +246,7 @@ def get_messages(conversation_id: str) -> list[dict[str, Any]]:
     conn = get_connection()
     try:
         cursor = conn.execute(
-            """SELECT id, conversation_id, role, content, author, model, created_at, ended_at
+            """SELECT id, conversation_id, role, content, author, model, created_at, ended_at, markers
                FROM messages WHERE conversation_id = ? ORDER BY created_at ASC""",
             (conversation_id,),
         )
@@ -236,7 +260,7 @@ def get_message(id: str) -> dict[str, Any] | None:
     conn = get_connection()
     try:
         cursor = conn.execute(
-            """SELECT id, conversation_id, role, content, author, model, created_at, ended_at
+            """SELECT id, conversation_id, role, content, author, model, created_at, ended_at, markers
                FROM messages WHERE id = ?""",
             (id,),
         )
@@ -270,6 +294,8 @@ def rebuild_buffer_content(
     Returns:
         Buffer content string with all markers
     """
+    import json
+
     lines: list[str] = []
     lines.append(
         markers.make_conversation_marker(conversation["id"], conversation["created_at"])
@@ -300,7 +326,31 @@ def rebuild_buffer_content(
                     msg["created_at"],
                 )
             )
-            lines.append(msg["content"])
+
+            # Rebuild content with tool markers inserted at proper positions
+            if msg.get("markers"):
+                try:
+                    marker_list = json.loads(msg["markers"])
+                    # Sort markers by position (descending) to insert from end
+                    marker_list = sorted(
+                        marker_list, key=lambda x: x["pos"], reverse=True
+                    )
+                    content_lines = msg["content"].split("\n")
+
+                    for marker in marker_list:
+                        pos = marker["pos"]
+                        name = marker["name"]
+                        # Insert marker at the line number position
+                        if 0 <= pos <= len(content_lines):
+                            content_lines.insert(pos, markers.make_marker(name))
+
+                    lines.extend(content_lines)
+                except (json.JSONDecodeError, KeyError):
+                    # If marker parsing fails, just add content as-is
+                    lines.append(msg["content"])
+            else:
+                lines.append(msg["content"])
+
             if msg["ended_at"]:
                 lines.append(markers.make_message_end(msg["id"], msg["ended_at"]))
 

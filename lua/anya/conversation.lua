@@ -235,7 +235,7 @@ function M.send_message()
   if is_new_conversation then
     vim.fn.AnyaSaveConversation(conv_id, timestamp)
   end
-  vim.fn.AnyaSaveMessage(msg_id, conv_id, "user", prompt_text, user_name, nil, timestamp, timestamp)
+  vim.fn.AnyaSaveMessage(msg_id, conv_id, "user", prompt_text, user_name, nil, timestamp, timestamp, nil)
 
   -- Send to agent for response (async)
   vim.fn.AnyaSend(prompt_text, conv_id)

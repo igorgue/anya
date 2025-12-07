@@ -312,15 +312,22 @@ class AnyaPlugin:
             # Save agent message to database
             self._ensure_db()
             full_content = "".join(collected_content)
+
+            # Extract markers from the collected content (markers are removed from content)
+            cleaned_content, markers_json = history.extract_markers_from_content(
+                full_content
+            )
+
             db.save_message_dict(
                 msg_id=msg_id,
                 conversation_id=conversation_id,
                 role="assistant",
-                content=full_content,
+                content=cleaned_content,
                 author=agent_name,
                 model=DEFAULT_MODEL,
                 created_at=timestamp,
                 ended_at=end_timestamp,
+                markers=markers_json,
             )
             # Update conversation timestamp
             db.update_conversation_timestamp(conversation_id, end_timestamp)
@@ -363,15 +370,22 @@ class AnyaPlugin:
 
             # Save agent message to database with whatever content was collected
             self._ensure_db()
+
+            # Extract markers from the collected content (markers are removed from content)
+            cleaned_content, markers_json = history.extract_markers_from_content(
+                full_content
+            )
+
             db.save_message_dict(
                 msg_id=msg_id,
                 conversation_id=conversation_id,
                 role="assistant",
-                content=full_content,
+                content=cleaned_content,
                 author=agent_name,
                 model=DEFAULT_MODEL,
                 created_at=timestamp,
                 ended_at=end_timestamp,
+                markers=markers_json,
             )
             # Update conversation timestamp
             db.update_conversation_timestamp(conversation_id, end_timestamp)
@@ -555,6 +569,7 @@ Usage:
             args[5]: Model (optional)
             args[6]: Created at timestamp (optional)
             args[7]: Ended at timestamp (optional)
+            args[8]: Markers JSON (optional)
         """
         if len(args) < 4:
             self.nvim.err_write(
@@ -571,6 +586,7 @@ Usage:
             model=args[5] if len(args) > 5 else None,
             created_at=args[6] if len(args) > 6 else None,
             ended_at=args[7] if len(args) > 7 else None,
+            markers=args[8] if len(args) > 8 else None,
         )
 
     @pynvim.function("AnyaListConversations", sync=True)

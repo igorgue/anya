@@ -223,9 +223,7 @@ def parse_buffer_content(
             tool_ids = parse_tool_marker(line)
             if tool_ids and current_message:
                 pos = len("\n".join(content_lines))
-                current_message.markers.append(
-                    Marker(type="at", ids=tool_ids, pos=pos)
-                )
+                current_message.markers.append(Marker(type="at", ids=tool_ids, pos=pos))
             continue
 
         if in_message:
@@ -310,3 +308,38 @@ def build_full_history(
             )
 
     return history
+
+
+def extract_markers_from_content(content: str) -> tuple[str, str]:
+    """Extract tool markers from message content.
+
+    Parses the content to find all `<!-- at: ... -->` markers and returns
+    them as a JSON string and the cleaned content (without markers).
+
+    Args:
+        content: The message content with embedded markers
+
+    Returns:
+        Tuple of (cleaned_content, markers_json) where markers_json is
+        [{"name": "marker_name", "pos": line_number}, ...] or None
+    """
+    import json
+
+    lines = content.split("\n")
+    cleaned_lines = []
+    markers_list = []
+
+    for line in lines:
+        tool_ids = parse_tool_marker(line)
+        if tool_ids:
+            # Store marker with its position (which will be the line number in cleaned content)
+            pos = len(cleaned_lines)
+            for marker_id in tool_ids:
+                markers_list.append({"name": marker_id, "pos": pos})
+        else:
+            cleaned_lines.append(line)
+
+    cleaned_content = "\n".join(cleaned_lines)
+    markers_json = json.dumps(markers_list) if markers_list else None
+
+    return (cleaned_content, markers_json)
