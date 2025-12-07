@@ -47,7 +47,9 @@ class AnyaPlugin:
             db.init_db()
             self._db_initialized = True
 
-    @pynvim.command("Anya", nargs="*", range="", sync=False, complete="customlist,AnyaComplete")
+    @pynvim.command(
+        "Anya", nargs="*", range="", sync=False, complete="customlist,AnyaComplete"
+    )
     def main_cmd(self, args, _range):
         subcommand = args[0] if args else None
 
@@ -67,7 +69,9 @@ class AnyaPlugin:
             self.nvim.async_call(self._open_interface, "tab")
         elif subcommand == "pane":
             # Check for direction argument
-            direction = args[1] if len(args) > 1 and args[1] in ["right", "left"] else "right"
+            direction = (
+                args[1] if len(args) > 1 and args[1] in ["right", "left"] else "right"
+            )
             self.nvim.async_call(self._open_interface, "pane", direction)
         elif subcommand == "history":
             self.nvim.exec_lua("require('anya.picker').open()")
@@ -438,5 +442,3 @@ Usage:
             return
         base, callback_id = args
         buffers.get_file_completions_async(self.nvim, base, callback_id)
-
-    

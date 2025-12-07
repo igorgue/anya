@@ -49,14 +49,14 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
             prompt_buf = buf
 
     if not chat_buf or not chat_buf.valid:
-        chat_buf = nvim.api.create_buf(False, True)
+        chat_buf = nvim.api.create_buf(True, False)
         nvim.api.buf_set_name(chat_buf, CHAT_TITLE)
         nvim.api.buf_set_option(chat_buf, "filetype", "anya-chat")
         nvim.api.buf_set_option(chat_buf, "buftype", "nofile")
         nvim.api.buf_set_option(chat_buf, "swapfile", False)
 
     if not prompt_buf or not prompt_buf.valid:
-        prompt_buf = nvim.api.create_buf(False, True)
+        prompt_buf = nvim.api.create_buf(True, False)
         nvim.api.buf_set_name(prompt_buf, PROMPT_TITLE)
         nvim.api.buf_set_option(prompt_buf, "filetype", "anya-prompt")
         nvim.api.buf_set_option(prompt_buf, "buftype", "nofile")
@@ -179,7 +179,9 @@ def close_pane(nvim: Nvim):
         nvim.api.win_close(_pane_state["chat_win"], True)
 
     # Return to the original window
-    if _pane_state["original_win"] and nvim.api.win_is_valid(_pane_state["original_win"]):
+    if _pane_state["original_win"] and nvim.api.win_is_valid(
+        _pane_state["original_win"]
+    ):
         nvim.api.set_current_win(_pane_state["original_win"])
 
     # Reset pane state
