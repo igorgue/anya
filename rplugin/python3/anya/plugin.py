@@ -354,12 +354,10 @@ class AnyaPlugin:
             end_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             # Close any open tool folds before message end marker
             if tool_was_called:
-                fold_end_marker = "\n" + markers.make_marker("fold_end") + "\n"
+                fold_end_marker = "\n" + markers.make_marker("fold_end")
                 collected_content.append(fold_end_marker)
-            footer = "\n"
-            if tool_was_called:
-                footer += markers.make_marker("fold_end") + "\n"
-            footer += markers.make_message_end(msg_id, end_timestamp) + "\n"
+                self.nvim.async_call(self._stream_text_to_buffer, chat_bufnr, fold_end_marker)
+            footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
             self.nvim.async_call(self._stream_text_to_buffer, chat_bufnr, footer)
 
             # Save agent message to database
@@ -417,13 +415,12 @@ class AnyaPlugin:
 
             # Add message end marker
             if tool_was_called:
-                full_content = fixed_content + "\n" + markers.make_marker("fold_end") + "\n"
+                fold_end_marker = "\n" + markers.make_marker("fold_end")
+                full_content = fixed_content + fold_end_marker
+                self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, fold_end_marker)
             else:
                 full_content = fixed_content
-            footer = "\n"
-            if tool_was_called:
-                footer += markers.make_marker("fold_end") + "\n"
-            footer += markers.make_message_end(msg_id, end_timestamp) + "\n"
+            footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
             self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, footer)
 
             # Save agent message to database with whatever content was collected
