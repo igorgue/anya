@@ -122,6 +122,7 @@ def get_file_completions_async(nvim: Nvim, base: str, callback_id: str):
 
     # Try to use fd first (much faster and respects gitignore)
     import subprocess
+
     try:
         # Use fd to get files and directories
         cmd = ["fd", "--max-depth", "3", "--type", "f", "--type", "d", ".", search_dir]
@@ -134,24 +135,24 @@ def get_file_completions_async(nvim: Nvim, base: str, callback_id: str):
 
         if result.returncode == 0:
             # Process fd output
-            for line in result.stdout.strip().split('\n'):
+            for line in result.stdout.strip().split("\n"):
                 if not line or len(matches) >= limit:
                     break
 
                 # Convert to relative path
                 if line.startswith(search_dir):
-                    relative = line[len(search_dir):]
-                    if relative.startswith('/'):
+                    relative = line[len(search_dir) :]
+                    if relative.startswith("/"):
                         relative = relative[1:]
                 else:
                     relative = line
 
                 # Check if it matches our prefix
-                name = relative.split('/')[-1]
+                name = relative.split("/")[-1]
                 if prefix == "" or name.lower().startswith(prefix.lower()):
                     display_name = relative
                     # Add trailing slash for directories
-                    if line.strip().endswith('/'):
+                    if line.strip().endswith("/"):
                         display_name = relative + "/"
                     completion = dir_part + display_name if dir_part else display_name
                     matches.append(completion)
@@ -169,10 +170,26 @@ def get_file_completions_async(nvim: Nvim, base: str, callback_id: str):
                 # Skip hidden directories and .git
                 dirs[:] = [d for d in dirs if not d.startswith(".") and d != ".git"]
                 # Also skip common ignore patterns
-                dirs[:] = [d for d in dirs if d not in ["node_modules", "__pycache__", "target", "build", "dist", "venv", ".venv", "vendor"]]
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if d
+                    not in [
+                        "node_modules",
+                        "__pycache__",
+                        "target",
+                        "build",
+                        "dist",
+                        "venv",
+                        ".venv",
+                        "vendor",
+                    ]
+                ]
 
                 # Process directories first
-                all_items = [(d, "directory") for d in dirs] + [(f, "file") for f in files]
+                all_items = [(d, "directory") for d in dirs] + [
+                    (f, "file") for f in files
+                ]
 
                 for name, item_type in all_items:
                     if count >= limit:
@@ -191,7 +208,9 @@ def get_file_completions_async(nvim: Nvim, base: str, callback_id: str):
                             display_name = name + "/"
 
                         # Reconstruct the completion path
-                        completion = dir_part + display_name if dir_part else display_name
+                        completion = (
+                            dir_part + display_name if dir_part else display_name
+                        )
                         matches.append(completion)
                         count += 1
 
@@ -199,7 +218,7 @@ def get_file_completions_async(nvim: Nvim, base: str, callback_id: str):
                     break
 
                 # Limit depth to avoid scanning too deep
-                level = root[len(search_dir):].count(os.sep)
+                level = root[len(search_dir) :].count(os.sep)
                 if level >= 3:
                     dirs[:] = []  # Don't recurse further
 

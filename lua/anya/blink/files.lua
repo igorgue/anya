@@ -10,7 +10,10 @@ local function get_at_symbol_query(line, cursor_col)
       at_pos = i
       break
     elseif char == " " then
-      break
+      -- Only break if we haven't found @ yet
+      if not at_pos then
+        break
+      end
     end
   end
 
@@ -18,6 +21,7 @@ local function get_at_symbol_query(line, cursor_col)
     return nil, nil
   end
 
+  -- Include everything after @ up to the cursor position
   local query = line:sub(at_pos + 1, cursor_col)
   return at_pos, query
 end
@@ -53,6 +57,10 @@ local function fuzzy_match(str, pattern)
         if str_idx == 1 or str:sub(str_idx - 1, str_idx - 1):match("[/_.-]") then
           score = score + 5
         end
+        -- Special bonus for exact dot matches (very important for file extensions)
+        if char == "." and str_lower:sub(str_idx, str_idx) == "." then
+          score = score + 10
+        end
         last_match_idx = str_idx
         str_idx = str_idx + 1
         break
@@ -70,6 +78,10 @@ local function fuzzy_match(str, pattern)
   -- Prefer matches where pattern is a larger portion of the filename
   local basename = str:match("[^/]+$") or str
   score = score + (#pattern / #basename) * 10
+  -- Huge bonus for exact matches
+  if str_lower == pattern_lower then
+    score = score + 100
+  end
 
   return true, score
 end
@@ -133,15 +145,17 @@ local function collect_files(root, collected, limit)
       end
 
       -- Skip hidden files and common ignore patterns
-      if name:sub(1, 1) ~= "."
-         and name ~= "node_modules"
-         and name ~= "__pycache__"
-         and name ~= "target"
-         and name ~= "build"
-         and name ~= "dist"
-         and name ~= "venv"
-         and name ~= ".venv"
-         and name ~= "vendor" then
+      if
+        name:sub(1, 1) ~= "."
+        and name ~= "node_modules"
+        and name ~= "__pycache__"
+        and name ~= "target"
+        and name ~= "build"
+        and name ~= "dist"
+        and name ~= "venv"
+        and name ~= ".venv"
+        and name ~= "vendor"
+      then
         local full_path = dir .. "/" .. name
         local relative_path = full_path:sub(#root + 2)
 
@@ -168,7 +182,7 @@ function files.new(opts)
     end,
 
     get_trigger_characters = function()
-      return { "@" }
+      return { "@", "." }
     end,
 
     get_completions = function(self, ctx, callback)
@@ -177,6 +191,7 @@ function files.new(opts)
 
       local at_pos, query = get_at_symbol_query(line, cursor_col)
 
+      -- For dot trigger, we need to ensure we're still in a @ completion context
       if not at_pos then
         callback({
           items = {},
@@ -184,6 +199,28 @@ function files.new(opts)
           is_incomplete_forward = false,
         })
         return
+      end
+
+      -- If triggered by a dot but there's no @ before it, don't provide completions
+      if ctx.trigger_character == "." then
+        local has_at_before = false
+        for i = cursor_col - 1, 1, -1 do
+          local char = line:sub(i, i)
+          if char == "@" then
+            has_at_before = true
+            break
+          elseif char == " " then
+            break
+          end
+        end
+        if not has_at_before then
+          callback({
+            items = {},
+            is_incomplete_backward = false,
+            is_incomplete_forward = false,
+          })
+          return
+        end
       end
 
       local project_root = get_project_root()
@@ -237,7 +274,7 @@ function files.new(opts)
       callback({
         items = items,
         is_incomplete_backward = false,
-        is_incomplete_forward = false,
+        is_incomplete_forward = true, -- Allow continuation after dots
       })
 
       return function() end

@@ -243,6 +243,19 @@ class AnyaPlugin:
             return
         text = args[0]
         conversation_id = args[1] if len(args) > 1 else None
+
+        # Save to history via Lua
+        if text and text.strip():
+            self.nvim.exec_lua(
+                """
+                local prompt_text = select(1, ...)
+                if prompt_text and prompt_text ~= "" then
+                    require("anya.history").add(prompt_text)
+                end
+                """,
+                text,
+            )
+
         self.send(text, conversation_id)
 
     @pynvim.function("AnyaNewConversationId", sync=True)
