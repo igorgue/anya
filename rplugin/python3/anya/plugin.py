@@ -16,7 +16,7 @@ from . import fidget
 
 VERSION = "0.0.1"
 
-DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-4.1")
+DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-3-turbo")
 
 
 def close_open_code_blocks(content: str) -> str:
