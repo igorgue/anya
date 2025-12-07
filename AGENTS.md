@@ -277,6 +277,61 @@ Functions exposed to Vim/Lua:
 | `AnyaDeleteConversation(conv_id)` | sync | Delete conversation |
 | `AnyaRebuildBufferContent(conv_id)` | sync | Rebuild buffer from DB |
 
+## Request Lifecycle Events
+
+The plugin emits User autocommand events to track request state. These are useful for integrations (e.g., status indicators, blocking UI during requests).
+
+### Events
+
+| Event | Data | Description |
+|-------|------|-------------|
+| `AnyaRequestStarted` | `{id, model}` | Fired when Python agent starts processing |
+| `AnyaRequestFinished` | `{id, status}` | Fired when Python agent completes (`status`: "success" or "error") |
+
+### Listening to Events
+
+```lua
+vim.api.nvim_create_autocmd("User", {
+  pattern = "AnyaRequestStarted",
+  callback = function(event)
+    local request_id = event.data.id
+    local model = event.data.model
+    -- Handle request start
+  end,
+})
+
+vim.api.nvim_create_autocmd("User", {
+  pattern = "AnyaRequestFinished",
+  callback = function(event)
+    local request_id = event.data.id
+    local status = event.data.status  -- "success" or "error"
+    -- Handle request completion
+  end,
+})
+```
+
+### Tracking Complete Streaming State
+
+**Important**: `AnyaRequestFinished` fires when the Python agent completes, but the Lua streaming queue may still be animating text. To check if streaming is truly complete (both agent done AND queue empty), use:
+
+```lua
+local conversation = require("anya.conversation")
+
+-- Returns true if agent is running OR queue has pending text
+if conversation.is_request_in_progress() then
+  -- Still streaming
+end
+```
+
+Or check the queue directly:
+
+```lua
+local text = require("anya.text")
+local status = text.get_queue_status()
+-- status.queue_length: number of items in queue
+-- status.timer_running: whether animation timer is active
+```
+
 ## Known Patterns
 
 - All Neovim API calls from async contexts must use `nvim.async_call`

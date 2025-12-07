@@ -3,9 +3,25 @@
 
 local M = {}
 local markers = require("anya.markers")
+local text = require("anya.text")
 
 -- Buffer-local variable names for tracking conversation state
 local CONVERSATION_ID_VAR = "anya_conversation_id"
+
+-- Track whether a request is currently in progress (Python agent running)
+M._request_in_progress = false
+
+--- Check if streaming is still in progress (either agent running or queue not empty)
+--- @return boolean True if streaming is in progress
+local function is_streaming_in_progress()
+  -- Check if Python agent is still running
+  if M._request_in_progress then
+    return true
+  end
+  -- Check if Lua streaming queue still has content
+  local status = text.get_queue_status()
+  return status.queue_length > 0 or status.timer_running
+end
 
 --- Get the chat buffer by looking for a buffer with filetype "anya-chat"
 --- @return number|nil Buffer number or nil if not found
@@ -84,10 +100,10 @@ local function is_chat_buffer_empty(chat_buf)
 end
 
 --- Format the user message content as a blockquote
---- @param text string The message text
+--- @param msg_text string The message text
 --- @return string[] Lines of the formatted message
-local function format_user_message(text)
-  local lines = vim.split(text, "\n", { plain = true })
+local function format_user_message(msg_text)
+  local lines = vim.split(msg_text, "\n", { plain = true })
   local result = {}
   for _, line in ipairs(lines) do
     table.insert(result, "> " .. line)
@@ -99,6 +115,12 @@ end
 --- Creates a new conversation if one doesn't exist
 --- @return boolean True if the message was sent successfully
 function M.send_message()
+  -- Block sending while streaming is in progress (agent running or queue not empty)
+  if is_streaming_in_progress() then
+    vim.notify("Anya: Please wait for the current response to complete.", vim.log.levels.WARN)
+    return false
+  end
+
   local chat_buf = get_chat_buffer()
   local prompt_buf = get_prompt_buffer()
 
@@ -204,7 +226,6 @@ function M.send_message()
   vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, { "" })
 
   -- Process markers to create folds and extmarks
-  local text = require("anya.text")
   text._process_markers(chat_buf)
 
   -- Scroll chat buffer to bottom
@@ -248,5 +269,38 @@ function M.get_current_conversation_id()
   end
   return get_conversation_id(chat_buf)
 end
+
+--- Check if streaming is currently in progress (agent running or queue not empty)
+--- @return boolean True if streaming is in progress
+function M.is_request_in_progress()
+  return is_streaming_in_progress()
+end
+
+--- Set up autocommands to track request state
+--- Called once during plugin initialization
+function M.setup_request_tracking()
+  local group = vim.api.nvim_create_augroup("AnyaRequestTracking", { clear = true })
+
+  vim.api.nvim_create_autocmd("User", {
+    pattern = "AnyaRequestStarted",
+    group = group,
+    callback = function()
+      M._request_in_progress = true
+    end,
+    desc = "Track when Anya request starts",
+  })
+
+  vim.api.nvim_create_autocmd("User", {
+    pattern = "AnyaRequestFinished",
+    group = group,
+    callback = function()
+      M._request_in_progress = false
+    end,
+    desc = "Track when Anya request finishes",
+  })
+end
+
+-- Initialize request tracking when module loads
+M.setup_request_tracking()
 
 return M

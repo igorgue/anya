@@ -63,12 +63,15 @@ function M:init()
     callback = function(event)
       local handle = M:get_progress_handle(event.data.id)
       if handle then
-        M:report_exit_status(handle, event)
-        -- Display completion message for at least 1 second
-        vim.defer_fn(function()
-          M:pop_progress_handle(event.data.id)
-          handle:finish()
-        end, 1000)
+        -- Wait for streaming queue to empty before showing completion
+        M:wait_for_queue_empty(function()
+          M:report_exit_status(handle, event)
+          -- Display completion message for at least 1 second
+          vim.defer_fn(function()
+            M:pop_progress_handle(event.data.id)
+            handle:finish()
+          end, 1000)
+        end)
       end
     end,
   })
@@ -113,6 +116,21 @@ function M:report_exit_status(handle, event)
   else
     handle.message = "󰜺 cancelled"
   end
+end
+
+-- Wait for the streaming queue to be empty before calling callback
+-- Polls every 50ms until queue is empty
+function M:wait_for_queue_empty(callback)
+  local text = require("anya.text")
+  local function check()
+    local status = text.get_queue_status()
+    if status.queue_length == 0 and not status.timer_running then
+      callback()
+    else
+      vim.defer_fn(check, 50)
+    end
+  end
+  check()
 end
 
 return M
