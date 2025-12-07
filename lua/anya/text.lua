@@ -395,6 +395,19 @@ function M._hide_line_with_duration(bufnr, line_num, duration)
   })
 end
 
+-- Clear all manual folds in a buffer
+-- @param bufnr number: Buffer number
+function M._clear_folds(bufnr)
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(win) == bufnr then
+      vim.api.nvim_win_call(win, function()
+        pcall(vim.cmd, "normal! zE")
+      end)
+      break
+    end
+  end
+end
+
 -- Process marker lines in buffer and create folds/extmarks
 -- Scans for markers and applies corresponding UI elements:
 -- - fold_start/fold_end: creates manual folds
@@ -404,6 +417,9 @@ end
 function M._process_markers(bufnr)
   -- Clear existing extmarks to avoid duplicates
   vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
+
+  -- Clear existing folds to avoid duplicates
+  M._clear_folds(bufnr)
 
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local fold_start_line = nil

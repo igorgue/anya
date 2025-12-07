@@ -264,6 +264,7 @@ class AnyaPlugin:
         # Collect streamed content for saving
         collected_content: list[str] = []
         parallel_tools: list[dict] = []  # Collect parallel tool calls
+        skip_next_fold_start = False  # Skip fold_start for first delta after parallel flush
         tool_name = None  # Track if we're in a tool call
         tool_args = ""  # Accumulate tool arguments
         tool_was_called = False  # Track if any tool was called
@@ -329,9 +330,11 @@ class AnyaPlugin:
                                 parallel_tools, collected_content, chat_bufnr
                             )
                             parallel_tools = []
+                            skip_next_fold_start = True
 
-                        # Wrap tool outputs with markers
-                        wrapped_delta = self._wrap_tool_output_delta(delta)
+                        # Wrap tool outputs with markers (skip if we just flushed parallel tools)
+                        wrapped_delta = self._wrap_tool_output_delta(delta, skip_fold_markers=skip_next_fold_start)
+                        skip_next_fold_start = False  # Reset for next delta
                         collected_content.append(wrapped_delta)
 
                         # Don't queue text if cancellation is in progress
@@ -558,6 +561,7 @@ class AnyaPlugin:
         # Use the status from the first tool (all should be same for parallel execution)
         status = tools[0]["status"]
 
+        # Add fold_start marker after the tool headers
         output = combined + "\n" + markers.make_marker("fold_start", status) + "\n"
         collected_content.append(output)
 
@@ -656,10 +660,14 @@ class AnyaPlugin:
         # Add opening fold marker with status and newline so it's on its own line
         return header + "\n" + markers.make_marker("fold_start", status) + "\n"
 
-    def _wrap_tool_output_delta(self, delta: str) -> str:
+    def _wrap_tool_output_delta(self, delta: str, skip_fold_markers: bool = False) -> str:
         """Wrap tool output sections with markers.
 
         Detects tool headers and wraps them with fold markers.
+        
+        Args:
+            delta: Text delta to process
+            skip_fold_markers: If True, don't add fold markers (already added by parallel flush)
         """
         from .tools.output import extract_tool_call, format_tool_header
 
@@ -674,8 +682,9 @@ class AnyaPlugin:
                 # Reformat with trimmed argument
                 formatted = format_tool_header(tool_name, first_arg)
                 result.append(formatted)
-                # Add opening marker (closing will be added at message end)
-                result.append(markers.make_marker("fold_start", "tool_pending"))
+                # Add opening marker only if not skipped
+                if not skip_fold_markers:
+                    result.append(markers.make_marker("fold_start", "tool_pending"))
             else:
                 result.append(line)
 
