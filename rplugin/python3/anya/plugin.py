@@ -118,7 +118,6 @@ class AnyaPlugin:
             "AnyaRequestStarted",
             {
                 "id": request_id,
-                "message": "thinking",
                 "model": DEFAULT_MODEL,
             },
         )

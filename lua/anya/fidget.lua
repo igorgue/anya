@@ -13,6 +13,38 @@ end
 
 M.handles = {}
 
+-- Fun status phrases that will randomly show up
+M.status_phrases = {
+  "brewing",
+  "cooking",
+  "crafting",
+  "analyzing",
+  "assembling",
+  "juggling",
+  "scheming",
+  "wrangling",
+  "polishing",
+  "refining",
+  "pondering",
+  "musing",
+  "orchestrating",
+  "constructing",
+  "generating",
+  "processing",
+  "deciphering",
+  "computing",
+  "synthesizing",
+  "weaving",
+  "harmonizing",
+  "conjuring",
+  "summoning",
+}
+
+function M:get_random_phrase()
+  local idx = math.random(1, #M.status_phrases)
+  return M.status_phrases[idx]
+end
+
 function M:init()
   local group = vim.api.nvim_create_augroup("AnyaFidgetHooks", {})
 
@@ -61,7 +93,7 @@ function M:create_progress_handle(event)
   local data = event.data or event
   return fidget_progress.handle.create({
     title = "",
-    message = data.message or "thinking",
+    message = data.message or M:get_random_phrase(),
     lsp_client = {
       name = M:get_model_name(data),
     },
