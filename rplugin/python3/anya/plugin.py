@@ -205,7 +205,7 @@ class AnyaPlugin:
                     self._append_to_chat_buffer(chat_buf.number, added_content + "\n")
 
             # Write cancellation message to chat buffer
-            cancel_msg = "\n> cancelled 󱋟 \n"
+            cancel_msg = "\n> cancelled 󱋟 "
             self._append_to_chat_buffer(chat_buf.number, cancel_msg)
 
         # Always emit finish event to notify Lua that request is done
@@ -287,9 +287,11 @@ class AnyaPlugin:
                         # Mark that streaming has started
                         self._streaming_started = True
                         collected_content.append(delta)
-                        self.nvim.async_call(
-                            self._stream_text_to_buffer, chat_bufnr, delta
-                        )
+                        # Don't queue text if cancellation is in progress
+                        if not self._request_cancelled:
+                            self.nvim.async_call(
+                                self._stream_text_to_buffer, chat_bufnr, delta
+                            )
 
             # Calculate duration
             end_time = time.time()
