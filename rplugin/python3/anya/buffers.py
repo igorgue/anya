@@ -67,18 +67,24 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
         nvim.command("tabnew")
         nvim.command("enew")
 
+        # Create prompt window first (at bottom)
+        nvim.command("botright split")
+        nvim.command(f"resize {PROMPT_HEIGHT}")
+        prompt_win = nvim.api.get_current_win()
+        nvim.api.win_set_option(prompt_win, "winfixheight", True)
+        nvim.api.win_set_buf(prompt_win, prompt_buf)
+
+        # Go back to top window and set up chat
+        nvim.command("wincmd k")
         chat_win = nvim.api.get_current_win()
         nvim.api.win_set_buf(chat_win, chat_buf)
         nvim.api.win_set_option(chat_win, "wrap", True)
         nvim.api.win_set_option(chat_win, "linebreak", True)
-
-        nvim.command("botright split")
-        nvim.command(f"resize {PROMPT_HEIGHT}")
-        nvim.api.win_set_option(0, "winfixheight", True)
-        nvim.api.win_set_buf(0, prompt_buf)
+        # Mark chat window as preferred main for Snacks.picker
+        nvim.api.win_set_var(chat_win, "snacks_main", True)
 
         # Focus the prompt window so user can start typing
-        nvim.api.set_current_win(0)
+        nvim.api.set_current_win(prompt_win)
 
     elif layout == "pane":
         # Handle pane toggling
@@ -106,27 +112,32 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
             else:  # default to right
                 nvim.command("botright vsplit")
 
-            # This is our main Anya pane window (chat will go here)
+            # This is our main Anya pane window (will become chat)
             pane_win = nvim.api.get_current_win()
 
-            # Put chat buffer in this pane
-            nvim.api.win_set_buf(pane_win, chat_buf)
-            nvim.api.win_set_option(pane_win, "wrap", True)
-            nvim.api.win_set_option(pane_win, "linebreak", True)
-
-            # Split this pane horizontally for the prompt
+            # Create prompt window first (at bottom of pane)
             nvim.command("split")
             prompt_win = nvim.api.get_current_win()
             nvim.command(f"resize {PROMPT_HEIGHT}")
             nvim.api.win_set_option(prompt_win, "winfixheight", True)
             nvim.api.win_set_buf(prompt_win, prompt_buf)
 
-            # Focus stays on prompt window so user can start typing immediately
+            # Go back to top window and set up chat
+            nvim.command("wincmd k")
+            chat_win = nvim.api.get_current_win()
+            nvim.api.win_set_buf(chat_win, chat_buf)
+            nvim.api.win_set_option(chat_win, "wrap", True)
+            nvim.api.win_set_option(chat_win, "linebreak", True)
+            # Mark chat window as preferred main for Snacks.picker
+            nvim.api.win_set_var(chat_win, "snacks_main", True)
+
+            # Focus the prompt window so user can start typing
+            nvim.api.set_current_win(prompt_win)
 
             # Store pane state for toggling
             _pane_state["is_open"] = True
             _pane_state["direction"] = direction
-            _pane_state["chat_win"] = pane_win
+            _pane_state["chat_win"] = chat_win
             _pane_state["prompt_win"] = prompt_win
     else:  # default "split" layout
         nvim.command("enew")
@@ -134,18 +145,24 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
         if len(nvim.api.list_wins()) > 1:
             nvim.command("only")
 
+        # Create prompt window first (at bottom)
+        nvim.command("botright split")
+        nvim.command(f"resize {PROMPT_HEIGHT}")
+        prompt_win = nvim.api.get_current_win()
+        nvim.api.win_set_option(prompt_win, "winfixheight", True)
+        nvim.api.win_set_buf(prompt_win, prompt_buf)
+
+        # Go back to top window and set up chat
+        nvim.command("wincmd k")
         chat_win = nvim.api.get_current_win()
         nvim.api.win_set_buf(chat_win, chat_buf)
         nvim.api.win_set_option(chat_win, "wrap", True)
         nvim.api.win_set_option(chat_win, "linebreak", True)
-
-        nvim.command("botright split")
-        nvim.command(f"resize {PROMPT_HEIGHT}")
-        nvim.api.win_set_option(0, "winfixheight", True)
-        nvim.api.win_set_buf(0, prompt_buf)
+        # Mark chat window as preferred main for Snacks.picker
+        nvim.api.win_set_var(chat_win, "snacks_main", True)
 
         # Focus the prompt window so user can start typing
-        nvim.api.set_current_win(0)
+        nvim.api.set_current_win(prompt_win)
 
     # Set up keymaps for the prompt buffer
     nvim.api.buf_set_keymap(
