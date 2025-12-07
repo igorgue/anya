@@ -301,8 +301,18 @@ class AnyaPlugin:
                                 tool_was_called = True
                                 self._streaming_started = True
 
-                                # Format tool header
-                                tool_header = self._format_tool_call(tool_name, tool_args)
+                                # Determine tool status based on item status
+                                item_status = getattr(item, "status", "completed")
+                                tool_status = (
+                                    "tool_success"
+                                    if item_status == "completed"
+                                    else "tool_failure"
+                                )
+
+                                # Format tool header with appropriate status marker
+                                tool_header = self._format_tool_call_with_status(
+                                    tool_name, tool_args, tool_status
+                                )
                                 collected_content.append(tool_header)
 
                                 # Stream the tool header and opening marker
@@ -521,6 +531,21 @@ class AnyaPlugin:
         Returns:
             Formatted header with opening fold marker
         """
+        return self._format_tool_call_with_status(tool_name, tool_args, "tool_pending")
+
+    def _format_tool_call_with_status(
+        self, tool_name: str, tool_args: str, status: str
+    ) -> str:
+        """Format a tool call as a header with opening fold marker and status.
+
+        Args:
+            tool_name: The name of the tool function
+            tool_args: The arguments passed to the tool (JSON string)
+            status: The tool status marker (tool_pending, tool_success, tool_failure)
+
+        Returns:
+            Formatted header with opening fold marker and status
+        """
         import json
 
         from .tools.output import format_tool_header
@@ -546,8 +571,8 @@ class AnyaPlugin:
         # Format header
         header = format_tool_header(tool_name, first_arg)
 
-        # Add opening fold marker with newline so it's on its own line
-        return header + "\n" + markers.make_marker("fold_start", "tool_pending") + "\n"
+        # Add opening fold marker with status and newline so it's on its own line
+        return header + "\n" + markers.make_marker("fold_start", status) + "\n"
 
     def _wrap_tool_output_delta(self, delta: str) -> str:
         """Wrap tool output sections with markers.
