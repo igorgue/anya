@@ -263,6 +263,9 @@ class AnyaPlugin:
 
         # Collect streamed content for saving
         collected_content: list[str] = []
+        tool_name = None  # Track if we're in a tool call
+        tool_args = ""  # Accumulate tool arguments
+        tool_was_called = False  # Track if any tool was called
 
         try:
             # Record start time
@@ -279,18 +282,51 @@ class AnyaPlugin:
                 if self._request_cancelled:
                     raise asyncio.CancelledError()
 
-                if event.type == "raw_response_event" and isinstance(
-                    event.data, ResponseTextDeltaEvent
-                ):
+                # Only process events that have a data attribute
+                if not hasattr(event, "data"):
+                    continue
+
+                # Handle tool call detection - use OutputItemDoneEvent to get complete tool info
+                from openai.types.responses import ResponseOutputItemDoneEvent
+
+                if isinstance(event.data, ResponseOutputItemDoneEvent):
+                    # Check if this is a function call output item
+                    item = getattr(event.data, "item", None)
+                    if item is not None:
+                        item_type = getattr(item, "type", None)
+                        if item_type == "function_call":
+                            tool_name = getattr(item, "name", None)
+                            tool_args = getattr(item, "arguments", "")
+                            if tool_name:
+                                tool_was_called = True
+                                self._streaming_started = True
+
+                                # Format tool header
+                                tool_header = self._format_tool_call(tool_name, tool_args)
+                                collected_content.append(tool_header)
+
+                                # Stream the tool header and opening marker
+                                if not self._request_cancelled:
+                                    self.nvim.async_call(
+                                        self._stream_text_to_buffer,
+                                        chat_bufnr,
+                                        tool_header,
+                                    )
+
+                if isinstance(event.data, ResponseTextDeltaEvent):
                     delta = event.data.delta
                     if delta:
                         # Mark that streaming has started
                         self._streaming_started = True
-                        collected_content.append(delta)
+
+                        # Wrap tool outputs with markers
+                        wrapped_delta = self._wrap_tool_output_delta(delta)
+                        collected_content.append(wrapped_delta)
+
                         # Don't queue text if cancellation is in progress
                         if not self._request_cancelled:
                             self.nvim.async_call(
-                                self._stream_text_to_buffer, chat_bufnr, delta
+                                self._stream_text_to_buffer, chat_bufnr, wrapped_delta
                             )
 
             # Calculate duration
@@ -306,7 +342,11 @@ class AnyaPlugin:
                 duration_str = f"{duration_seconds:.1f}s"
 
             end_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
+            # Close any open tool folds before message end marker
+            footer = "\n"
+            if tool_was_called:
+                footer += markers.make_marker("fold_end") + "\n"
+            footer += markers.make_message_end(msg_id, end_timestamp) + "\n"
             self.nvim.async_call(self._stream_text_to_buffer, chat_bufnr, footer)
 
             # Save agent message to database
@@ -365,7 +405,10 @@ class AnyaPlugin:
             full_content = fixed_content
 
             # Add message end marker
-            footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
+            footer = "\n"
+            if tool_was_called:
+                footer += markers.make_marker("fold_end") + "\n"
+            footer += markers.make_message_end(msg_id, end_timestamp) + "\n"
             self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, footer)
 
             # Save agent message to database with whatever content was collected
@@ -467,6 +510,69 @@ class AnyaPlugin:
         if not self.nvim.api.buf_is_valid(bufnr):
             return
         self.nvim.exec_lua("require('anya.text').output(...)", bufnr, text)
+
+    def _format_tool_call(self, tool_name: str, tool_args: str) -> str:
+        """Format a tool call as a header with opening fold marker.
+
+        Args:
+            tool_name: The name of the tool function
+            tool_args: The arguments passed to the tool (JSON string)
+
+        Returns:
+            Formatted header with opening fold marker
+        """
+        import json
+
+        from .tools.output import format_tool_header
+
+        # Try to extract first argument from JSON args
+        first_arg = ""
+        try:
+            if tool_args:
+                args_dict = json.loads(tool_args)
+                # Get the first non-empty value
+                for key, value in args_dict.items():
+                    if isinstance(value, str):
+                        first_arg = value
+                    else:
+                        first_arg = str(value)
+                    break
+        except (json.JSONDecodeError, AttributeError):
+            first_arg = tool_args[:50] if tool_args else ""
+
+        if not first_arg:
+            first_arg = "(no args)"
+
+        # Format header
+        header = format_tool_header(tool_name, first_arg)
+
+        # Add opening fold marker with newline so it's on its own line
+        return header + "\n" + markers.make_marker("fold_start", "tool_pending") + "\n"
+
+    def _wrap_tool_output_delta(self, delta: str) -> str:
+        """Wrap tool output sections with markers.
+
+        Detects tool headers and wraps them with fold markers.
+        """
+        from .tools.output import extract_tool_call, format_tool_header
+
+        lines = delta.split("\n")
+        result = []
+
+        for line in lines:
+            # Check if line is a tool header
+            tool_info = extract_tool_call(line)
+            if tool_info:
+                tool_name, first_arg = tool_info
+                # Reformat with trimmed argument
+                formatted = format_tool_header(tool_name, first_arg)
+                result.append(formatted)
+                # Add opening marker (closing will be added at message end)
+                result.append(markers.make_marker("fold_start", "tool_pending"))
+            else:
+                result.append(line)
+
+        return "\n".join(result)
 
     def _autoscroll(self, bufnr):
         """Scroll all windows showing buffer to bottom."""
