@@ -87,14 +87,7 @@ vim.api.nvim_create_autocmd("InsertEnter", {
 vim.keymap.set("n", "<C-p>", history_previous, { buffer = true, desc = "Previous prompt in history" })
 vim.keymap.set("n", "<C-n>", history_next, { buffer = true, desc = "Next prompt in history" })
 
--- Optional: Also allow history navigation in insert mode with different keys
-vim.keymap.set("i", "<Up>", function()
-  history_previous()
-end, { buffer = true, desc = "Previous prompt in history" })
 
-vim.keymap.set("i", "<Down>", function()
-  history_next()
-end, { buffer = true, desc = "Next prompt in history" })
 
 -- Cancel agent response with Ctrl+C
 vim.keymap.set("n", "<C-c>", function()
