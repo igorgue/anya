@@ -83,26 +83,15 @@ vim.api.nvim_create_autocmd("InsertEnter", {
   desc = "Stop history navigation when entering insert mode",
 })
 
--- Map Enter to send message in both normal and insert mode
-vim.keymap.set("n", "<CR>", send_message, { buffer = true, desc = "Send message" })
-vim.keymap.set("i", "<CR>", function()
-  -- Exit insert mode and send message
-  vim.cmd("stopinsert")
-  send_message()
-end, { buffer = true, desc = "Send message" })
-
 -- History navigation keymaps (normal mode only to avoid conflicts)
 vim.keymap.set("n", "<C-p>", history_previous, { buffer = true, desc = "Previous prompt in history" })
 vim.keymap.set("n", "<C-n>", history_next, { buffer = true, desc = "Next prompt in history" })
 
 -- Optional: Also allow history navigation in insert mode with different keys
--- These exit insert mode first, then navigate
 vim.keymap.set("i", "<Up>", function()
-  vim.cmd("stopinsert")
   history_previous()
 end, { buffer = true, desc = "Previous prompt in history" })
 
 vim.keymap.set("i", "<Down>", function()
-  vim.cmd("stopinsert")
   history_next()
 end, { buffer = true, desc = "Next prompt in history" })

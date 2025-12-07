@@ -179,7 +179,7 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
         prompt_buf,
         "i",
         "<CR>",
-        "<cmd>stopinsert<cr><cmd>lua require('anya.conversation').send_message()<cr>",
+        "<cmd>lua require('anya.conversation').send_message()<cr>",
         {"noremap": True, "silent": True, "desc": "Send message"},
     )
 
