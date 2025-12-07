@@ -399,7 +399,7 @@ end
 -- Scans for markers and applies corresponding UI elements:
 -- - fold_start/fold_end: creates manual folds
 -- - tool_success: highlights header line with OkMsg
--- - anya__message: displays time or agent info, creates message folds
+-- - am: displays time or agent info, creates message folds
 -- @param bufnr number: Buffer number to process
 function M._process_markers(bufnr)
   -- Clear existing extmarks to avoid duplicates

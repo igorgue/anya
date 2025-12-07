@@ -17,23 +17,23 @@ M.edit_rejected = "edit_rejected"
 M.edit_failed = "edit_failed"
 M.thinking = "thinking"
 
-M.PREFIX = "<!-- anya__tools:"
+M.PREFIX = "<!-- at:"
 M.SUFFIX = "-->"
 
--- Pattern to match tool marker lines: <!-- anya__tools: ... -->
-M.TOOLS_PATTERN = "^<!%-%- anya__tools: (.+) %-%->$"
+-- Pattern to match tool marker lines: <!-- at: ... -->
+M.TOOLS_PATTERN = "^<!%-%- at: (.+) %-%->$"
 
--- Pattern to match message markers: <!-- anya__message: id, start/end, ... -->
--- User message: <!-- anya__message: 604c2d, start, Igor, 2024-06-27T14:30:00Z -->
--- Agent message: <!-- anya__message: f13e20, start, code, gpt-4.1, 2024-06-27T14:30:00Z -->
-M.MESSAGE_PATTERN = "^<!%-%- anya__message: (.+) %-%->$"
+-- Pattern to match message markers: <!-- am: id, start/end, ... -->
+-- User message: <!-- am: 604c2d, start, Igor, 2024-06-27T14:30:00Z -->
+-- Agent message: <!-- am: f13e20, start, code, gpt-4.1, 2024-06-27T14:30:00Z -->
+M.MESSAGE_PATTERN = "^<!%-%- am: (.+) %-%->$"
 
--- Pattern to match conversation markers: <!-- anya__conversation: id, timestamp -->
-M.CONVERSATION_PATTERN = "^<!%-%- anya__conversation: (.+) %-%->$"
+-- Pattern to match conversation markers: <!-- ac: id, timestamp -->
+M.CONVERSATION_PATTERN = "^<!%-%- ac: (.+) %-%->$"
 
 --- Create a marker line with the given marker names
 --- @param ... string One or more marker names to include
---- @return string A marker line like '<!-- anya__markers: fold_start, tool_pending -->'
+--- @return string A marker line like '<!-- at: fold_start, tool_pending -->'
 function M.make_marker(...)
   local names = { ... }
   return M.PREFIX .. " " .. table.concat(names, ", ") .. " " .. M.SUFFIX
@@ -75,9 +75,9 @@ function M.is_message_marker(line)
 end
 
 --- Parse a message marker line and return its components
---- User message format: <!-- anya__message: id, start, name, timestamp -->
---- Agent message format: <!-- anya__message: id, start, agent_type, model, timestamp -->
---- End format: <!-- anya__message: id, end, timestamp -->
+--- User message format: <!-- am: id, start, name, timestamp -->
+--- Agent message format: <!-- am: id, start, agent_type, model, timestamp -->
+--- End format: <!-- am: id, end, timestamp -->
 --- @param line string The line to parse
 --- @return table|nil Parsed info: { id, type, is_agent, name/agent_type, model, timestamp }
 function M.parse_message_marker(line)
@@ -134,26 +134,26 @@ end
 --- Create a conversation marker line
 --- @param id string The conversation ID
 --- @param timestamp string ISO 8601 UTC timestamp
---- @return string A marker line like '<!-- anya__conversation: 67f169, 2024-06-27T14:30:00Z -->'
+--- @return string A marker line like '<!-- ac: 67f169, 2024-06-27T14:30:00Z -->'
 function M.make_conversation_marker(id, timestamp)
-  return "<!-- anya__conversation: " .. id .. ", " .. timestamp .. " -->"
+  return "<!-- ac: " .. id .. ", " .. timestamp .. " -->"
 end
 
 --- Create a message start marker line for a user message
 --- @param id string The message ID
 --- @param name string The user's name
 --- @param timestamp string ISO 8601 UTC timestamp
---- @return string A marker line like '<!-- anya__message: 604c2d, start, Igor, 2024-06-27T14:30:00Z -->'
+--- @return string A marker line like '<!-- am: 604c2d, start, Igor, 2024-06-27T14:30:00Z -->'
 function M.make_user_message_start(id, name, timestamp)
-  return "<!-- anya__message: " .. id .. ", start, " .. name .. ", " .. timestamp .. " -->"
+  return "<!-- am: " .. id .. ", start, " .. name .. ", " .. timestamp .. " -->"
 end
 
 --- Create a message end marker line
 --- @param id string The message ID
 --- @param timestamp string ISO 8601 UTC timestamp
---- @return string A marker line like '<!-- anya__message: 604c2d, end, 2024-06-27T14:30:00Z -->'
+--- @return string A marker line like '<!-- am: 604c2d, end, 2024-06-27T14:30:00Z -->'
 function M.make_message_end(id, timestamp)
-  return "<!-- anya__message: " .. id .. ", end, " .. timestamp .. " -->"
+  return "<!-- am: " .. id .. ", end, " .. timestamp .. " -->"
 end
 
 --- Create a message start marker line for an agent message
@@ -161,9 +161,9 @@ end
 --- @param agent_type string The agent type (e.g., "code", "plan")
 --- @param model string The model name (e.g., "gpt-4.1")
 --- @param timestamp string ISO 8601 UTC timestamp
---- @return string A marker line like '<!-- anya__message: f13e20, start, code, gpt-4.1, 2024-06-27T14:30:00Z -->'
+--- @return string A marker line like '<!-- am: f13e20, start, code, gpt-4.1, 2024-06-27T14:30:00Z -->'
 function M.make_agent_message_start(id, agent_type, model, timestamp)
-  return "<!-- anya__message: " .. id .. ", start, " .. agent_type .. ", " .. model .. ", " .. timestamp .. " -->"
+  return "<!-- am: " .. id .. ", start, " .. agent_type .. ", " .. model .. ", " .. timestamp .. " -->"
 end
 
 --- Check if a line is a conversation marker line
@@ -174,7 +174,7 @@ function M.is_conversation_marker(line)
 end
 
 --- Parse a conversation marker line and return its components
---- Format: <!-- anya__conversation: id, timestamp -->
+--- Format: <!-- ac: id, timestamp -->
 --- @param line string The line to parse
 --- @return table|nil Parsed conversation info: { id, timestamp }
 function M.parse_conversation_marker(line)

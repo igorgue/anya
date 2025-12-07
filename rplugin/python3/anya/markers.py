@@ -16,7 +16,7 @@ EDIT_APPLIED = "edit_applied"
 EDIT_REJECTED = "edit_rejected"
 EDIT_FAILED = "edit_failed"
 
-PREFIX = "<!-- anya__tools:"
+PREFIX = "<!-- at:"
 SUFFIX = "-->"
 
 
@@ -27,7 +27,7 @@ def make_marker(*names: str) -> str:
         *names: One or more marker names to include
 
     Returns:
-        A marker line like '<!-- anya__tools: fold_start, tool_pending -->'
+        A marker line like '<!-- at: fold_start, tool_pending -->'
     """
     return f"{PREFIX} {', '.join(names)} {SUFFIX}"
 
@@ -44,10 +44,10 @@ def make_agent_message_start(
         timestamp: ISO 8601 UTC timestamp
 
     Returns:
-        A marker line like '<!-- anya__message: f13e20, start, code, gpt-4.1, 2024-06-27T14:30:00Z -->'
+        A marker line like '<!-- am: f13e20, start, code, gpt-4.1, 2024-06-27T14:30:00Z -->'
     """
     return (
-        f"<!-- anya__message: {msg_id}, start, {agent_type}, {model}, {timestamp} -->"
+        f"<!-- am: {msg_id}, start, {agent_type}, {model}, {timestamp} -->"
     )
 
 
@@ -60,9 +60,9 @@ def make_user_message_start(msg_id: str, author: str, timestamp: str) -> str:
         timestamp: ISO 8601 UTC timestamp
 
     Returns:
-        A marker line like '<!-- anya__message: 604c2d, start, Igor, 2024-06-27T14:30:00Z -->'
+        A marker line like '<!-- am: 604c2d, start, Igor, 2024-06-27T14:30:00Z -->'
     """
-    return f"<!-- anya__message: {msg_id}, start, {author}, {timestamp} -->"
+    return f"<!-- am: {msg_id}, start, {author}, {timestamp} -->"
 
 
 def make_conversation_marker(conv_id: str, timestamp: str) -> str:
@@ -73,9 +73,9 @@ def make_conversation_marker(conv_id: str, timestamp: str) -> str:
         timestamp: ISO 8601 UTC timestamp
 
     Returns:
-        A marker line like '<!-- anya__conversation: 67f169, 2024-06-27T14:30:00Z -->'
+        A marker line like '<!-- ac: 67f169, 2024-06-27T14:30:00Z -->'
     """
-    return f"<!-- anya__conversation: {conv_id}, {timestamp} -->"
+    return f"<!-- ac: {conv_id}, {timestamp} -->"
 
 
 def make_message_end(msg_id: str, timestamp: str) -> str:
@@ -86,9 +86,9 @@ def make_message_end(msg_id: str, timestamp: str) -> str:
         timestamp: ISO 8601 UTC timestamp
 
     Returns:
-        A marker line like '<!-- anya__message: 604c2d, end, 2024-06-27T14:30:00Z -->'
+        A marker line like '<!-- am: 604c2d, end, 2024-06-27T14:30:00Z -->'
     """
-    return f"<!-- anya__message: {msg_id}, end, {timestamp} -->"
+    return f"<!-- am: {msg_id}, end, {timestamp} -->"
 
 
 def with_markers(text: str, marker_list: list[str]) -> str:

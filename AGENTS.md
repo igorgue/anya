@@ -83,10 +83,10 @@ Named after Anya Forger from Spy x Family - she can read minds, this plugin read
 Markers are HTML comments that track message metadata:
 
 ```html
-<!-- anya__conversation: {id}, {timestamp} -->
-<!-- anya__message: {id}, start, {role}, {author}, {model}, {timestamp} -->
-<!-- anya__message: {id}, end, {timestamp} -->
-<!-- anya__tools: {marker_names} -->
+<!-- ac: {id}, {timestamp} -->
+<!-- am: {id}, start, {role}, {author}, {model}, {timestamp} -->
+<!-- am: {id}, end, {timestamp} -->
+<!-- at: {marker_names} -->
 ```
 
 ## Development Commands

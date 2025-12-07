@@ -8,10 +8,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-CONVERSATION_PATTERN = re.compile(r"^<!-- anya__conversation: ([^,]+), ([^-]+) -->$")
-MESSAGE_START_PATTERN = re.compile(r"^<!-- anya__message: ([^,]+), start, (.+) -->$")
-MESSAGE_END_PATTERN = re.compile(r"^<!-- anya__message: ([^,]+), end, ([^-]+) -->$")
-TOOLS_PATTERN = re.compile(r"^<!-- anya__tools: (.+) -->$")
+CONVERSATION_PATTERN = re.compile(r"^<!-- ac: ([^,]+), ([^-]+) -->$")
+MESSAGE_START_PATTERN = re.compile(r"^<!-- am: ([^,]+), start, (.+) -->$")
+MESSAGE_END_PATTERN = re.compile(r"^<!-- am: ([^,]+), end, ([^-]+) -->$")
+TOOLS_PATTERN = re.compile(r"^<!-- at: (.+) -->$")
 
 
 @dataclass
@@ -53,7 +53,7 @@ class ConversationRecord:
 def parse_conversation_marker(line: str) -> dict[str, str] | None:
     """Parse a conversation marker line.
 
-    Format: <!-- anya__conversation: {id}, {timestamp} -->
+    Format: <!-- ac: {id}, {timestamp} -->
 
     Returns:
         Dict with 'id' and 'timestamp', or None if not a valid marker.
@@ -67,8 +67,8 @@ def parse_conversation_marker(line: str) -> dict[str, str] | None:
 def parse_message_start_marker(line: str) -> dict[str, Any] | None:
     """Parse a message start marker line.
 
-    User format: <!-- anya__message: {id}, start, {author}, {timestamp} -->
-    Agent format: <!-- anya__message: {id}, start, {agent_type}, {model}, {timestamp} -->
+    User format: <!-- am: {id}, start, {author}, {timestamp} -->
+    Agent format: <!-- am: {id}, start, {agent_type}, {model}, {timestamp} -->
 
     Returns:
         Dict with parsed fields, or None if not a valid marker.
@@ -104,7 +104,7 @@ def parse_message_start_marker(line: str) -> dict[str, Any] | None:
 def parse_message_end_marker(line: str) -> dict[str, str] | None:
     """Parse a message end marker line.
 
-    Format: <!-- anya__message: {id}, end, {timestamp} -->
+    Format: <!-- am: {id}, end, {timestamp} -->
 
     Returns:
         Dict with 'id' and 'timestamp', or None if not a valid marker.
@@ -118,7 +118,7 @@ def parse_message_end_marker(line: str) -> dict[str, str] | None:
 def parse_tool_marker(line: str) -> list[str] | None:
     """Parse a tool marker line.
 
-    Format: <!-- anya__tools: {id1}, {id2}, ... -->
+    Format: <!-- at: {id1}, {id2}, ... -->
 
     Returns:
         List of marker IDs, or None if not a valid marker.
@@ -180,7 +180,7 @@ def parse_buffer_content(
             current_conversation_id = conv_marker["id"]
             records.append(
                 ConversationRecord(
-                    type="anya__conversation",
+                    type="ac",
                     id=conv_marker["id"],
                     timestamp=conv_marker["timestamp"],
                 )
@@ -196,7 +196,7 @@ def parse_buffer_content(
 
             role = "assistant" if start_marker["is_agent"] else "user"
             current_message = MessageRecord(
-                type="anya__message",
+                type="am",
                 id=start_marker["id"],
                 role=role,
                 author=start_marker["author"],
@@ -224,7 +224,7 @@ def parse_buffer_content(
             if tool_ids and current_message:
                 pos = len("\n".join(content_lines))
                 current_message.markers.append(
-                    Marker(type="anya__tools", ids=tool_ids, pos=pos)
+                    Marker(type="at", ids=tool_ids, pos=pos)
                 )
             continue
 

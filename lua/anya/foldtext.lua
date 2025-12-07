@@ -5,7 +5,7 @@ local M = {}
 
 -- Strip HTML comment markers from text
 local function strip_markers(text)
-  return text:gsub("^<!%-%- anya__[^>]*%-%->", ""):gsub("^<!%-%- ", ""):gsub(" %-%->$", "")
+  return text:gsub("^<!%-%- [a-z][a-z]: [^>]*%-%->", ""):gsub("^<!%-%- ", ""):gsub(" %-%->$", "")
 end
 
 -- Get custom fold text for a fold
@@ -23,7 +23,7 @@ function M.get_foldtext()
   local line_count = 0
   for i = start_line, end_line do
     local check_line = vim.api.nvim_buf_get_lines(0, i - 1, i, false)[1] or ""
-    if not check_line:match("^<!%-%- anya__") then
+    if not check_line:match("^<!%-%- [a-z][a-z]:") then
       line_count = line_count + 1
     end
   end
