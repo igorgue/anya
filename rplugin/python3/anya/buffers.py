@@ -140,6 +140,11 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
             # This is our main Anya pane window (will become chat)
             pane_win = nvim.api.get_current_win()
 
+            # Set pane width to 30% of screen width
+            screen_width = nvim.api.get_option("columns")
+            pane_width = max(1, int(screen_width * 0.3))
+            nvim.command(f"vertical resize {pane_width}")
+
             # Create prompt window first (at bottom of pane)
             nvim.command("split")
             prompt_win = nvim.api.get_current_win()
