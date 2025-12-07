@@ -5,6 +5,15 @@ CHAT_TITLE = "Chat"
 PROMPT_TITLE = "Prompt"
 PROMPT_HEIGHT = 8
 
+# Track pane state for toggling
+_pane_state = {
+    "is_open": False,
+    "direction": "right",
+    "chat_win": None,
+    "prompt_win": None,
+    "original_win": None,
+}
+
 
 def get_buffer_content(nvim: Nvim, bufnr: int) -> str:
     """Read entire buffer content as a single string with markers intact.
@@ -22,8 +31,14 @@ def get_buffer_content(nvim: Nvim, bufnr: int) -> str:
     return "\n".join(lines)
 
 
-def new(nvim: Nvim) -> tuple[object]:
-    """Create the Anya UI layout with chat and prompt buffers."""
+def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
+    """Create the Anya UI layout with chat and prompt buffers.
+
+    Args:
+        nvim: Neovim instance
+        layout: Layout type - "split" (default), "tab", or "pane"
+        direction: For pane layout - "right" (default) or "left"
+    """
     chat_buf = None
     prompt_buf = None
 
@@ -47,21 +62,90 @@ def new(nvim: Nvim) -> tuple[object]:
         nvim.api.buf_set_option(prompt_buf, "buftype", "nofile")
         nvim.api.buf_set_option(prompt_buf, "swapfile", False)
 
-    nvim.command("enew")
+    if layout == "tab":
+        # Create a new tab
+        nvim.command("tabnew")
+        nvim.command("enew")
 
-    if len(nvim.api.list_wins()) > 1:
-        nvim.command("only")
+        chat_win = nvim.api.get_current_win()
+        nvim.api.win_set_buf(chat_win, chat_buf)
+        nvim.api.win_set_option(chat_win, "wrap", True)
+        nvim.api.win_set_option(chat_win, "linebreak", True)
 
-    chat_win = nvim.api.get_current_win()
+        nvim.command("botright split")
+        nvim.command(f"resize {PROMPT_HEIGHT}")
+        nvim.api.win_set_option(0, "winfixheight", True)
+        nvim.api.win_set_buf(0, prompt_buf)
 
-    nvim.api.win_set_buf(chat_win, chat_buf)
-    nvim.api.win_set_option(chat_win, "wrap", True)
-    nvim.api.win_set_option(chat_win, "linebreak", True)
+        # Focus the prompt window so user can start typing
+        nvim.api.set_current_win(0)
 
-    nvim.command("botright split")
-    nvim.command(f"resize {PROMPT_HEIGHT}")
-    nvim.api.win_set_option(0, "winfixheight", True)
-    nvim.api.win_set_buf(0, prompt_buf)
+    elif layout == "pane":
+        # Handle pane toggling
+        global _pane_state
+        direction = direction or "right"
+
+        if _pane_state["is_open"]:
+            # Close the pane
+            close_pane(nvim)
+            _pane_state["is_open"] = False
+            # Return existing buffers (they're still valid)
+            for buf in nvim.buffers:
+                if buf.name.endswith(CHAT_TITLE):
+                    chat_buf = buf
+                elif buf.name.endswith(PROMPT_TITLE):
+                    prompt_buf = buf
+            return (chat_buf, prompt_buf)
+        else:
+            # Remember current window
+            _pane_state["original_win"] = nvim.api.get_current_win()
+
+            # Create a vertical pane for Anya (don't close existing windows)
+            if direction == "left":
+                nvim.command("topleft vsplit")
+            else:  # default to right
+                nvim.command("botright vsplit")
+
+            # This is our main Anya pane window (chat will go here)
+            pane_win = nvim.api.get_current_win()
+
+            # Put chat buffer in this pane
+            nvim.api.win_set_buf(pane_win, chat_buf)
+            nvim.api.win_set_option(pane_win, "wrap", True)
+            nvim.api.win_set_option(pane_win, "linebreak", True)
+
+            # Split this pane horizontally for the prompt
+            nvim.command("split")
+            prompt_win = nvim.api.get_current_win()
+            nvim.command(f"resize {PROMPT_HEIGHT}")
+            nvim.api.win_set_option(prompt_win, "winfixheight", True)
+            nvim.api.win_set_buf(prompt_win, prompt_buf)
+
+            # Focus stays on prompt window so user can start typing immediately
+
+            # Store pane state for toggling
+            _pane_state["is_open"] = True
+            _pane_state["direction"] = direction
+            _pane_state["chat_win"] = pane_win
+            _pane_state["prompt_win"] = prompt_win
+    else:  # default "split" layout
+        nvim.command("enew")
+
+        if len(nvim.api.list_wins()) > 1:
+            nvim.command("only")
+
+        chat_win = nvim.api.get_current_win()
+        nvim.api.win_set_buf(chat_win, chat_buf)
+        nvim.api.win_set_option(chat_win, "wrap", True)
+        nvim.api.win_set_option(chat_win, "linebreak", True)
+
+        nvim.command("botright split")
+        nvim.command(f"resize {PROMPT_HEIGHT}")
+        nvim.api.win_set_option(0, "winfixheight", True)
+        nvim.api.win_set_buf(0, prompt_buf)
+
+        # Focus the prompt window so user can start typing
+        nvim.api.set_current_win(0)
 
     # Set up keymaps for the prompt buffer
     nvim.api.buf_set_keymap(
@@ -80,6 +164,28 @@ def new(nvim: Nvim) -> tuple[object]:
     )
 
     return (chat_buf, prompt_buf)
+
+
+def close_pane(nvim: Nvim):
+    """Close the pane layout and return to the original window."""
+    global _pane_state
+
+    # Close the prompt window first (it's inside the pane)
+    if _pane_state["prompt_win"] and nvim.api.win_is_valid(_pane_state["prompt_win"]):
+        nvim.api.win_close(_pane_state["prompt_win"], True)
+
+    # Close the chat window (the main pane)
+    if _pane_state["chat_win"] and nvim.api.win_is_valid(_pane_state["chat_win"]):
+        nvim.api.win_close(_pane_state["chat_win"], True)
+
+    # Return to the original window
+    if _pane_state["original_win"] and nvim.api.win_is_valid(_pane_state["original_win"]):
+        nvim.api.set_current_win(_pane_state["original_win"])
+
+    # Reset pane state
+    _pane_state["chat_win"] = None
+    _pane_state["prompt_win"] = None
+    _pane_state["original_win"] = None
 
 
 def get_file_completions_async(nvim: Nvim, base: str, callback_id: str):

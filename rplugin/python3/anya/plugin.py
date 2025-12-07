@@ -63,10 +63,21 @@ class AnyaPlugin:
                 return
             text = " ".join(args[1:])
             self.send(text)
+        elif subcommand == "tab":
+            self.nvim.async_call(self._open_interface, "tab")
+        elif subcommand == "pane":
+            # Check for direction argument
+            direction = args[1] if len(args) > 1 and args[1] in ["right", "left"] else "right"
+            self.nvim.async_call(self._open_interface, "pane", direction)
 
-    def _open_interface(self):
-        """Open the Anya interface with chat and prompt buffers."""
-        self.chat_buf, self.prompt_buf = buffers.new(self.nvim)
+    def _open_interface(self, layout="split", direction=None):
+        """Open the Anya interface with chat and prompt buffers.
+
+        Args:
+            layout: The layout type - "split" (default), "tab", or "pane"
+            direction: For "pane" layout, the direction - "right" (default) or "left"
+        """
+        self.chat_buf, self.prompt_buf = buffers.new(self.nvim, layout, direction)
 
     def send(self, text, conversation_id=None):
         """Send a prompt to the code agent and stream the response to the chat buffer."""
@@ -278,10 +289,12 @@ class AnyaPlugin:
         return f"""anya v{VERSION}
 
 Usage:
-    :Anya                Open the Anya interface
-    :Anya help           Show this help message
-    :Anya open           Open the Anya interface
-    :Anya send <prompt>  Send a prompt to the agent
+    :Anya                    Open the Anya interface (split layout)
+    :Anya help               Show this help message
+    :Anya open               Open the Anya interface (split layout)
+    :Anya tab                Open the Anya interface in a new tab
+    :Anya pane [right|left]  Open the Anya interface in a pane (default: right)
+    :Anya send <prompt>      Send a prompt to the agent
 """
 
     @pynvim.function("AnyaSaveConversation", sync=True)
