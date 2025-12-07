@@ -19,6 +19,56 @@ VERSION = "0.0.1"
 DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-4.1")
 
 
+def close_open_code_blocks(content: str) -> str:
+    """Close any unclosed markdown code blocks in the content.
+
+    Detects code fence markers (```, ```python, etc.) and ensures they're
+    properly closed. If a fence is opened but not closed, adds closing
+    backticks.
+
+    Args:
+        content: The markdown content to check
+
+    Returns:
+        The content with any unclosed code blocks closed
+    """
+    if not content:
+        return content
+
+    lines = content.split("\n")
+    fence_stack = []  # Stack of backtick counts for open fences
+
+    for line in lines:
+        stripped = line.lstrip()
+
+        # Check if this line starts with backticks
+        if stripped.startswith("`"):
+            # Count consecutive backticks at the start
+            tick_count = 0
+            for char in stripped:
+                if char == "`":
+                    tick_count += 1
+                else:
+                    break
+
+            # Need at least 3 backticks to be a fence
+            if tick_count >= 3:
+                # Check if this closes the most recent open fence
+                if fence_stack and fence_stack[-1] == tick_count:
+                    fence_stack.pop()
+                else:
+                    # This opens a new fence
+                    fence_stack.append(tick_count)
+
+    # If there are unclosed fences, add closing backticks
+    if fence_stack:
+        tick_count = fence_stack[-1]
+        closing_fence = "`" * tick_count
+        lines.append(closing_fence)
+
+    return "\n".join(lines)
+
+
 @pynvim.plugin
 class AnyaPlugin:
     def __init__(self, nvim):
@@ -110,32 +160,45 @@ class AnyaPlugin:
         # Prevent cancel spam
         if self._cancel_in_progress:
             return
-        
+
         if self._current_task is None:
             self.nvim.err_write("Anya: No request to cancel.\n")
             return
-        
+
         chat_buf = self._get_chat_buffer()
         if not chat_buf:
             self.nvim.err_write("Anya: Chat buffer not found.\n")
             return
-        
+
         # Mark cancel as in progress to prevent spam
         self._cancel_in_progress = True
-        
+
         # Cancel the task
         try:
             self._current_task.cancel()
         except Exception as e:
             self.nvim.err_write(f"Anya: Failed to cancel task: {e}\n")
-        
+
         # Flush the streaming queue to finish outputting pending text
         self.nvim.exec_lua("require('anya.text').flush_queue()")
-        
+
+        # Close any open code blocks in the buffer before adding cancellation message
+        buffer_content = buffers.get_buffer_content(self.nvim, chat_buf.number)
+        fixed_content = close_open_code_blocks(buffer_content)
+
+        # If blocks were closed, we need to append the closing fences
+        if len(fixed_content) > len(buffer_content):
+            original_lines = buffer_content.split("\n")
+            fixed_lines = fixed_content.split("\n")
+            if len(fixed_lines) > len(original_lines):
+                added_lines = fixed_lines[len(original_lines) :]
+                added_content = "\n".join(added_lines)
+                self._append_to_chat_buffer(chat_buf.number, added_content + "\n")
+
         # Write cancellation message to chat buffer
-        cancel_msg = "\n\n*Request cancelled by user.*\n"
+        cancel_msg = "\n*Request cancelled by user.*\n"
         self._append_to_chat_buffer(chat_buf.number, cancel_msg)
-        
+
         # Clear the task reference and cancel flag
         self._current_task = None
         self._cancel_in_progress = False
@@ -247,13 +310,30 @@ class AnyaPlugin:
             # Handle cancellation
             end_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+            # Close any open code blocks in the collected content
+            original_content = "".join(collected_content)
+            fixed_content = close_open_code_blocks(original_content)
+
+            # If closing fences were added, append them to the buffer
+            if len(fixed_content) > len(original_content):
+                # Extract only what was added (the closing fence)
+                original_lines = original_content.split("\n")
+                fixed_lines = fixed_content.split("\n")
+                if len(fixed_lines) > len(original_lines):
+                    added_lines = fixed_lines[len(original_lines) :]
+                    added_content = "\n".join(added_lines)
+                    self.nvim.async_call(
+                        self._append_to_chat_buffer, chat_bufnr, added_content + "\n"
+                    )
+
+            full_content = fixed_content
+
             # Add message end marker
-            footer = markers.make_message_end(msg_id, end_timestamp) + "\n"
+            footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
             self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, footer)
 
             # Save agent message to database with whatever content was collected
             self._ensure_db()
-            full_content = "".join(collected_content)
             db.save_message_dict(
                 msg_id=msg_id,
                 conversation_id=conversation_id,
