@@ -8,5 +8,34 @@ endif
 
 let g:loaded_anya = 1
 
-" Command to open the conversation history picker
-command! AnyaHistory lua require('anya.picker').open()
+" Define completion function for :Anya command
+function! AnyaComplete(ArgLead, CmdLine, CursorPos)
+  " Get the command line without the initial ':Anya '
+  let cmdline = a:CmdLine
+  if cmdline =~# '^:Anya\>'
+    let cmdline = substitute(cmdline, '^:Anya\s*', '', '')
+  endif
+
+  " Split into parts
+  let parts = split(cmdline)
+  let subcommands = ['help', 'open', 'send', 'tab', 'pane', 'history']
+
+  " If no arguments yet or we're completing the first subcommand
+  if len(parts) <= 1 || (len(parts) == 1 && a:ArgLead != '')
+    return filter(copy(subcommands), 'v:val =~# "^" . a:ArgLead')
+  endif
+
+  " Complete subcommand arguments
+  if len(parts) >= 1
+    let first_cmd = parts[0]
+
+    " Complete directions for 'pane' subcommand
+    if first_cmd ==# 'pane' && len(parts) == 2 && a:ArgLead != ''
+      return filter(['right', 'left'], 'v:val =~# "^" . a:ArgLead')
+    elseif first_cmd ==# 'pane' && len(parts) == 2 && a:ArgLead == ''
+      return ['right', 'left']
+    endif
+  endif
+
+  return []
+endfunction

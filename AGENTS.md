@@ -20,7 +20,6 @@ Named after Anya Forger from Spy x Family - she can read minds, this plugin read
 
 **Vim Layer** (`plugin/anya.vim`)
 - Bootstrap script that sets `g:loaded_anya`
-- Provides `:AnyaHistory` command for conversation browser
 
 **Buffer Management** (`rplugin/python3/anya/buffers.py`)
 - Creates split layout with chat and prompt buffers
@@ -105,7 +104,7 @@ Markers are HTML comments that track message metadata:
 :Anya send <text>
 
 " Browse conversation history
-:AnyaHistory
+:Anya history
 ```
 
 ### Keymaps (in prompt buffer)
@@ -235,7 +234,7 @@ ftplugin/
   anya-chat.lua        # Chat buffer configuration
   anya-prompt.lua      # Prompt buffer configuration
 
-plugin/anya.vim        # Bootstrap and :AnyaHistory command
+plugin/anya.vim        # Bootstrap script only
 syntax/anya-chat.vim   # Marker concealment syntax
 prompts/               # Agent system prompts
 doc/anya.txt           # Vim help documentation
@@ -292,3 +291,13 @@ Functions exposed to Vim/Lua:
 - Follow existing code conventions and formatting
 - Use type hints in Python code
 - Prefer minimal, focused changes over large rewrites
+
+## Command System
+
+**IMPORTANT**: All Anya commands must be implemented as subcommands of `:Anya`. Do NOT create new standalone commands like `:AnyaHistory`.
+
+Examples:
+- ✅ Correct: `:Anya history`, `:Anya send <text>`, `:Anya help`
+- ❌ Incorrect: `:AnyaHistory`, `:AnyaSend`, `:AnyaHelp`
+
+The main `:Anya` command in `plugin.py` uses `nargs="*"` to accept subcommands and their arguments. This keeps the command namespace clean and ensures all functionality is discoverable under `:Anya`.

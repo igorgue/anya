@@ -8,7 +8,7 @@ An AI-powered Neovim plugin built on the OpenAI Agents SDK.
 
 - **Chat Interface**: Split-window layout with streaming responses
 - **Conversation Persistence**: SQLite database stores conversation history
-- **Conversation Browser**: Browse and load previous conversations with `:AnyaHistory`
+- **Conversation Browser**: Browse and load previous conversations with `:Anya history`
 - **Context Awareness**: Conversation history is automatically included in agent context
 - **Streaming Animation**: Smooth character-by-character text animation
 - **Marker System**: Hidden markers track message boundaries and metadata
@@ -78,7 +78,7 @@ export OPENAI_API_KEY="sk-..."
 | `:Anya open` | Open the Anya interface |
 | `:Anya help` | Show help message |
 | `:Anya send <text>` | Send a prompt directly |
-| `:AnyaHistory` | Open conversation history picker |
+| `:Anya history` | Open conversation history picker |
 
 ### Basic Workflow
 
@@ -97,7 +97,7 @@ export OPENAI_API_KEY="sk-..."
 
 Conversations are automatically saved to a SQLite database at `~/.local/share/anya/conversations.db`.
 
-Use `:AnyaHistory` to browse and load previous conversations (requires `snacks.nvim`).
+Use `:Anya history` to browse and load previous conversations (requires `snacks.nvim`).
 
 ## Architecture
 
