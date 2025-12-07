@@ -28,6 +28,8 @@ class AnyaPlugin:
         self._loop = None
         self._loop_thread = None
         self._db_initialized = False
+        self._current_task = None  # Track current agent task for cancellation
+        self._cancel_in_progress = False  # Prevent cancel spam
 
     def _ensure_loop(self):
         """Ensure the asyncio event loop is running (lazy initialization)."""
@@ -76,6 +78,8 @@ class AnyaPlugin:
             self.nvim.async_call(self._open_interface, "pane", direction)
         elif subcommand == "history":
             self.nvim.exec_lua("require('anya.picker').open()")
+        elif subcommand == "cancel":
+            self.cancel_agent()
 
     def _open_interface(self, layout="split", direction=None):
         """Open the Anya interface with chat and prompt buffers.
@@ -94,12 +98,47 @@ class AnyaPlugin:
             return
         loop = self._ensure_loop()
         request_id = ids.new()
-        asyncio.run_coroutine_threadsafe(
+        self._current_task = asyncio.run_coroutine_threadsafe(
             self._run_agent_streaming(
                 text, conversation_id, chat_buf.number, request_id
             ),
             loop,
         )
+
+    def cancel_agent(self):
+        """Cancel the current agent response and flush the queue."""
+        # Prevent cancel spam
+        if self._cancel_in_progress:
+            return
+        
+        if self._current_task is None:
+            self.nvim.err_write("Anya: No request to cancel.\n")
+            return
+        
+        chat_buf = self._get_chat_buffer()
+        if not chat_buf:
+            self.nvim.err_write("Anya: Chat buffer not found.\n")
+            return
+        
+        # Mark cancel as in progress to prevent spam
+        self._cancel_in_progress = True
+        
+        # Cancel the task
+        try:
+            self._current_task.cancel()
+        except Exception as e:
+            self.nvim.err_write(f"Anya: Failed to cancel task: {e}\n")
+        
+        # Flush the streaming queue to finish outputting pending text
+        self.nvim.exec_lua("require('anya.text').flush_queue()")
+        
+        # Write cancellation message to chat buffer
+        cancel_msg = "\n\n*Request cancelled by user.*\n"
+        self._append_to_chat_buffer(chat_buf.number, cancel_msg)
+        
+        # Clear the task reference and cancel flag
+        self._current_task = None
+        self._cancel_in_progress = False
 
     async def _run_agent_streaming(
         self, _text, conversation_id, chat_bufnr, request_id
@@ -201,6 +240,40 @@ class AnyaPlugin:
                 {
                     "id": request_id,
                     "status": "success",
+                },
+            )
+
+        except asyncio.CancelledError:
+            # Handle cancellation
+            end_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            # Add message end marker
+            footer = markers.make_message_end(msg_id, end_timestamp) + "\n"
+            self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, footer)
+
+            # Save agent message to database with whatever content was collected
+            self._ensure_db()
+            full_content = "".join(collected_content)
+            db.save_message_dict(
+                msg_id=msg_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=full_content,
+                author=agent_name,
+                model=DEFAULT_MODEL,
+                created_at=timestamp,
+                ended_at=end_timestamp,
+            )
+            # Update conversation timestamp
+            db.update_conversation_timestamp(conversation_id, end_timestamp)
+
+            # Emit fidget finish event
+            fidget.emit_user_event(
+                self.nvim,
+                "AnyaRequestFinished",
+                {
+                    "id": request_id,
+                    "status": "cancelled",
                 },
             )
 
@@ -339,6 +412,7 @@ Usage:
     :Anya pane [right|left]  Open the Anya interface in a pane (default: right)
     :Anya send <prompt>      Send a prompt to the agent
     :Anya history            Open the conversation history picker
+    :Anya cancel             Cancel the current agent response (Ctrl+C)
 """
 
     @pynvim.function("AnyaSaveConversation", sync=True)

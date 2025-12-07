@@ -95,3 +95,12 @@ end, { buffer = true, desc = "Previous prompt in history" })
 vim.keymap.set("i", "<Down>", function()
   history_next()
 end, { buffer = true, desc = "Next prompt in history" })
+
+-- Cancel agent response with Ctrl+C
+vim.keymap.set("n", "<C-c>", function()
+  vim.cmd("Anya cancel")
+end, { buffer = true, desc = "Cancel agent response" })
+
+vim.keymap.set("i", "<C-c>", function()
+  vim.cmd("Anya cancel")
+end, { buffer = true, desc = "Cancel agent response" })

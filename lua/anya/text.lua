@@ -816,4 +816,33 @@ function M.get_queue_status()
   }
 end
 
+-- Flush the streaming queue by writing all remaining text immediately
+-- Used when cancelling to finish streaming animation without waiting
+function M.flush_queue()
+  -- Process all remaining items in the queue
+  while #_G.anya_stream_queue > 0 do
+    local item = _G.anya_stream_queue[1]
+
+    -- Validate buffer still exists
+    if vim.api.nvim_buf_is_valid(item.bufnr) then
+      -- Write all remaining text at once
+      if item.text ~= "" then
+        M._append_to_buffer(item.bufnr, item.text)
+        M._autoscroll_to_bottom(item.bufnr)
+      end
+
+      -- Process markers
+      M._process_markers(item.bufnr)
+    end
+
+    table.remove(_G.anya_stream_queue, 1)
+  end
+
+  -- Stop the timer if running
+  if _G.anya_stream_timer then
+    _G.anya_stream_timer:stop()
+    _G.anya_stream_timer = nil
+  end
+end
+
 return M

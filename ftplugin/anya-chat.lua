@@ -18,3 +18,8 @@ vim.opt_local.modifiable = true
 vim.opt_local.spell = false
 -- Custom foldtext that handles concealed markers
 vim.opt_local.foldtext = [[v:lua.require'anya.foldtext'.get_foldtext()]]
+
+-- Cancel agent response with Ctrl+C
+vim.keymap.set("n", "<C-c>", function()
+  vim.cmd("Anya cancel")
+end, { buffer = true, desc = "Cancel agent response" })

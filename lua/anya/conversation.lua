@@ -295,6 +295,8 @@ function M.setup_request_tracking()
     group = group,
     callback = function()
       M._request_in_progress = false
+      -- Allow user to continue even if request was cancelled
+      -- This enables sending follow-up messages
     end,
     desc = "Track when Anya request finishes",
   })
