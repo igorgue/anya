@@ -31,6 +31,20 @@ def get_buffer_content(nvim: Nvim, bufnr: int) -> str:
     return "\n".join(lines)
 
 
+def is_in_anya_buffer(nvim: Nvim) -> bool:
+    """Check if the current buffer is an Anya buffer (chat or prompt).
+
+    Args:
+        nvim: Neovim instance
+
+    Returns:
+        True if current buffer is an Anya buffer
+    """
+    current_buf = nvim.api.get_current_buf()
+    ft = nvim.api.buf_get_option(current_buf, "filetype")
+    return ft in ("anya-chat", "anya-prompt")
+
+
 def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
     """Create the Anya UI layout with chat and prompt buffers.
 
@@ -38,7 +52,18 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
         nvim: Neovim instance
         layout: Layout type - "split" (default), "tab", or "pane"
         direction: For pane layout - "right" (default) or "left"
+
+    Returns:
+        Tuple of (chat_buf, prompt_buf) or (None, None) if operation was blocked
     """
+    global _pane_state
+
+    # For pane layout: if user is in an Anya buffer but pane is not open,
+    # they're using a different layout - show error instead of opening pane
+    if layout == "pane" and is_in_anya_buffer(nvim) and not _pane_state["is_open"]:
+        nvim.err_write("Anya: Already open\n")
+        return (None, None)
+
     chat_buf = None
     prompt_buf = None
 
