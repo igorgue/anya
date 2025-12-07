@@ -114,7 +114,6 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
 
     elif layout == "pane":
         # Handle pane toggling
-        global _pane_state
         direction = direction or "right"
 
         if _pane_state["is_open"]:
