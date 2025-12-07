@@ -80,6 +80,8 @@ class AnyaPlugin:
         self._db_initialized = False
         self._current_task = None  # Track current agent task for cancellation
         self._cancel_in_progress = False  # Prevent cancel spam
+        self._streaming_started = False  # Track if we've received any content
+        self._request_cancelled = False  # Flag for async handler to check
 
     def _ensure_loop(self):
         """Ensure the asyncio event loop is running (lazy initialization)."""
@@ -148,6 +150,8 @@ class AnyaPlugin:
             return
         loop = self._ensure_loop()
         request_id = ids.new()
+        self._streaming_started = False  # Reset streaming flag for new request
+        self._request_cancelled = False  # Reset cancellation flag for new request
         self._current_task = asyncio.run_coroutine_threadsafe(
             self._run_agent_streaming(
                 text, conversation_id, chat_buf.number, request_id
@@ -157,21 +161,21 @@ class AnyaPlugin:
 
     def cancel_agent(self):
         """Cancel the current agent response and flush the queue."""
+        # Only allow cancellation if streaming has actually started
+        if not self._streaming_started or self._current_task is None:
+            return
+
         # Prevent cancel spam
         if self._cancel_in_progress:
             return
 
-        if self._current_task is None:
-            self.nvim.err_write("Anya: No request to cancel.\n")
-            return
-
         chat_buf = self._get_chat_buffer()
         if not chat_buf:
-            self.nvim.err_write("Anya: Chat buffer not found.\n")
             return
 
         # Mark cancel as in progress to prevent spam
         self._cancel_in_progress = True
+        self._request_cancelled = True  # Signal async handler to abort
 
         # Cancel the task
         try:
@@ -182,25 +186,42 @@ class AnyaPlugin:
         # Flush the streaming queue to finish outputting pending text
         self.nvim.exec_lua("require('anya.text').flush_queue()")
 
-        # Close any open code blocks in the buffer before adding cancellation message
-        buffer_content = buffers.get_buffer_content(self.nvim, chat_buf.number)
-        fixed_content = close_open_code_blocks(buffer_content)
+        # Force reset the request state in Lua to unlock the UI
+        self.nvim.exec_lua("require('anya.conversation').force_reset_request_state()")
 
-        # If blocks were closed, we need to append the closing fences
-        if len(fixed_content) > len(buffer_content):
-            original_lines = buffer_content.split("\n")
-            fixed_lines = fixed_content.split("\n")
-            if len(fixed_lines) > len(original_lines):
-                added_lines = fixed_lines[len(original_lines) :]
-                added_content = "\n".join(added_lines)
-                self._append_to_chat_buffer(chat_buf.number, added_content + "\n")
+        # Only show cancellation message if streaming actually started
+        if self._streaming_started:
+            # Close any open code blocks in the buffer before adding cancellation message
+            buffer_content = buffers.get_buffer_content(self.nvim, chat_buf.number)
+            fixed_content = close_open_code_blocks(buffer_content)
 
-        # Write cancellation message to chat buffer
-        cancel_msg = "\n*Request cancelled by user.*\n"
-        self._append_to_chat_buffer(chat_buf.number, cancel_msg)
+            # If blocks were closed, we need to append the closing fences
+            if len(fixed_content) > len(buffer_content):
+                original_lines = buffer_content.split("\n")
+                fixed_lines = fixed_content.split("\n")
+                if len(fixed_lines) > len(original_lines):
+                    added_lines = fixed_lines[len(original_lines) :]
+                    added_content = "\n".join(added_lines)
+                    self._append_to_chat_buffer(chat_buf.number, added_content + "\n")
+
+            # Write cancellation message to chat buffer
+            cancel_msg = "\n> cancelled 󱋟 \n"
+            self._append_to_chat_buffer(chat_buf.number, cancel_msg)
+
+        # Always emit finish event to notify Lua that request is done
+        # This ensures the UI is unlocked even if cancel happened before streaming started
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaRequestFinished",
+            {
+                "id": "cancelled",
+                "status": "cancelled",
+            },
+        )
 
         # Clear the task reference and cancel flag
         self._current_task = None
+        self._streaming_started = False
         self._cancel_in_progress = False
 
     async def _run_agent_streaming(
@@ -254,11 +275,17 @@ class AnyaPlugin:
             )
 
             async for event in result.stream_events():
+                # Check if cancellation was requested
+                if self._request_cancelled:
+                    raise asyncio.CancelledError()
+
                 if event.type == "raw_response_event" and isinstance(
                     event.data, ResponseTextDeltaEvent
                 ):
                     delta = event.data.delta
                     if delta:
+                        # Mark that streaming has started
+                        self._streaming_started = True
                         collected_content.append(delta)
                         self.nvim.async_call(
                             self._stream_text_to_buffer, chat_bufnr, delta
@@ -372,6 +399,10 @@ class AnyaPlugin:
                     "status": "error",
                 },
             )
+        finally:
+            # Always clear the current task reference when done
+            self._current_task = None
+            self._request_cancelled = False
 
     def _get_chat_buffer(self):
         """Find the chat buffer by filetype."""

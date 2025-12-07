@@ -276,6 +276,11 @@ function M.is_request_in_progress()
   return is_streaming_in_progress()
 end
 
+--- Force reset request state (for cancellation)
+function M.force_reset_request_state()
+  M._request_in_progress = false
+end
+
 --- Set up autocommands to track request state
 --- Called once during plugin initialization
 function M.setup_request_tracking()
