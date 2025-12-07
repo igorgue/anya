@@ -6,12 +6,12 @@ import re
 def extract_tool_call(text: str) -> tuple[str, str] | None:
     """Extract tool name and first arg from tool call header.
 
-    Looks for: **tool_name | first_arg**
+    Looks for: **tool_name: first_arg**
 
     Returns:
         (tool_name, first_arg) or None
     """
-    match = re.match(r"\*\*(\w+(?:-\w+)*)\s*\|\s*([^*]+)\*\*", text)
+    match = re.match(r"\*\*(\w+(?:-\w+)*)\s*:\s*([^*]+)\*\*", text)
     if match:
         return match.group(1), match.group(2).strip()
     return None
@@ -26,14 +26,18 @@ def format_tool_header(tool_name: str, first_arg: str, max_len: int = 30) -> str
         max_len: Max length before trimming
 
     Returns:
-        **tool_name | trimmed_arg**
+        **tool_name** or **tool_name: trimmed_arg**
     """
+    # If no arguments, just show the tool name
+    if not first_arg or first_arg == "(no args)":
+        return f"**{tool_name}**"
+
     if len(first_arg) > max_len:
         trimmed = first_arg[: max_len - 3] + "..."
     else:
         trimmed = first_arg
 
-    return f"**{tool_name} | {trimmed}**"
+    return f"**{tool_name}: {trimmed}**"
 
 
 def is_tool_header(text: str) -> bool:

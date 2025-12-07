@@ -263,6 +263,7 @@ class AnyaPlugin:
 
         # Collect streamed content for saving
         collected_content: list[str] = []
+        parallel_tools: list[dict] = []  # Collect parallel tool calls
         tool_name = None  # Track if we're in a tool call
         tool_args = ""  # Accumulate tool arguments
         tool_was_called = False  # Track if any tool was called
@@ -309,25 +310,25 @@ class AnyaPlugin:
                                     else "tool_failure"
                                 )
 
-                                # Format tool header with appropriate status marker
-                                tool_header = self._format_tool_call_with_status(
-                                    tool_name, tool_args, tool_status
-                                )
-                                collected_content.append(tool_header)
-
-                                # Stream the tool header and opening marker
-                                if not self._request_cancelled:
-                                    self.nvim.async_call(
-                                        self._stream_text_to_buffer,
-                                        chat_bufnr,
-                                        tool_header,
-                                    )
+                                # Collect parallel tool info (will be shown after all tools finish)
+                                parallel_tools.append({
+                                    "name": tool_name,
+                                    "args": tool_args,
+                                    "status": tool_status,
+                                })
 
                 if isinstance(event.data, ResponseTextDeltaEvent):
                     delta = event.data.delta
                     if delta:
                         # Mark that streaming has started
                         self._streaming_started = True
+
+                        # If we've collected parallel tools and text is starting, flush them now
+                        if parallel_tools and delta.strip():
+                            self._flush_parallel_tools(
+                                parallel_tools, collected_content, chat_bufnr
+                            )
+                            parallel_tools = []
 
                         # Wrap tool outputs with markers
                         wrapped_delta = self._wrap_tool_output_delta(delta)
@@ -338,6 +339,13 @@ class AnyaPlugin:
                             self.nvim.async_call(
                                 self._stream_text_to_buffer, chat_bufnr, wrapped_delta
                             )
+
+            # Flush any remaining parallel tools before message end
+            if parallel_tools:
+                self._flush_parallel_tools(
+                    parallel_tools, collected_content, chat_bufnr
+                )
+                parallel_tools = []
 
             # Calculate duration
             end_time = time.time()
@@ -522,6 +530,78 @@ class AnyaPlugin:
         if not self.nvim.api.buf_is_valid(bufnr):
             return
         self.nvim.exec_lua("require('anya.text').output(...)", bufnr, text)
+
+    def _flush_parallel_tools(
+        self,
+        tools: list[dict],
+        collected_content: list[str],
+        chat_bufnr: int,
+    ):
+        """Flush collected parallel tool calls as a single combined output block.
+
+        Args:
+            tools: List of {name, args, status} dicts
+            collected_content: Content list to append to
+            chat_bufnr: Buffer number for streaming
+        """
+        if not tools:
+            return
+
+        # Format all tools on same line with pipe separators
+        tool_headers = []
+        for tool in tools:
+            formatted = self._format_tool_header(tool["name"], tool["args"])
+            tool_headers.append(formatted)
+
+        # Create single combined output with all tools on same line
+        combined = " | ".join(tool_headers)
+        # Use the status from the first tool (all should be same for parallel execution)
+        status = tools[0]["status"]
+
+        output = combined + "\n" + markers.make_marker("fold_start", status) + "\n"
+        collected_content.append(output)
+
+        # Stream to buffer
+        if not self._request_cancelled:
+            self.nvim.async_call(
+                self._stream_text_to_buffer,
+                chat_bufnr,
+                output,
+            )
+
+    def _format_tool_header(self, tool_name: str, tool_args: str) -> str:
+        """Format a tool header without markers (for use in parallel tool display).
+
+        Args:
+            tool_name: The name of the tool function
+            tool_args: The arguments passed to the tool (JSON string)
+
+        Returns:
+            Formatted header like **tool_name | arg**
+        """
+        import json
+
+        from .tools.output import format_tool_header
+
+        # Try to extract first argument from JSON args
+        first_arg = ""
+        try:
+            if tool_args:
+                args_dict = json.loads(tool_args)
+                # Get the first non-empty value
+                for key, value in args_dict.items():
+                    if isinstance(value, str):
+                        first_arg = value
+                    else:
+                        first_arg = str(value)
+                    break
+        except (json.JSONDecodeError, AttributeError):
+            first_arg = tool_args[:50] if tool_args else ""
+
+        if not first_arg:
+            first_arg = "(no args)"
+
+        return format_tool_header(tool_name, first_arg)
 
     def _format_tool_call(self, tool_name: str, tool_args: str) -> str:
         """Format a tool call as a header with opening fold marker.
