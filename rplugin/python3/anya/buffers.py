@@ -80,6 +80,7 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
         nvim.api.win_set_buf(chat_win, chat_buf)
         nvim.api.win_set_option(chat_win, "wrap", True)
         nvim.api.win_set_option(chat_win, "linebreak", True)
+        nvim.api.win_set_option(chat_win, "showbreak", "")
         # Mark chat window as preferred main for Snacks.picker
         nvim.api.win_set_var(chat_win, "snacks_main", True)
 
@@ -128,6 +129,7 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
             nvim.api.win_set_buf(chat_win, chat_buf)
             nvim.api.win_set_option(chat_win, "wrap", True)
             nvim.api.win_set_option(chat_win, "linebreak", True)
+            nvim.api.win_set_option(chat_win, "showbreak", "")
             # Mark chat window as preferred main for Snacks.picker
             nvim.api.win_set_var(chat_win, "snacks_main", True)
 
@@ -158,6 +160,7 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
         nvim.api.win_set_buf(chat_win, chat_buf)
         nvim.api.win_set_option(chat_win, "wrap", True)
         nvim.api.win_set_option(chat_win, "linebreak", True)
+        nvim.api.win_set_option(chat_win, "showbreak", "")
         # Mark chat window as preferred main for Snacks.picker
         nvim.api.win_set_var(chat_win, "snacks_main", True)
 
