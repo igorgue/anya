@@ -353,6 +353,9 @@ class AnyaPlugin:
 
             end_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             # Close any open tool folds before message end marker
+            if tool_was_called:
+                fold_end_marker = "\n" + markers.make_marker("fold_end") + "\n"
+                collected_content.append(fold_end_marker)
             footer = "\n"
             if tool_was_called:
                 footer += markers.make_marker("fold_end") + "\n"
@@ -412,9 +415,11 @@ class AnyaPlugin:
                         self._append_to_chat_buffer, chat_bufnr, added_content + "\n"
                     )
 
-            full_content = fixed_content
-
             # Add message end marker
+            if tool_was_called:
+                full_content = fixed_content + "\n" + markers.make_marker("fold_end") + "\n"
+            else:
+                full_content = fixed_content
             footer = "\n"
             if tool_was_called:
                 footer += markers.make_marker("fold_end") + "\n"

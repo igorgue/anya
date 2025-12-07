@@ -339,10 +339,15 @@ def rebuild_buffer_content(
 
                     for marker in marker_list:
                         pos = marker["pos"]
-                        name = marker["name"]
+                        # Support both old format (single "name") and new format (list of "names")
+                        if "names" in marker:
+                            names = marker["names"]
+                        else:
+                            # Backwards compatibility with old "name" format
+                            names = [marker.get("name", "")]
                         # Insert marker at the line number position
-                        if 0 <= pos <= len(content_lines):
-                            content_lines.insert(pos, markers.make_marker(name))
+                        if names and 0 <= pos <= len(content_lines):
+                            content_lines.insert(pos, markers.make_marker(*names))
 
                     lines.extend(content_lines)
                 except (json.JSONDecodeError, KeyError):

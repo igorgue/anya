@@ -321,7 +321,7 @@ def extract_markers_from_content(content: str) -> tuple[str, str]:
 
     Returns:
         Tuple of (cleaned_content, markers_json) where markers_json is
-        [{"name": "marker_name", "pos": line_number}, ...] or None
+        [{"names": ["marker1", "marker2"], "pos": line_number}, ...] or None
     """
     import json
 
@@ -332,10 +332,9 @@ def extract_markers_from_content(content: str) -> tuple[str, str]:
     for line in lines:
         tool_ids = parse_tool_marker(line)
         if tool_ids:
-            # Store marker with its position (which will be the line number in cleaned content)
+            # Store all marker names together at the same position
             pos = len(cleaned_lines)
-            for marker_id in tool_ids:
-                markers_list.append({"name": marker_id, "pos": pos})
+            markers_list.append({"names": tool_ids, "pos": pos})
         else:
             cleaned_lines.append(line)
 
