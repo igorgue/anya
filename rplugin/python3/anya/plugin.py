@@ -209,6 +209,15 @@ class AnyaPlugin:
         """
         self.chat_buf, self.prompt_buf = buffers.new(self.nvim, layout, direction)
 
+        # Pre-connect MCP servers in background for faster first message
+        if not self._mcp_manager.is_loaded():
+            mcp_enabled = os.environ.get("ANYA_DISABLE_MCP", "0") != "1"
+            if mcp_enabled:
+                loop = self._ensure_loop()
+                asyncio.run_coroutine_threadsafe(
+                    self._mcp_manager.get_connected_servers(), loop
+                )
+
     def send(self, text, conversation_id=None):
         """Send a prompt to the code agent and stream the response to the chat buffer."""
         # Prevent concurrent requests - check if a task is still running

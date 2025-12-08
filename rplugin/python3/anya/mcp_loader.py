@@ -77,7 +77,7 @@ def create_mcp_servers(configs: list[MCPServerConfig]) -> list:
                     name=name,
                     params=params,
                     client_session_timeout_seconds=server_config.get("timeout", 30),
-                    cache_tools_list=server_config.get("cache_tools_list", False),
+                    cache_tools_list=server_config.get("cache_tools_list", True),
                 )
                 servers.append(server)
 
@@ -95,7 +95,7 @@ def create_mcp_servers(configs: list[MCPServerConfig]) -> list:
                     name=name,
                     params=params,
                     client_session_timeout_seconds=server_config.get("timeout", 30),
-                    cache_tools_list=server_config.get("cache_tools_list", False),
+                    cache_tools_list=server_config.get("cache_tools_list", True),
                 )
                 servers.append(server)
 
