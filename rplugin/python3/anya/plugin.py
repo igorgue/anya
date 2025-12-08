@@ -372,9 +372,6 @@ class AnyaPlugin:
         )
 
         try:
-            # Record start time
-            start_time = time.time()
-
             # Get MCP servers (uses cached connections if available)
             agent_for_run = code
             mcp_enabled = os.environ.get("ANYA_DISABLE_MCP", "0") != "1"
