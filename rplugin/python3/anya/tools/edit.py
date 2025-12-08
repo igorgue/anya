@@ -6,6 +6,42 @@ from ..agents.context import NvimPluginContext
 from .utils import create_error_handler
 
 
+async def _wait_for_tool_folds_to_close(nvim, timeout: float = 300.0) -> None:
+    """Wait until there are no open tool folds AND the streaming queue is empty.
+
+    This ensures edit blocks are rendered after other tool outputs have completed,
+    their folds have been closed, AND the streaming animation has finished writing
+    all text to the buffer.
+    """
+    start_time = asyncio.get_event_loop().time()
+    while asyncio.get_event_loop().time() - start_time < timeout:
+        state = [{"fold_open": False, "queue_length": 0}]
+
+        def get_state():
+            try:
+                fold_open = nvim.eval("get(g:, 'anya_tool_fold_open', v:false)")
+                # Get queue status from Lua
+                queue_status = nvim.exec_lua(
+                    "return require('anya.text').get_queue_status()"
+                )
+                state[0] = {
+                    "fold_open": bool(fold_open),
+                    "queue_length": queue_status.get("queue_length", 0),
+                }
+            except Exception:
+                state[0] = {"fold_open": False, "queue_length": 0}
+
+        nvim.async_call(get_state)
+        await asyncio.sleep(0.05)
+
+        # Wait until fold is closed AND queue is empty
+        if not state[0]["fold_open"] and state[0]["queue_length"] == 0:
+            return
+
+    # If we time out, just continue; better to show UI than hang
+    return
+
+
 async def _wait_for_edit_decision(nvim, edit_id: str, timeout: float = 300.0) -> dict:
     """Wait for user to apply or reject an edit.
 
@@ -114,6 +150,10 @@ async def edit(
     import uuid
 
     edit_id = uuid.uuid4().hex[:8]
+
+    # Wait for any other tool folds to close before rendering
+    # This ensures edit blocks don't appear inside other tool outputs
+    await _wait_for_tool_folds_to_close(nvim)
 
     # Render edit blocks in UI and wait for user decision
     def render_and_setup():

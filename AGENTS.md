@@ -332,6 +332,68 @@ local status = text.get_queue_status()
 -- status.timer_running: whether animation timer is active
 ```
 
+## Streaming Queue Architecture
+
+The plugin uses a **two-stage streaming system**:
+
+1. **Python side** (`plugin.py`): Queues text via `nvim.async_call` to Lua
+2. **Lua side** (`text.lua`): Animates text character-by-character via `_G.anya_stream_queue`
+
+### Critical: Waiting for Streaming to Complete
+
+When Python calls `nvim.async_call(self._stream_text_to_buffer, ...)`, the text is added to a Lua queue but **not yet written to the buffer**. The Lua timer processes the queue asynchronously.
+
+**This means**: Any code that needs to render content AFTER previous content must wait for BOTH:
+1. The Python-side state (e.g., `g:anya_tool_fold_open`)
+2. The Lua streaming queue to be empty
+
+### Tool Fold State Tracking
+
+The plugin tracks open tool folds via:
+- `self._tool_fold_open` (Python)
+- `g:anya_tool_fold_open` (Vim global, for tools to read)
+
+Set to `true` when `fold_start` is queued, `false` when `fold_end` is queued.
+
+### Pattern: Waiting for Buffer to be Ready
+
+From an async Python tool, wait for both fold state AND queue:
+
+```python
+async def _wait_for_streaming_complete(nvim, timeout: float = 300.0) -> None:
+    start_time = asyncio.get_event_loop().time()
+    while asyncio.get_event_loop().time() - start_time < timeout:
+        state = [{"fold_open": False, "queue_length": 0}]
+
+        def get_state():
+            try:
+                fold_open = nvim.eval("get(g:, 'anya_tool_fold_open', v:false)")
+                queue_status = nvim.exec_lua(
+                    "return require('anya.text').get_queue_status()"
+                )
+                state[0] = {
+                    "fold_open": bool(fold_open),
+                    "queue_length": queue_status.get("queue_length", 0),
+                }
+            except Exception:
+                state[0] = {"fold_open": False, "queue_length": 0}
+
+        nvim.async_call(get_state)
+        await asyncio.sleep(0.05)
+
+        if not state[0]["fold_open"] and state[0]["queue_length"] == 0:
+            return
+```
+
+### Why This Matters
+
+Without waiting for the queue, content can appear in wrong locations:
+- Tool A outputs header + fold_start + content (queued)
+- Tool B tries to render immediately (before queue drains)
+- Tool B's content appears INSIDE Tool A's fold
+
+The `edit` tool uses this pattern to ensure edit blocks render after other tool folds close.
+
 ## Known Patterns
 
 - All Neovim API calls from async contexts must use `nvim.async_call`
@@ -339,6 +401,7 @@ local status = text.get_queue_status()
 - Markers are HTML comments that get concealed in the UI
 - Streaming uses Lua timer with character-by-character animation
 - Database operations are lazy-initialized on first use
+- **Tools that render UI must wait for streaming queue to be empty**
 
 ## Coding Guidelines for Agents
 

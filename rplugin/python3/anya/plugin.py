@@ -141,6 +141,7 @@ class AnyaPlugin:
         self._request_cancelled = False  # Flag for async handler to check
         self.session_id = str(uuid.uuid4())  # Session ID for this Neovim instance
         self.allowed_commands = set()  # Persist allowed commands across agent runs
+        self._tool_fold_open = False  # Track if a tool fold is currently open
 
     def _ensure_loop(self):
         """Ensure the asyncio event loop is running (lazy initialization)."""
@@ -160,6 +161,11 @@ class AnyaPlugin:
         if not self._db_initialized:
             db.init_db()
             self._db_initialized = True
+
+    def _set_tool_fold_open(self, is_open: bool):
+        """Set the tool fold open state and expose it via vim global variable."""
+        self._tool_fold_open = bool(is_open)
+        self.nvim.vars["anya_tool_fold_open"] = bool(is_open)
 
     @pynvim.command(
         "Anya", nargs="*", range="", sync=False, complete="customlist,AnyaComplete"
@@ -331,6 +337,9 @@ class AnyaPlugin:
 
         self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, header)
 
+        # Initialize tool fold state at start of request
+        self.nvim.async_call(self._set_tool_fold_open, False)
+
         # Collect streamed content for saving
         collected_content: list[str] = []
         parallel_tools: list[dict] = []  # Collect parallel tool calls
@@ -339,7 +348,9 @@ class AnyaPlugin:
         tool_was_called = False  # Track if any tool was called (for unclosed folds)
         in_anya_marker = False  # Track if LLM is outputting an anya marker
         needs_blank_before_text = False  # Add blank line before next text after tool
-        last_output_was_marker = True  # Track if last output was a marker (header counts)
+        last_output_was_marker = (
+            True  # Track if last output was a marker (header counts)
+        )
 
         try:
             # Record start time
@@ -423,6 +434,10 @@ class AnyaPlugin:
                                             chat_bufnr,
                                             pending_header,
                                         )
+                                        # Mark that a tool fold is now open
+                                        self.nvim.async_call(
+                                            self._set_tool_fold_open, True
+                                        )
                                     last_output_was_marker = True
                                 else:
                                     # Additional parallel tool - update header line
@@ -497,6 +512,10 @@ class AnyaPlugin:
                                         chat_bufnr,
                                         fold_end_marker,
                                     )
+                                    # Mark that the tool fold is now closed
+                                    self.nvim.async_call(
+                                        self._set_tool_fold_open, False
+                                    )
 
                             pending_tool_outputs = []
                             expected_outputs = 0
@@ -552,6 +571,8 @@ class AnyaPlugin:
                 self.nvim.async_call(
                     self._stream_text_to_buffer, chat_bufnr, fold_end_marker
                 )
+                # Mark that the tool fold is now closed
+                self.nvim.async_call(self._set_tool_fold_open, False)
             footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
             self.nvim.async_call(self._stream_text_to_buffer, chat_bufnr, footer)
 
@@ -607,6 +628,8 @@ class AnyaPlugin:
                 self.nvim.async_call(
                     self._append_to_chat_buffer, chat_bufnr, fold_end_marker
                 )
+                # Mark that the tool fold is now closed
+                self.nvim.async_call(self._set_tool_fold_open, False)
             else:
                 full_content = fixed_content
             footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
@@ -656,6 +679,8 @@ class AnyaPlugin:
             # Always clear the current task reference when done
             self._current_task = None
             self._request_cancelled = False
+            # Ensure tool fold state is reset
+            self.nvim.async_call(self._set_tool_fold_open, False)
 
     def _get_chat_buffer(self):
         """Find the chat buffer by filetype."""
