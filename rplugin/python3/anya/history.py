@@ -130,9 +130,16 @@ def parse_tool_marker(line: str) -> list[str] | None:
 
 
 def is_marker_line(line: str) -> bool:
-    """Check if a line is any type of marker."""
+    """Check if a line is any type of anya marker (at:, am:, ac:)."""
     stripped = line.strip()
-    return stripped.startswith("<!-- anya") and stripped.endswith("-->")
+    if not stripped.endswith("-->"):
+        return False
+    # Check for all marker prefixes: at: (tool), am: (message), ac: (conversation)
+    return (
+        stripped.startswith("<!-- at:")
+        or stripped.startswith("<!-- am:")
+        or stripped.startswith("<!-- ac:")
+    )
 
 
 def is_header_line(line: str) -> bool:

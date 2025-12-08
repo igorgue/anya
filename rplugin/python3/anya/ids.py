@@ -11,6 +11,8 @@ generated_ids: dict[str, int] = dict()
 
 def new(conversation: str | None = None, min_length: int = 6) -> str:
     """Generate a new unique hashid for a conversation or message identified by the given salt."""
+    import sys
+
     salt = get_or_create_salt()
 
     if conversation:
@@ -26,7 +28,8 @@ def new(conversation: str | None = None, min_length: int = 6) -> str:
 
     save()
 
-    return hashids.encode(n)
+    result = hashids.encode(n)
+    return result
 
 
 def get_or_create_salt() -> str:

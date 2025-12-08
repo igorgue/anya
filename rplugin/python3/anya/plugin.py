@@ -20,6 +20,62 @@ VERSION = "0.0.1"
 DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-3-turbo")
 
 
+def filter_anya_markers(text: str, in_marker: bool) -> tuple[str, bool]:
+    """Filter out anya marker comments from streaming text.
+
+    Only filters markers that look like anya internal markers (<!-- am:, <!-- at:, <!-- ac:).
+    Preserves legitimate HTML comments that users may want in their output.
+
+    Handles markers that span multiple chunks by tracking state.
+
+    Args:
+        text: The text chunk to filter
+        in_marker: Whether we're currently inside an anya marker
+
+    Returns:
+        Tuple of (filtered_text, still_in_marker)
+    """
+    import re
+
+    # Only match anya-specific marker patterns
+    marker_pattern = re.compile(r"<!-- a[mtc]:")
+
+    result = []
+    i = 0
+    while i < len(text):
+        if in_marker:
+            # Look for end of marker
+            end_idx = text.find("-->", i)
+            if end_idx != -1:
+                # Found end, skip to after it
+                i = end_idx + 3
+                in_marker = False
+            else:
+                # Still in marker, discard rest of text
+                break
+        else:
+            # Look for start of anya marker (<!-- am:, <!-- at:, <!-- ac:)
+            match = marker_pattern.search(text, i)
+            if match:
+                start_idx = match.start()
+                # Add text before marker
+                result.append(text[i:start_idx])
+                # Check if marker ends in this chunk
+                end_idx = text.find("-->", start_idx + 8)
+                if end_idx != -1:
+                    # Complete marker in this chunk, skip it
+                    i = end_idx + 3
+                else:
+                    # Marker continues beyond this chunk
+                    in_marker = True
+                    break
+            else:
+                # No marker start, add rest of text
+                result.append(text[i:])
+                break
+    return "".join(result), in_marker
+
+
 def close_open_code_blocks(content: str) -> str:
     """Close any unclosed markdown code blocks in the content.
 
@@ -146,6 +202,13 @@ class AnyaPlugin:
 
     def send(self, text, conversation_id=None):
         """Send a prompt to the code agent and stream the response to the chat buffer."""
+        # Prevent concurrent requests - check if a task is still running
+        if self._current_task is not None and not self._current_task.done():
+            self.nvim.err_write(
+                "Anya: Please wait for the current response to complete.\n"
+            )
+            return
+
         chat_buf = self._get_chat_buffer()
         if not chat_buf:
             self.nvim.err_write("Anya: Chat buffer not found.\n")
@@ -269,6 +332,7 @@ class AnyaPlugin:
         pending_tool_outputs: list[str] = []  # Collect outputs for parallel tools
         expected_outputs = 0  # Number of outputs we're waiting for
         tool_was_called = False  # Track if any tool was called (for unclosed folds)
+        in_anya_marker = False  # Track if LLM is outputting an anya marker
 
         try:
             # Record start time
@@ -408,6 +472,14 @@ class AnyaPlugin:
                 ):
                     delta = event.data.delta
                     if delta:
+                        # Filter out anya markers from LLM output
+                        # Defense in depth: if markers leak into history, filter them here
+                        delta, in_anya_marker = filter_anya_markers(
+                            delta, in_anya_marker
+                        )
+                        if not delta:
+                            continue
+
                         # Mark that streaming has started
                         self._streaming_started = True
 
