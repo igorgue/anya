@@ -16,7 +16,16 @@ from ..tools import (
 code = Agent[NvimPluginContext](
     name="Code",
     instructions=get_instructions("code.md"),
-    tools=[buffer_name, create, gh, list_files, parrot, read_file, read_many_files, search],
+    tools=[
+        buffer_name,
+        create,
+        gh,
+        list_files,
+        parrot,
+        read_file,
+        read_many_files,
+        search,
+    ],
 )
 
 __all__ = ["code", "NvimPluginContext"]

@@ -422,18 +422,6 @@ class AnyaPlugin:
             # (Headers already displayed with pending status, just clear the list)
             parallel_tools = []
 
-            # Calculate duration
-            end_time = time.time()
-            duration_seconds = end_time - start_time
-
-            # Format duration
-            if duration_seconds >= 60:
-                minutes = int(duration_seconds // 60)
-                seconds = duration_seconds % 60
-                duration_str = f"{minutes}m{seconds:.1f}s"
-            else:
-                duration_str = f"{duration_seconds:.1f}s"
-
             end_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             # Close any open tool folds before message end marker
             if tool_was_called:

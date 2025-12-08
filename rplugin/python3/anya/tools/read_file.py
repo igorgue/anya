@@ -1,6 +1,5 @@
 import os
-from agents import function_tool, RunContextWrapper
-from typing import Any
+from agents import function_tool
 
 from .utils import create_error_handler
 
@@ -59,7 +58,7 @@ async def read_file(path_with_range: str, cwd: str = None) -> str:
             # Parse end
             if end_part == "end":
                 end_line = None  # Will read to end
-                force_full = True
+                # force_full = True
             elif end_part.isdigit():
                 end_line = int(end_part)
             else:
@@ -117,9 +116,7 @@ async def read_file(path_with_range: str, cwd: str = None) -> str:
     if is_truncated:
         # Extract the relative path for the message (undo any cwd joining)
         display_path = (
-            path_with_range.split("@")[0]
-            if "@" in path_with_range
-            else path_with_range
+            path_with_range.split("@")[0] if "@" in path_with_range else path_with_range
         )
         info_parts.append(
             f"[FILE TOO LARGE] File has {total_lines} lines total, showing lines {actual_start}-{actual_end}.\n"

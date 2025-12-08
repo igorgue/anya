@@ -1,16 +1,11 @@
-import os
-from agents import function_tool, RunContextWrapper
-from typing import Any
+from agents import function_tool
 
 from .utils import create_error_handler
-
-
-# Import the read_file implementation directly
-from .read_file import read_file as _read_file_impl
+from .read_file import read_file
 
 
 @function_tool(failure_error_function=create_error_handler)
-async def read_many_files(files: list, cwd: str = None) -> str:
+async def read_many_files(files: list[str], cwd: str = None) -> str:
     """Reads multiple files in a single call, supporting line ranges.
 
     Each file in the list can include optional @range specification:
@@ -50,7 +45,7 @@ async def read_many_files(files: list, cwd: str = None) -> str:
 
         # Call the underlying read_file async function directly
         try:
-            content = await _read_file_impl.__wrapped__(file_spec, cwd)
+            content = await read_file.__wrapped__(file_spec, cwd)
         except Exception as e:
             content = f"Error reading {file_spec}: {str(e)}"
 
