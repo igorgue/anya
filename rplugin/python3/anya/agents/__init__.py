@@ -1,4 +1,4 @@
-from agents import Agent
+from agents import Agent, function_tool
 
 from .context import NvimPluginContext
 from .utils import get_instructions
@@ -28,6 +28,8 @@ def MCPAgent(
     if not mcp_servers:
         return None
 
+    # We don't need custom tools anymore since the logging will be done
+    # in the agent's responses directly
     return Agent[NvimPluginContext](
         name="MCP Tools",
         instructions=get_instructions("mcp.md"),
@@ -65,7 +67,8 @@ def CodeAgent(mcp_servers=None):
             mcp_tool = mcp_agent.as_tool(
                 tool_name="mcp",
                 tool_description="Access external systems and data via MCP (Model Context Protocol) servers. "
-                "Use this when you need to query databases, APIs, or other external services.",
+                "Use this when you need to query databases, APIs, or other external services."
+                "you can also use this as a last resort if you don't know how to ansewer a question.",
             )
             config["tools"] = config["tools"] + [mcp_tool]
 
