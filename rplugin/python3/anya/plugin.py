@@ -353,11 +353,25 @@ class AnyaPlugin:
                             len(pending_tool_outputs) >= expected_outputs
                             and expected_outputs > 0
                         ):
-                            # Update pending markers to success
+                            # Check if any output indicates failure
+                            has_failure = any(
+                                "error" in o.lower()
+                                for o in pending_tool_outputs
+                                if isinstance(o, str)
+                            )
+
+                            # Update pending markers to success or failure
                             if not self._request_cancelled:
-                                self.nvim.async_call(
-                                    self._flush_and_update_pending_markers, chat_bufnr
-                                )
+                                if has_failure:
+                                    self.nvim.async_call(
+                                        self._flush_and_update_pending_markers_to_failure,
+                                        chat_bufnr,
+                                    )
+                                else:
+                                    self.nvim.async_call(
+                                        self._flush_and_update_pending_markers,
+                                        chat_bufnr,
+                                    )
 
                             all_outputs = "\n".join(
                                 o for o in pending_tool_outputs if o
@@ -765,6 +779,34 @@ class AnyaPlugin:
         """
         self.nvim.exec_lua("require('anya.text').flush_queue()")
         self._update_pending_markers_to_success(bufnr)
+
+    def _flush_and_update_pending_markers_to_failure(self, bufnr):
+        """Flush the streaming queue and update pending markers to failure.
+
+        This ensures markers are written to buffer before we try to update them.
+        """
+        self.nvim.exec_lua("require('anya.text').flush_queue()")
+        self._update_pending_markers_to_failure(bufnr)
+
+    def _update_pending_markers_to_failure(self, bufnr):
+        """Update all tool_pending markers to tool_failure in the buffer.
+
+        Scans the buffer for fold_start markers with tool_pending status
+        and replaces them with tool_failure status.
+        """
+        if not self.nvim.api.buf_is_valid(bufnr):
+            return
+
+        lines = self.nvim.api.buf_get_lines(bufnr, 0, -1, False)
+        pending_marker = markers.make_marker("fold_start", "tool_pending")
+        failure_marker = markers.make_marker("fold_start", "tool_failure")
+
+        for i, line in enumerate(lines):
+            if line == pending_marker:
+                self.nvim.api.buf_set_lines(bufnr, i, i + 1, False, [failure_marker])
+
+        # Reprocess markers to update extmarks
+        self._process_markers(bufnr)
 
     def _update_tool_header_line(self, bufnr, new_header: str):
         """Update the most recent tool header line with a new combined header.

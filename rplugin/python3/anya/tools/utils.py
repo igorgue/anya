@@ -2,6 +2,14 @@ import threading
 
 from pynvim import Nvim
 
+from agents import RunContextWrapper
+from typing import Any
+
+
+def create_error_handler(ctx: RunContextWrapper[Any], error: Exception) -> str:
+    """Custom error handler for the create tool."""
+    return f"Error: {str(error)}"
+
 
 def nvim_call_sync(nvim: Nvim, func: callable) -> any:
     """Call a function on the main Neovim thread and wait for result."""
