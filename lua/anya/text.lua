@@ -15,6 +15,12 @@ local icons = {
 local ns_id = vim.api.nvim_create_namespace("anya_markers")
 local edit_view_ns_id = vim.api.nvim_create_namespace("anya_edit_view")
 
+-- Edit block highlight groups (imported from edit_view)
+local HL_SEARCH = "AnyaEditSearch"
+local HL_REPLACE = "AnyaEditReplace"
+local HL_MARKER = "AnyaEditMarker"
+local HL_DIVIDER = "AnyaEditDivider"
+
 -- Initialize global state if not exists
 if not _G.anya_stream_queue then
   _G.anya_stream_queue = {}
@@ -71,6 +77,25 @@ local function setup_highlights()
 
   -- Widget text bold variant (for selected action)
   set_hl_fg_only("AnyaEditWidgetBold", "Normal", { bold = true })
+
+  -- Edit block content highlights (for SEARCH/REPLACE sections)
+  local diff_del = vim.api.nvim_get_hl(0, { name = "DiffDelete", link = false })
+  local diff_add = vim.api.nvim_get_hl(0, { name = "DiffAdd", link = false })
+  local comment_hl = vim.api.nvim_get_hl(0, { name = "Comment", link = false })
+  vim.api.nvim_set_hl(0, HL_SEARCH, { bg = diff_del.bg, fg = diff_del.fg })
+  vim.api.nvim_set_hl(0, HL_REPLACE, { bg = diff_add.bg, fg = diff_add.fg })
+  vim.api.nvim_set_hl(0, HL_MARKER, { fg = comment_hl.fg, bold = true })
+  vim.api.nvim_set_hl(0, HL_DIVIDER, { fg = comment_hl.fg })
+
+  -- Edit widget control highlights (accept/reject buttons)
+  local ok_hl = vim.api.nvim_get_hl(0, { name = "DiagnosticOk", link = false })
+  if not ok_hl.fg then
+    ok_hl = vim.api.nvim_get_hl(0, { name = "String", link = false })
+  end
+  local err_hl = vim.api.nvim_get_hl(0, { name = "ErrorMsg", link = false })
+  vim.api.nvim_set_hl(0, "AnyaEditAccept", { fg = ok_hl.fg })
+  vim.api.nvim_set_hl(0, "AnyaEditReject", { fg = err_hl.fg })
+  vim.api.nvim_set_hl(0, "AnyaEditPending", { fg = comment_hl.fg })
 end
 
 -- Ensure highlights are set up
@@ -409,6 +434,63 @@ function M._clear_folds(bufnr)
   end
 end
 
+-- Apply highlights to edit block content (SEARCH/REPLACE sections)
+-- Scans from header line to find and highlight the search/replace content
+-- @param bufnr number: Buffer number
+-- @param header_line_num number: Line number of header (1-indexed)
+-- @param lines table: All buffer lines (for scanning)
+local function apply_edit_content_highlights(bufnr, header_line_num, lines)
+  -- Scan forward from header to find edit block structure
+  local in_search = false
+  local in_replace = false
+  local found_start = false
+
+  for i = header_line_num + 1, #lines do
+    local line = lines[i]
+
+    -- Check for fold_end marker (end of edit block)
+    if markers.is_marker_line(line) then
+      local found_markers = markers.parse_marker(line)
+      if found_markers then
+        for _, marker_name in ipairs(found_markers) do
+          if marker_name == markers.fold_end then
+            return -- Done with this edit block
+          end
+        end
+      end
+    end
+
+    -- Check for SEARCH/REPLACE markers
+    if line:match("^<<<<<<< SEARCH") then
+      vim.api.nvim_buf_set_extmark(bufnr, ns_id, i - 1, 0, {
+        line_hl_group = HL_MARKER,
+      })
+      in_search = true
+      in_replace = false
+      found_start = true
+    elseif line:match("^=======") and found_start then
+      vim.api.nvim_buf_set_extmark(bufnr, ns_id, i - 1, 0, {
+        line_hl_group = HL_DIVIDER,
+      })
+      in_search = false
+      in_replace = true
+    elseif line:match("^>>>>>>> REPLACE") then
+      vim.api.nvim_buf_set_extmark(bufnr, ns_id, i - 1, 0, {
+        line_hl_group = HL_MARKER,
+      })
+      in_replace = false
+    elseif in_search then
+      vim.api.nvim_buf_set_extmark(bufnr, ns_id, i - 1, 0, {
+        line_hl_group = HL_SEARCH,
+      })
+    elseif in_replace then
+      vim.api.nvim_buf_set_extmark(bufnr, ns_id, i - 1, 0, {
+        line_hl_group = HL_REPLACE,
+      })
+    end
+  end
+end
+
 -- Process marker lines in buffer and create folds/extmarks
 -- Scans for markers and applies corresponding UI elements:
 -- - fold_start/fold_end: creates manual folds
@@ -532,6 +614,8 @@ function M._process_markers(bufnr)
                 -- Map marker name to state
                 local state = marker_name:match("^edit_(.+)$") or "pending"
                 M._apply_edit_header(bufnr, i - 1, state, diff_info)
+                -- Apply content highlights for SEARCH/REPLACE sections
+                apply_edit_content_highlights(bufnr, i - 1, lines)
               end
             end
           end
@@ -615,32 +699,33 @@ end
 
 -- Build virtual text for edit tool widget (right-aligned)
 -- Format: "1: accept | 2: reject [icon]"
--- @param state string: "pending", "applied", or "rejected"
+-- @param state string: "pending", "applied", "rejected", or "failed"
 -- @return table: Array of {text, hl_group} tuples for virt_text
 local function build_edit_virt_text(state)
   local virt_text = {}
 
   -- Widget: "1: accept | 2: reject"
-  local accept_hl = state == "applied" and "AnyaEditWidgetBold" or "AnyaEditWidget"
-  local reject_hl = state == "rejected" and "AnyaEditWidgetBold" or "AnyaEditWidget"
+  -- Use green for accept when applied, red for reject when rejected/failed, gray otherwise
+  local accept_hl = state == "applied" and "AnyaEditAccept" or "AnyaEditPending"
+  local reject_hl = (state == "rejected" or state == "failed") and "AnyaEditReject" or "AnyaEditPending"
 
-  table.insert(virt_text, { "1: ", "AnyaEditWidget" })
+  table.insert(virt_text, { "1: ", "AnyaEditPending" })
   table.insert(virt_text, { "accept", accept_hl })
-  table.insert(virt_text, { " | ", "AnyaEditWidget" })
-  table.insert(virt_text, { "2: ", "AnyaEditWidget" })
+  table.insert(virt_text, { " | ", "AnyaEditPending" })
+  table.insert(virt_text, { "2: ", "AnyaEditPending" })
   table.insert(virt_text, { "reject ", reject_hl })
 
   -- Icon based on state
   local icon, icon_hl
   if state == "applied" then
     icon = icons.success
-    icon_hl = "AnyaToolSuccess"
-  elseif state == "rejected" then
+    icon_hl = "AnyaEditAccept"
+  elseif state == "rejected" or state == "failed" then
     icon = icons.failure
-    icon_hl = "AnyaToolFailure"
+    icon_hl = "AnyaEditReject"
   else
     icon = icons.pending
-    icon_hl = "AnyaToolPending"
+    icon_hl = "AnyaEditPending"
   end
   table.insert(virt_text, { icon .. " ", icon_hl })
 
@@ -648,14 +733,14 @@ local function build_edit_virt_text(state)
 end
 
 -- Apply inline highlights to edit header line for diff indicators and filename
--- Format: "27+ 2~ 30- | README.md"
+-- Format: "+2 -1 | README.md"
 -- @param bufnr number: Buffer number
 -- @param line_idx number: Line index (0-indexed)
 -- @param line_content string: The header line content
 -- @param diff_info table: Parsed diff info (used for validation)
 local function apply_edit_header_highlights(bufnr, line_idx, line_content, diff_info)
-  -- Highlight diff indicators: "27+" "2~" "30-"
-  for start_pos, _, indicator, end_pos in line_content:gmatch("()(%d+)([+~-])()") do
+  -- Highlight diff indicators: "+2" "-1" (indicator before number)
+  for start_pos, indicator, _, end_pos in line_content:gmatch("()([+~-])(%d+)()") do
     local hl_group
     if indicator == "+" then
       hl_group = "AnyaEditAdd"
