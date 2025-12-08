@@ -113,14 +113,15 @@ end
             if result.get("ok"):
                 if "value" in result:
                     val = result["value"]
-                    try:
-                        parts.append(f"=> {json.dumps(val, indent=2, default=str)}")
-                    except (TypeError, ValueError):
-                        parts.append(f"=> {repr(val)}")
+                    if val is not None:
+                        try:
+                            parts.append(f"=> {json.dumps(val, indent=2, default=str)}")
+                        except (TypeError, ValueError):
+                            parts.append(f"=> {repr(val)}")
             else:
                 parts.append(f"Error: {result.get('error', 'unknown error')}")
 
-            return "\n".join(parts) if parts else "nil"
+            return "\n".join(parts) if parts else "(no output)"
         else:
             raise Exception("No result file created")
     except Exception as e:
