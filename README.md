@@ -125,6 +125,60 @@ The agent currently has access to:
 
 Create an `AGENTS.md` file in your project root to provide custom instructions to the agent. These instructions are prepended to the agent's system prompt.
 
+## MCP Server Support
+
+Anya supports MCP (Model Context Protocol) servers for extended tool capabilities.
+
+### Configuration
+
+Create `~/.config/anya/mcp/servers.json`:
+
+```json
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"],
+      "timeout": 30
+    }
+  ]
+}
+```
+
+### Performance Tips
+
+MCP server startup can be slow, especially with `npx`. To improve performance:
+
+**1. Use `bunx` instead of `npx`** (much faster, no download check):
+```json
+{
+  "command": "bunx",
+  "args": ["--bun", "@modelcontextprotocol/server-filesystem", "/path"]
+}
+```
+
+**2. Install servers globally** and use the binary directly:
+```bash
+npm install -g @anthropics/mcp-server-fetch
+```
+```json
+{
+  "command": "mcp-server-fetch"
+}
+```
+
+**3. Only enable servers you use** - each server adds startup time.
+
+**4. Use HTTP/SSE servers** when available - no subprocess spawn overhead.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANYA_DISABLE_MCP` | `0` | Set to `1` to disable MCP servers |
+
 ## Development
 
 ### File Structure

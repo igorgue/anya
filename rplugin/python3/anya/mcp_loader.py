@@ -163,7 +163,9 @@ class MCPManager:
             name = getattr(server, "name", "unknown")
             try:
                 if hasattr(server, "connect"):
-                    await asyncio.wait_for(server.connect(), timeout=10.0)
+                    # Use server's configured timeout, fallback to 30s
+                    timeout = getattr(server, "client_session_timeout_seconds", 30)
+                    await asyncio.wait_for(server.connect(), timeout=timeout)
                 return (server, True, None)
             except asyncio.TimeoutError:
                 return (server, False, f"{name}: connection timeout")

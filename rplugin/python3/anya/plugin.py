@@ -145,6 +145,14 @@ class AnyaPlugin:
         self._tool_fold_open = False  # Track if a tool fold is currently open
         self._mcp_manager = MCPManager(nvim)  # MCP server manager with caching
 
+        # Start MCP server connection in background on plugin load
+        mcp_enabled = os.environ.get("ANYA_DISABLE_MCP", "0") != "1"
+        if mcp_enabled and self._mcp_manager.load_configs():
+            loop = self._ensure_loop()
+            asyncio.run_coroutine_threadsafe(
+                self._mcp_manager.get_connected_servers(), loop
+            )
+
     def _ensure_loop(self):
         """Ensure the asyncio event loop is running (lazy initialization)."""
         if self._loop is None:
@@ -511,12 +519,14 @@ class AnyaPlugin:
                                 # Don't render anything - edit tool already rendered via UI
                                 pass
                             elif all_outputs:
-                                collected_content.append(all_outputs)
+                                # Wrap MCP server output with backticks
+                                wrapped_output = f"``````\n{all_outputs}\n``````"
+                                collected_content.append(wrapped_output)
                                 if not self._request_cancelled:
                                     self.nvim.async_call(
                                         self._stream_text_to_buffer,
                                         chat_bufnr,
-                                        all_outputs,
+                                        wrapped_output,
                                     )
 
                             # Skip fold markers for edit tool - edit_view handles its own display
