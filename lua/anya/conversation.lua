@@ -270,6 +270,34 @@ function M.get_current_conversation_id()
   return get_conversation_id(chat_buf)
 end
 
+--- Get the current message ID by searching backward from cursor for message start marker
+--- @param bufnr number|nil Buffer number (defaults to chat buffer)
+--- @return string|nil The message ID or nil
+function M.get_current_message_id(bufnr)
+  bufnr = bufnr or get_chat_buffer()
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    return nil
+  end
+
+  local cursor_line = 1
+  local ok, cursor = pcall(vim.api.nvim_win_get_cursor, 0)
+  if ok then
+    cursor_line = cursor[1]
+  end
+
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, cursor_line, false)
+
+  for i = #lines, 1, -1 do
+    local line = lines[i]
+    local msg_id = line:match("<!%-%- am: ([^,]+), start,")
+    if msg_id then
+      return msg_id
+    end
+  end
+
+  return nil
+end
+
 --- Check if streaming is currently in progress (agent running or queue not empty)
 --- @return boolean True if streaming is in progress
 function M.is_request_in_progress()

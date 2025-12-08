@@ -2,6 +2,7 @@
 -- Renders and manages SEARCH/REPLACE edit blocks in the chat buffer
 
 local M = {}
+local markers = require("anya.markers")
 
 -- Namespace for edit block highlights and virtual text
 local ns_id = vim.api.nvim_create_namespace("anya_edit_view")
@@ -120,7 +121,6 @@ end
 
 -- Update the header extmark and marker
 local function update_edit_header(bufnr, extmark_id)
-  local markers = require("anya.markers")
   local edit_data = edit_registry[extmark_id]
   if not edit_data then
     return
@@ -159,7 +159,7 @@ local function update_edit_header(bufnr, extmark_id)
   vim.api.nvim_buf_set_lines(bufnr, marker_row, marker_row + 1, false, { new_marker })
 end
 
--- Handle keypress for apply/reject
+-- Handle keypress for apply/reject (with toggle support)
 function M.handle_keypress(bufnr, key)
   local cursor
   local ok, result = pcall(function()
@@ -205,40 +205,95 @@ function M.handle_keypress(bufnr, key)
 
       if end_row and row >= start_row and row <= end_row then
         local current_state = edit_registry[id].state
-
-        -- Only allow action on pending edits
-        if current_state ~= STATE_PENDING then
-          vim.notify("Edit already processed", vim.log.levels.INFO)
-          return true
-        end
-
         local action = nil
         local success = false
         local message = ""
+        local old_marker = nil
+        local new_marker = nil
 
         if key == "1" then
-          -- Apply the edit
-          local apply_result = vim.fn.AnyaApplyEditContent(edit_registry[id].raw_block)
-          if apply_result and apply_result.success then
-            edit_registry[id].state = STATE_APPLIED
-            success = true
-            message = apply_result.message or ""
-            action = "apply"
-          else
-            edit_registry[id].state = STATE_FAILED
-            success = false
-            message = apply_result and apply_result.message or "Unknown error"
-            action = "failed"
+          if current_state == STATE_PENDING then
+            -- Apply the edit
+            local apply_result = vim.fn.AnyaApplyEditContent(edit_registry[id].raw_block)
+            if apply_result and apply_result.success then
+              edit_registry[id].state = STATE_APPLIED
+              success = true
+              message = apply_result.message or ""
+              action = "apply"
+              old_marker = markers.edit_pending
+              new_marker = markers.edit_applied
+            else
+              edit_registry[id].state = STATE_FAILED
+              success = false
+              message = apply_result and apply_result.message or "Unknown error"
+              action = "failed"
+              old_marker = markers.edit_pending
+              new_marker = markers.edit_failed
+            end
+          elseif current_state == STATE_REJECTED then
+            -- Toggle from rejected to applied
+            local apply_result = vim.fn.AnyaApplyEditContent(edit_registry[id].raw_block)
+            if apply_result and apply_result.success then
+              edit_registry[id].state = STATE_APPLIED
+              success = true
+              message = apply_result.message or ""
+              action = "toggle_apply"
+              old_marker = markers.edit_rejected
+              new_marker = markers.edit_applied
+            else
+              edit_registry[id].state = STATE_FAILED
+              success = false
+              message = apply_result and apply_result.message or "Unknown error"
+              action = "failed"
+            end
+          elseif current_state == STATE_APPLIED or current_state == STATE_FAILED then
+            vim.notify("Edit already applied", vim.log.levels.INFO)
+            return true
           end
         elseif key == "2" then
-          edit_registry[id].state = STATE_REJECTED
-          success = true
-          action = "reject"
+          if current_state == STATE_PENDING then
+            -- Reject the edit
+            edit_registry[id].state = STATE_REJECTED
+            success = true
+            action = "reject"
+            old_marker = markers.edit_pending
+            new_marker = markers.edit_rejected
+          elseif current_state == STATE_APPLIED then
+            -- Toggle from applied to rejected (unapply)
+            local unapply_result = vim.fn.AnyaUnapplyEdit(edit_registry[id].raw_block)
+            if unapply_result and unapply_result.success then
+              edit_registry[id].state = STATE_REJECTED
+              success = true
+              message = "Edit unapplied"
+              action = "toggle_reject"
+              old_marker = markers.edit_applied
+              new_marker = markers.edit_rejected
+            else
+              local err_msg = unapply_result and unapply_result.message or "Failed to unapply"
+              vim.notify("Failed to unapply: " .. err_msg, vim.log.levels.ERROR)
+              return true
+            end
+          elseif current_state == STATE_FAILED then
+            -- Can change failed to rejected
+            edit_registry[id].state = STATE_REJECTED
+            success = true
+            action = "toggle_reject"
+            old_marker = markers.edit_failed
+            new_marker = markers.edit_rejected
+          elseif current_state == STATE_REJECTED then
+            vim.notify("Edit already rejected", vim.log.levels.INFO)
+            return true
+          end
         else
           return false
         end
 
         update_edit_header(bufnr, id)
+
+        -- Update marker in database if we changed states (for toggle operations)
+        if old_marker and new_marker and old_marker ~= new_marker then
+          M.update_marker_in_db(bufnr, old_marker, new_marker)
+        end
 
         -- Call decision callback if set (for edit tool polling)
         if decision_callback then
@@ -254,10 +309,20 @@ function M.handle_keypress(bufnr, key)
   return false
 end
 
+-- Update the edit marker in the database for the current message
+function M.update_marker_in_db(bufnr, old_marker, new_marker)
+  local conversation = require("anya.conversation")
+  local message_id = conversation.get_current_message_id(bufnr)
+  if message_id then
+    local result = vim.fn.AnyaUpdateEditMarker(message_id, old_marker, new_marker)
+    if not result or not result.success then
+      vim.notify("Note: Database marker update skipped", vim.log.levels.DEBUG)
+    end
+  end
+end
+
 -- Render a SEARCH/REPLACE edit block in the buffer
 function M.render_edit(bufnr, filename, search_content, replace_content, raw_block)
-  local markers = require("anya.markers")
-
   local line_count = vim.api.nvim_buf_line_count(bufnr)
 
   -- Start on the next line (no blank line before)

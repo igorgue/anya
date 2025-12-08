@@ -1577,3 +1577,120 @@ Usage:
         )
 
         return True
+
+    @pynvim.function("AnyaUnapplyEdit", sync=True)
+    def unapply_edit(self, args):
+        """Unapply a previously applied edit by swapping SEARCH/REPLACE and reapplying.
+
+        This reverses an edit that was already applied to the file.
+
+        Args:
+            args[0]: Raw edit block content (the original SEARCH/REPLACE text)
+
+        Returns:
+            dict with {success: bool, message: str}
+        """
+        if not args or not args[0]:
+            return {"success": False, "message": "No edit content provided"}
+
+        raw_block = args[0]
+
+        from . import search_replace
+
+        blocks = search_replace.parse_search_replace_blocks(raw_block)
+        if not blocks:
+            return {"success": False, "message": "No edit blocks found in content"}
+
+        cwd = self.nvim.call("getcwd")
+        results = []
+
+        for block in blocks:
+            reversed_block = search_replace.EditBlock(
+                path=block.path,
+                search=block.replace,
+                replace=block.search,
+                raw_block=block.raw_block,
+            )
+            result = search_replace.apply_edit_block(reversed_block, cwd)
+            results.append(result)
+
+        all_success = all(r.success for r in results)
+        messages = [r.message for r in results]
+
+        return {
+            "success": all_success,
+            "message": "; ".join(messages),
+            "results": [
+                {
+                    "path": r.path,
+                    "success": r.success,
+                    "message": r.message,
+                    "match_type": r.match_type,
+                }
+                for r in results
+            ],
+        }
+
+    @pynvim.function("AnyaUpdateEditMarker", sync=True)
+    def update_edit_marker(self, args):
+        """Update an edit marker in the database for a message.
+
+        This is called when a user toggles an edit decision, so the
+        database reflects the current state.
+
+        Args:
+            args[0]: Message ID (find from conversation context)
+            args[1]: Old marker name (e.g., "edit_applied")
+            args[2]: New marker name (e.g., "edit_rejected")
+
+        Returns:
+            dict with {success: bool, message: str}
+        """
+        if len(args) < 3:
+            return {
+                "success": False,
+                "message": "Requires message_id, old_marker, new_marker",
+            }
+
+        import json
+
+        message_id = args[0]
+        old_marker = args[1]
+        new_marker = args[2]
+
+        self._ensure_db()
+        message = db.get_message(message_id)
+        if not message:
+            return {"success": False, "message": f"Message not found: {message_id}"}
+
+        markers_json = message.get("markers")
+        if not markers_json:
+            return {"success": False, "message": "Message has no markers"}
+
+        try:
+            marker_list = json.loads(markers_json)
+        except json.JSONDecodeError:
+            return {"success": False, "message": "Failed to parse markers JSON"}
+
+        updated = False
+        for marker in marker_list:
+            names = marker.get("names", [])
+            if old_marker in names:
+                idx = names.index(old_marker)
+                names[idx] = new_marker
+                marker["names"] = names
+                updated = True
+
+        if not updated:
+            return {
+                "success": False,
+                "message": f"Marker '{old_marker}' not found in message",
+            }
+
+        new_markers_json = json.dumps(marker_list)
+        success = db.update_message_markers(message_id, new_markers_json)
+
+        if success:
+            return {"success": True, "message": "Marker updated in database"}
+        else:
+            return {"success": False, "message": "Failed to update marker in database"}

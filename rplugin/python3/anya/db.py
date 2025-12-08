@@ -272,6 +272,28 @@ def get_message(id: str) -> dict[str, Any] | None:
         conn.close()
 
 
+def update_message_markers(id: str, markers_json: str) -> bool:
+    """Update the markers JSON for a message.
+
+    Args:
+        id: Message ID
+        markers_json: JSON string of markers list
+
+    Returns:
+        True if updated successfully
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE messages SET markers = ? WHERE id = ?",
+            (markers_json, id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def load_conversation(id: str) -> dict[str, Any] | None:
     """Load a full conversation with all its messages."""
     conversation = get_conversation(id)
