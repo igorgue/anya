@@ -289,19 +289,48 @@ class AnyaPlugin:
                     item_type = getattr(item, "type", None)
 
                     if item_type == "tool_call_item":
-                        # Tool is being called - collect info for header
+                        # Tool is being called - display pending header immediately
                         raw_item = getattr(item, "raw_item", None)
-                        tool_name = getattr(item, "name", None) or getattr(raw_item, "name", "") if raw_item else ""
-                        tool_args = getattr(item, "arguments", "") or getattr(raw_item, "arguments", "") if raw_item else ""
+                        tool_name = (
+                            getattr(item, "name", None) or getattr(raw_item, "name", "")
+                            if raw_item
+                            else ""
+                        )
+                        tool_args = (
+                            getattr(item, "arguments", "")
+                            or getattr(raw_item, "arguments", "")
+                            if raw_item
+                            else ""
+                        )
                         if tool_name:
                             tool_was_called = True
                             self._streaming_started = True
-                            parallel_tools.append({
-                                "name": tool_name,
-                                "args": tool_args,
-                                "status": "tool_pending",
-                            })
+
+                            # Store tool info for later update
+                            parallel_tools.append(
+                                {
+                                    "name": tool_name,
+                                    "args": tool_args,
+                                    "status": "tool_pending",
+                                }
+                            )
                             expected_outputs += 1
+
+                            # Display tool header with pending status immediately
+                            formatted = self._format_tool_header(tool_name, tool_args)
+                            pending_header = (
+                                formatted
+                                + "\n"
+                                + markers.make_marker("fold_start", "tool_pending")
+                                + "\n"
+                            )
+                            collected_content.append(pending_header)
+                            if not self._request_cancelled:
+                                self.nvim.async_call(
+                                    self._stream_text_to_buffer,
+                                    chat_bufnr,
+                                    pending_header,
+                                )
 
                     elif item_type == "tool_call_output_item":
                         # Tool output received - this is the raw tool result
@@ -309,15 +338,15 @@ class AnyaPlugin:
                         pending_tool_outputs.append(tool_output)
 
                         # Check if we've received all expected outputs
-                        if len(pending_tool_outputs) >= expected_outputs and expected_outputs > 0:
-                            # Flush tool headers first
-                            if parallel_tools:
-                                for t in parallel_tools:
-                                    t["status"] = "tool_success"
-                                self._flush_parallel_tools(
-                                    parallel_tools, collected_content, chat_bufnr
+                        if (
+                            len(pending_tool_outputs) >= expected_outputs
+                            and expected_outputs > 0
+                        ):
+                            # Flush queue first so markers are in buffer, then update
+                            if not self._request_cancelled:
+                                self.nvim.async_call(
+                                    self._flush_and_update_pending_markers, chat_bufnr
                                 )
-                                parallel_tools = []
 
                             # Output all collected tool outputs
                             for output in pending_tool_outputs:
@@ -325,23 +354,32 @@ class AnyaPlugin:
                                     collected_content.append(output)
                                     if not self._request_cancelled:
                                         self.nvim.async_call(
-                                            self._stream_text_to_buffer, chat_bufnr, output
+                                            self._stream_text_to_buffer,
+                                            chat_bufnr,
+                                            output,
                                         )
 
                             # Close the fold after all tool outputs
-                            fold_end_marker = "\n" + markers.make_marker("fold_end") + "\n\n"
+                            fold_end_marker = (
+                                "\n" + markers.make_marker("fold_end") + "\n\n"
+                            )
                             collected_content.append(fold_end_marker)
                             if not self._request_cancelled:
                                 self.nvim.async_call(
-                                    self._stream_text_to_buffer, chat_bufnr, fold_end_marker
+                                    self._stream_text_to_buffer,
+                                    chat_bufnr,
+                                    fold_end_marker,
                                 )
 
                             # Reset state
                             pending_tool_outputs = []
                             expected_outputs = 0
                             tool_was_called = False
+                            parallel_tools = []
 
-                if hasattr(event, "data") and isinstance(event.data, ResponseTextDeltaEvent):
+                if hasattr(event, "data") and isinstance(
+                    event.data, ResponseTextDeltaEvent
+                ):
                     delta = event.data.delta
                     if delta:
                         # Mark that streaming has started
@@ -357,11 +395,8 @@ class AnyaPlugin:
                             )
 
             # Flush any remaining parallel tools before message end
-            if parallel_tools:
-                self._flush_parallel_tools(
-                    parallel_tools, collected_content, chat_bufnr
-                )
-                parallel_tools = []
+            # (Headers already displayed with pending status, just clear the list)
+            parallel_tools = []
 
             # Calculate duration
             end_time = time.time()
@@ -380,7 +415,9 @@ class AnyaPlugin:
             if tool_was_called:
                 fold_end_marker = "\n" + markers.make_marker("fold_end")
                 collected_content.append(fold_end_marker)
-                self.nvim.async_call(self._stream_text_to_buffer, chat_bufnr, fold_end_marker)
+                self.nvim.async_call(
+                    self._stream_text_to_buffer, chat_bufnr, fold_end_marker
+                )
             footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
             self.nvim.async_call(self._stream_text_to_buffer, chat_bufnr, footer)
 
@@ -441,7 +478,9 @@ class AnyaPlugin:
             if tool_was_called:
                 fold_end_marker = "\n" + markers.make_marker("fold_end")
                 full_content = fixed_content + fold_end_marker
-                self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, fold_end_marker)
+                self.nvim.async_call(
+                    self._append_to_chat_buffer, chat_bufnr, fold_end_marker
+                )
             else:
                 full_content = fixed_content
             footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
@@ -688,6 +727,37 @@ class AnyaPlugin:
         if not self.nvim.api.buf_is_valid(bufnr):
             return
         self.nvim.exec_lua("require('anya.text')._process_markers(...)", bufnr)
+
+    def _update_pending_markers_to_success(self, bufnr):
+        """Update all tool_pending markers to tool_success in the buffer.
+
+        Scans the buffer for fold_start markers with tool_pending status
+        and replaces them with tool_success status.
+        """
+        if not self.nvim.api.buf_is_valid(bufnr):
+            return
+
+        lines = self.nvim.api.buf_get_lines(bufnr, 0, -1, False)
+        pending_marker = markers.make_marker("fold_start", "tool_pending")
+        success_marker = markers.make_marker("fold_start", "tool_success")
+
+        for i, line in enumerate(lines):
+            if line == pending_marker:
+                self.nvim.api.buf_set_lines(bufnr, i, i + 1, False, [success_marker])
+
+        # Reprocess markers to update extmarks
+        self._process_markers(bufnr)
+
+    def _flush_and_update_pending_markers(self, bufnr):
+        """Flush the streaming queue and update pending markers to success.
+
+        This ensures markers are written to buffer before we try to update them.
+        """
+        # Flush the streaming queue first
+        self.nvim.exec_lua("require('anya.text').flush_queue()")
+
+        # Now update the markers
+        self._update_pending_markers_to_success(bufnr)
 
     @pynvim.function("AnyaSend", sync=False)
     def anya_send(self, args):

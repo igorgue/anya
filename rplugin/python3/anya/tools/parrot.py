@@ -1,3 +1,4 @@
+import time
 from agents import function_tool
 
 
@@ -12,4 +13,5 @@ async def parrot(message: str) -> str:
     Returns:
         str: The input message converted to uppercase.
     """
+    time.sleep(3)  # Simulate processing delay
     return message.upper()
