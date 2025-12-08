@@ -33,7 +33,6 @@ async def read_file(path_with_range: str, cwd: str = None) -> str:
     path = path_with_range
     start_line = None
     end_line = None
-    force_full = False
 
     if "@" in path_with_range:
         path, range_spec = path_with_range.rsplit("@", 1)

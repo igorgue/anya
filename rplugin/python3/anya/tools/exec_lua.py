@@ -3,7 +3,6 @@ import json
 import os
 import tempfile
 from agents import function_tool, RunContextWrapper
-from typing import Any
 
 from ..agents.context import NvimPluginContext
 from .utils import create_error_handler
@@ -74,7 +73,7 @@ end
     def run_lua():
         try:
             nvim.command(f"luafile {temp_lua}")
-        except Exception as e:
+        except Exception as _e:
             pass
         finally:
             # Set the event from the main thread
@@ -89,7 +88,7 @@ end
         if asyncio.get_event_loop().time() - start_time > timeout:
             try:
                 os.unlink(temp_lua)
-            except:
+            except Exception:
                 pass
             raise Exception("Lua execution timed out")
         await asyncio.sleep(0.01)
@@ -98,7 +97,7 @@ end
     try:
         try:
             os.unlink(temp_lua)
-        except:
+        except Exception:
             pass
 
         if os.path.exists(temp_result):
@@ -125,4 +124,4 @@ end
         else:
             raise Exception("No result file created")
     except Exception as e:
-        raise Exception(f"Error reading result: {type(e).__name__}: {e}")
+        raise Exception(f"Reading result: {type(e).__name__}: {e}")

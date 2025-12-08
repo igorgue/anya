@@ -1,9 +1,7 @@
 import asyncio
 import os
 import subprocess
-import threading
 from agents import function_tool, RunContextWrapper
-from typing import Any
 
 from ..agents.context import NvimPluginContext
 from .utils import create_error_handler
@@ -19,7 +17,7 @@ async def _nvim_ui_select(nvim, options: list, prompt: str) -> str:
         nvim.exec_lua(
             f"""
 vim.g.anya_select_result = nil
-vim.ui.select({lua_options}, 
+vim.ui.select({lua_options},
     {{prompt = "{lua_prompt}"}},
     function(selection)
         vim.g.anya_select_result = selection or "Cancel"
@@ -38,7 +36,7 @@ vim.ui.select({lua_options},
         def get_result():
             try:
                 result[0] = nvim.eval("get(g:, 'anya_select_result', v:null)")
-            except:
+            except Exception:
                 pass
 
         nvim.async_call(get_result)
