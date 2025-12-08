@@ -15,6 +15,33 @@ _pane_state = {
 }
 
 
+def set_prompt_buffer_options(nvim: Nvim, bufnr: int):
+    """Configure buffer-local options for the prompt buffer.
+
+    Args:
+        nvim: Neovim instance
+        bufnr: Buffer number
+    """
+    nvim.api.buf_set_option(bufnr, "wrap", True)
+    nvim.api.buf_set_option(bufnr, "linebreak", True)
+    nvim.api.buf_set_option(bufnr, "number", False)
+    nvim.api.buf_set_option(bufnr, "relativenumber", False)
+    nvim.api.buf_set_option(bufnr, "signcolumn", "no")
+    nvim.api.buf_set_option(bufnr, "spell", False)
+    nvim.api.buf_set_option(bufnr, "modifiable", True)
+
+
+def set_prompt_window_options(nvim: Nvim, winid: int):
+    """Configure window-local options for the prompt window.
+
+    Args:
+        nvim: Neovim instance
+        winid: Window ID
+    """
+    nvim.api.win_set_option(winid, "wrap", True)
+    nvim.api.win_set_option(winid, "linebreak", True)
+
+
 def get_buffer_content(nvim: Nvim, bufnr: int) -> str:
     """Read entire buffer content as a single string with markers intact.
 
@@ -86,6 +113,7 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
         nvim.api.buf_set_option(prompt_buf, "filetype", "anya-prompt")
         nvim.api.buf_set_option(prompt_buf, "buftype", "nofile")
         nvim.api.buf_set_option(prompt_buf, "swapfile", False)
+        set_prompt_buffer_options(nvim, prompt_buf)
 
     if layout == "tab":
         # Create a new tab
@@ -98,6 +126,7 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
         prompt_win = nvim.api.get_current_win()
         nvim.api.win_set_option(prompt_win, "winfixheight", True)
         nvim.api.win_set_buf(prompt_win, prompt_buf)
+        set_prompt_window_options(nvim, prompt_win)
 
         # Go back to top window and set up chat
         nvim.command("wincmd k")
@@ -151,6 +180,7 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
             nvim.command(f"resize {PROMPT_HEIGHT}")
             nvim.api.win_set_option(prompt_win, "winfixheight", True)
             nvim.api.win_set_buf(prompt_win, prompt_buf)
+            set_prompt_window_options(nvim, prompt_win)
 
             # Go back to top window and set up chat
             nvim.command("wincmd k")
@@ -182,6 +212,7 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
         prompt_win = nvim.api.get_current_win()
         nvim.api.win_set_option(prompt_win, "winfixheight", True)
         nvim.api.win_set_buf(prompt_win, prompt_buf)
+        set_prompt_window_options(nvim, prompt_win)
 
         # Go back to top window and set up chat
         nvim.command("wincmd k")
