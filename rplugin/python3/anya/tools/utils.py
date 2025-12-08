@@ -6,7 +6,7 @@ from agents import RunContextWrapper
 from typing import Any
 
 
-def create_error_handler(ctx: RunContextWrapper[Any], error: Exception) -> str:
+def create_error_handler(_ctx: RunContextWrapper[Any], error: Exception) -> str:
     """Custom error handler for the create tool."""
     return f"Error: {str(error)}"
 
@@ -31,3 +31,26 @@ def nvim_call_sync(nvim: Nvim, func: callable) -> any:
     if error[0]:
         raise error[0]
     return result[0]
+
+
+def format_tool_header(tool_name: str, first_arg: str, max_len: int = 30) -> str:
+    """Format tool header with trimmed argument.
+
+    Args:
+        tool_name: Tool function name
+        first_arg: First argument to tool
+        max_len: Max length before trimming
+
+    Returns:
+        **tool_name** or **tool_name: trimmed_arg**
+    """
+    # If no arguments, just show the tool name
+    if not first_arg or first_arg == "(no args)":
+        return f"**{tool_name}**"
+
+    if len(first_arg) > max_len:
+        trimmed = first_arg[: max_len - 3] + "..."
+    else:
+        trimmed = first_arg
+
+    return f"**{tool_name}: {trimmed}**"

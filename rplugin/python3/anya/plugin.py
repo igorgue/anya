@@ -661,7 +661,7 @@ class AnyaPlugin:
         """
         import json
 
-        from .tools.output import format_tool_header
+        from .tools.utils import format_tool_header
 
         # Try to extract first argument from JSON args
         first_arg = ""
@@ -710,7 +710,7 @@ class AnyaPlugin:
         """
         import json
 
-        from .tools.output import format_tool_header
+        from .tools.utils import format_tool_header
 
         # Try to extract first argument from JSON args
         first_arg = ""
