@@ -272,19 +272,24 @@ end
 
 --- Get the current message ID by searching backward from cursor for message start marker
 --- @param bufnr number|nil Buffer number (defaults to chat buffer)
+--- @param from_line number|nil Line number to search backward from (defaults to cursor line, 1-indexed)
 --- @return string|nil The message ID or nil
-function M.get_current_message_id(bufnr)
+function M.get_current_message_id(bufnr, from_line)
   bufnr = bufnr or get_chat_buffer()
   if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
     return nil
   end
 
-  local cursor_line = 1
-  local ok, cursor = pcall(vim.api.nvim_win_get_cursor, 0)
-  if ok then
-    cursor_line = cursor[1]
+  local cursor_line = from_line or 1
+  if not from_line then
+    local ok, cursor = pcall(vim.api.nvim_win_get_cursor, 0)
+    if ok then
+      cursor_line = cursor[1]
+    end
   end
 
+  -- Get lines from 0 (0-indexed) to cursor_line (converts to 0-indexed)
+  -- vim.api.nvim_buf_get_lines uses 0-indexed, so we need end=cursor_line to include cursor_line
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, cursor_line, false)
 
   for i = #lines, 1, -1 do

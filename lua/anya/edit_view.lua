@@ -310,14 +310,18 @@ function M.handle_keypress(bufnr, key)
 end
 
 -- Update the edit marker in the database for the current message
-function M.update_marker_in_db(bufnr, old_marker, new_marker)
+function M.update_marker_in_db(bufnr, old_marker, new_marker, from_line)
   local conversation = require("anya.conversation")
-  local message_id = conversation.get_current_message_id(bufnr)
-  if message_id then
-    local result = vim.fn.AnyaUpdateEditMarker(message_id, old_marker, new_marker)
-    if not result or not result.success then
-      vim.notify("Note: Database marker update skipped", vim.log.levels.DEBUG)
-    end
+  local message_id = conversation.get_current_message_id(bufnr, from_line)
+  if not message_id then
+    vim.notify("Warning: Could not find message ID to sync edit state to database", vim.log.levels.WARN)
+    return
+  end
+
+  local result = vim.fn.AnyaUpdateEditMarker(message_id, old_marker, new_marker)
+  if not result or not result.success then
+    local err_msg = result and result.message or "Unknown error"
+    vim.notify("Error syncing edit marker: " .. err_msg, vim.log.levels.ERROR)
   end
 end
 
@@ -471,6 +475,87 @@ end
 -- Clear decision callback
 function M.clear_decision_callback()
   decision_callback = nil
+end
+
+-- Handle keypress for any pending edit (used from prompt buffer)
+-- Finds the most recent pending edit and applies/rejects it
+function M.handle_keypress_any_edit(key)
+  -- Find the most recent pending edit by checking registry in reverse order
+  local last_pending_id = nil
+  for id, data in pairs(edit_registry) do
+    if data.state == STATE_PENDING then
+      if not last_pending_id or id > last_pending_id then
+        last_pending_id = id
+      end
+    end
+  end
+
+  if not last_pending_id then
+    return false
+  end
+
+  local edit_data = edit_registry[last_pending_id]
+  local bufnr = nil
+
+  -- Find the buffer containing this edit (should be chat buffer)
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(buf) then
+      local extmark = vim.api.nvim_buf_get_extmark_by_id(buf, ns_id, last_pending_id, { details = true })
+      if extmark and #extmark > 0 then
+        bufnr = buf
+        break
+      end
+    end
+  end
+
+  if not bufnr then
+    return false
+  end
+
+  -- Now simulate the keypress on that edit
+  local action = nil
+  local success = false
+  local message = ""
+  local old_marker = nil
+  local new_marker = nil
+
+  if key == "1" then
+    local apply_result = vim.fn.AnyaApplyEditContent(edit_data.raw_block)
+    if apply_result and apply_result.success then
+      edit_data.state = STATE_APPLIED
+      success = true
+      message = apply_result.message or ""
+      action = "apply"
+      old_marker = markers.edit_pending
+      new_marker = markers.edit_applied
+    else
+      edit_data.state = STATE_FAILED
+      success = false
+      message = apply_result and apply_result.message or "Unknown error"
+      action = "failed"
+      old_marker = markers.edit_pending
+      new_marker = markers.edit_failed
+    end
+  elseif key == "2" then
+    edit_data.state = STATE_REJECTED
+    success = true
+    action = "reject"
+    old_marker = markers.edit_pending
+    new_marker = markers.edit_rejected
+  else
+    return false
+  end
+
+  update_edit_header(bufnr, last_pending_id)
+
+  -- Call decision callback if set (for edit tool polling)
+  -- The decision callback will handle database sync
+  if decision_callback then
+    decision_callback(action, success, message)
+    decision_callback = nil
+  end
+
+  return true
 end
 
 return M

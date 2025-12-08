@@ -95,3 +95,22 @@ end, { buffer = true, desc = "Cancel agent response" })
 vim.keymap.set("i", "<C-c>", function()
   vim.cmd("Anya cancel")
 end, { buffer = true, desc = "Cancel agent response" })
+
+-- Handle 1 and 2 key presses for edit responses
+-- If there's a pending edit, respond to it
+-- Otherwise, allow normal vim behavior (no-op for numbers)
+vim.keymap.set("n", "1", function()
+  local edit_view = require("anya.edit_view")
+  if not edit_view.handle_keypress_any_edit("1") then
+    -- No pending edit to respond to, allow normal behavior
+    -- (1 key does nothing in prompt buffer)
+  end
+end, { buffer = true, desc = "Apply pending edit" })
+
+vim.keymap.set("n", "2", function()
+  local edit_view = require("anya.edit_view")
+  if not edit_view.handle_keypress_any_edit("2") then
+    -- No pending edit to respond to, allow normal behavior
+    -- (2 key does nothing in prompt buffer)
+  end
+end, { buffer = true, desc = "Reject pending edit" })
