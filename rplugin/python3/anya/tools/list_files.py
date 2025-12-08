@@ -53,10 +53,12 @@ async def list_files(path: str = ".", cwd: str = None, max_results: int = 100) -
     if result.returncode == 0:
         lines = result.stdout.strip().split("\n")
         if len(lines) > max_results:
-            return (
+            output = (
                 "\n".join(lines[:max_results])
                 + f"\n... (truncated, showing {max_results} of {len(lines)} files)"
             )
-        return result.stdout.strip()
+        else:
+            output = result.stdout.strip()
+        return f"``````\n{output}\n``````"
     else:
         raise Exception(f"fd command failed: {result.stderr}")

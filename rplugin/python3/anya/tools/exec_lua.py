@@ -120,7 +120,8 @@ end
             else:
                 parts.append(f"Error: {result.get('error', 'unknown error')}")
 
-            return "\n".join(parts) if parts else "(no output)"
+            result = "\n".join(parts) if parts else "(no output)"
+            return f"``````\n{result}\n``````"
         else:
             raise Exception("No result file created")
     except Exception as e:

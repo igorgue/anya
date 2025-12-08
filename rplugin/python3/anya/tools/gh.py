@@ -119,4 +119,5 @@ async def gh(command: str, cwd: str = None, timeout: int = 30) -> str:
             output_parts.append("")
         output_parts.append(f"Exit code: {process.returncode}")
 
-    return "\n".join(output_parts) if output_parts else "(no output)"
+    result = "\n".join(output_parts) if output_parts else "(no output)"
+    return f"``````\n{result}\n``````"
