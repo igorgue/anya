@@ -339,6 +339,7 @@ class AnyaPlugin:
         tool_was_called = False  # Track if any tool was called (for unclosed folds)
         in_anya_marker = False  # Track if LLM is outputting an anya marker
         needs_blank_before_text = False  # Add blank line before next text after tool
+        last_output_was_marker = True  # Track if last output was a marker (header counts)
 
         try:
             # Record start time
@@ -405,9 +406,12 @@ class AnyaPlugin:
 
                                 if len(parallel_tools) == 1:
                                     # First tool - output header with pending marker
+                                    # Add blank line if last output wasn't a marker
+                                    prefix = "" if last_output_was_marker else "\n"
                                     # Use the status from the tool (edit_pending or tool_pending)
                                     pending_header = (
-                                        combined_header
+                                        prefix
+                                        + combined_header
                                         + "\n"
                                         + markers.make_marker("fold_start", status)
                                         + "\n"
@@ -419,6 +423,7 @@ class AnyaPlugin:
                                             chat_bufnr,
                                             pending_header,
                                         )
+                                    last_output_was_marker = True
                                 else:
                                     # Additional parallel tool - update header line
                                     if not self._request_cancelled:
@@ -498,6 +503,7 @@ class AnyaPlugin:
                             tool_was_called = False
                             parallel_tools = []
                             needs_blank_before_text = True
+                            last_output_was_marker = True
 
                 if hasattr(event, "data") and isinstance(
                     event.data, ResponseTextDeltaEvent
@@ -526,6 +532,7 @@ class AnyaPlugin:
 
                         # LLM text output - this is the agent's response (after tool results)
                         collected_content.append(delta)
+                        last_output_was_marker = False
 
                         # Don't queue text if cancellation is in progress
                         if not self._request_cancelled:
