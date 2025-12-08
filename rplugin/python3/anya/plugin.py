@@ -302,7 +302,8 @@ class AnyaPlugin:
         """Run the agent with streaming and write to chat buffer."""
         from agents import Runner
         from openai.types.responses import ResponseTextDeltaEvent
-        from .agents import code
+        from .agents import code, create_code_agent, _mcp_server_configs
+        from .mcp_loader import create_mcp_servers
         from .agents.context import NvimPluginContext
 
         context = NvimPluginContext(
@@ -356,8 +357,27 @@ class AnyaPlugin:
             # Record start time
             start_time = time.time()
 
+            # Connect MCP servers if enabled
+            agent_for_run = code
+            mcp_enabled = os.environ.get("ANYA_DISABLE_MCP", "0") != "1"
+            if _mcp_server_configs and mcp_enabled:
+                mcp_servers = create_mcp_servers(_mcp_server_configs)
+                connected = []
+                for server in mcp_servers:
+                    try:
+                        if hasattr(server, "connect"):
+                            await asyncio.wait_for(server.connect(), timeout=10.0)
+                        connected.append(server)
+                    except Exception as e:
+                        self.nvim.async_call(
+                            self.nvim.err_write,
+                            f"Anya: MCP {getattr(server, 'name', '?')}: {e}\n",
+                        )
+                if connected:
+                    agent_for_run = create_code_agent(mcp_servers=connected)
+
             result = Runner.run_streamed(
-                starting_agent=code,
+                starting_agent=agent_for_run,
                 input=llm_history,
                 context=context,
             )
