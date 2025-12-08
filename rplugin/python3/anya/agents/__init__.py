@@ -5,6 +5,7 @@ from .utils import get_instructions
 from ..tools import (
     buffer_name,
     create,
+    edit,
     exec,
     exec_lua,
     gh,
@@ -21,6 +22,7 @@ code = Agent[NvimPluginContext](
     tools=[
         buffer_name,
         create,
+        edit,
         exec,
         exec_lua,
         gh,

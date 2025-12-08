@@ -13,6 +13,7 @@ local icons = {
 
 -- Namespace for extmarks
 local ns_id = vim.api.nvim_create_namespace("anya_markers")
+local edit_view_ns_id = vim.api.nvim_create_namespace("anya_edit_view")
 
 -- Initialize global state if not exists
 if not _G.anya_stream_queue then
@@ -423,6 +424,7 @@ function M._process_markers(bufnr)
 
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local fold_start_line = nil
+  local fold_is_edit = false -- Track if current fold is an edit (should be open)
   -- Track message fold starts by id: { [id] = line_number }
   local message_fold_starts = {}
   -- Track message start info for duration calculation: { [id] = { timestamp, is_agent } }
@@ -481,13 +483,16 @@ function M._process_markers(bufnr)
           if marker_name == markers.fold_start then
             -- fold_start affects line above (i-1 in 1-indexed)
             fold_start_line = i - 1
+            fold_is_edit = false -- Reset, will be set if edit marker found
           elseif marker_name == markers.fold_end and fold_start_line then
             -- fold_end line is included in the fold
             local fold_end_line = i
             if fold_end_line > fold_start_line then
-              M._create_fold_range(bufnr, fold_start_line, fold_end_line)
+              -- Open edit folds so user can see content and decide
+              M._create_fold_range(bufnr, fold_start_line, fold_end_line, fold_is_edit)
             end
             fold_start_line = nil
+            fold_is_edit = false
           elseif marker_name == markers.tool_success then
             -- Highlight the header line (line above marker) with checkmark icon
             M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", icons.success)
@@ -506,14 +511,28 @@ function M._process_markers(bufnr)
             or marker_name == markers.edit_rejected
             or marker_name == markers.edit_failed
           then
+            -- Mark this fold as an edit fold (should be open for pending)
+            if marker_name == markers.edit_pending then
+              fold_is_edit = true
+            end
             -- Parse diff info from header line (line above marker)
             local header_line_idx = i - 2 -- 0-indexed, line above marker
             if header_line_idx >= 0 then
-              local header_line = lines[i - 1] -- 1-indexed
-              local diff_info = parse_edit_header(header_line)
-              -- Map marker name to state
-              local state = marker_name:match("^edit_(.+)$") or "pending"
-              M._apply_edit_header(bufnr, i - 1, state, diff_info)
+              -- Skip if edit_view already has an extmark on this line
+              local existing = vim.api.nvim_buf_get_extmarks(
+                bufnr,
+                edit_view_ns_id,
+                { header_line_idx, 0 },
+                { header_line_idx, -1 },
+                {}
+              )
+              if #existing == 0 then
+                local header_line = lines[i - 1] -- 1-indexed
+                local diff_info = parse_edit_header(header_line)
+                -- Map marker name to state
+                local state = marker_name:match("^edit_(.+)$") or "pending"
+                M._apply_edit_header(bufnr, i - 1, state, diff_info)
+              end
             end
           end
         end

@@ -300,7 +300,9 @@ class AnyaPlugin:
         from .agents.context import NvimPluginContext
 
         context = NvimPluginContext(
-            nvim=self.nvim, session_id=self.session_id, allowed_commands=self.allowed_commands
+            nvim=self.nvim,
+            session_id=self.session_id,
+            allowed_commands=self.allowed_commands,
         )
 
         # Emit fidget start event
@@ -374,45 +376,56 @@ class AnyaPlugin:
                             tool_was_called = True
                             self._streaming_started = True
 
+                            # Use edit_pending for edit tool, tool_pending for others
+                            status = (
+                                "edit_pending"
+                                if tool_name == "edit"
+                                else "tool_pending"
+                            )
                             parallel_tools.append(
                                 {
                                     "name": tool_name,
                                     "args": tool_args,
-                                    "status": "tool_pending",
+                                    "status": status,
                                 }
                             )
                             expected_outputs += 1
 
-                            # Build combined header with all tools so far
-                            tool_headers = [
-                                self._format_tool_header(t["name"], t["args"])
-                                for t in parallel_tools
-                            ]
-                            combined_header = " | ".join(tool_headers)
-
-                            if len(parallel_tools) == 1:
-                                # First tool - output header with pending marker
-                                pending_header = (
-                                    combined_header
-                                    + "\n"
-                                    + markers.make_marker("fold_start", "tool_pending")
-                                    + "\n"
-                                )
-                                collected_content.append(pending_header)
-                                if not self._request_cancelled:
-                                    self.nvim.async_call(
-                                        self._stream_text_to_buffer,
-                                        chat_bufnr,
-                                        pending_header,
-                                    )
+                            # Skip header output for edit tool - edit_view handles its own display
+                            if tool_name == "edit":
+                                pass  # edit_view will render its own header
                             else:
-                                # Additional parallel tool - update header line
-                                if not self._request_cancelled:
-                                    self.nvim.async_call(
-                                        self._update_tool_header_line,
-                                        chat_bufnr,
-                                        combined_header,
+                                # Build combined header with all tools so far
+                                tool_headers = [
+                                    self._format_tool_header(t["name"], t["args"])
+                                    for t in parallel_tools
+                                ]
+                                combined_header = " | ".join(tool_headers)
+
+                                if len(parallel_tools) == 1:
+                                    # First tool - output header with pending marker
+                                    # Use the status from the tool (edit_pending or tool_pending)
+                                    pending_header = (
+                                        combined_header
+                                        + "\n"
+                                        + markers.make_marker("fold_start", status)
+                                        + "\n"
                                     )
+                                    collected_content.append(pending_header)
+                                    if not self._request_cancelled:
+                                        self.nvim.async_call(
+                                            self._stream_text_to_buffer,
+                                            chat_bufnr,
+                                            pending_header,
+                                        )
+                                else:
+                                    # Additional parallel tool - update header line
+                                    if not self._request_cancelled:
+                                        self.nvim.async_call(
+                                            self._update_tool_header_line,
+                                            chat_bufnr,
+                                            combined_header,
+                                        )
 
                     elif item_type == "tool_call_output_item":
                         tool_output = getattr(item, "output", "")
@@ -422,6 +435,11 @@ class AnyaPlugin:
                             len(pending_tool_outputs) >= expected_outputs
                             and expected_outputs > 0
                         ):
+                            # Check if this is an edit tool (don't auto-update markers)
+                            is_edit_tool = any(
+                                t["name"] == "edit" for t in parallel_tools
+                            )
+
                             # Check if any output indicates failure
                             has_failure = any(
                                 "error" in o.lower()
@@ -430,7 +448,8 @@ class AnyaPlugin:
                             )
 
                             # Update pending markers to success or failure
-                            if not self._request_cancelled:
+                            # Skip marker update for edit tool - user will approve/reject
+                            if not self._request_cancelled and not is_edit_tool:
                                 if has_failure:
                                     self.nvim.async_call(
                                         self._flush_and_update_pending_markers_to_failure,
@@ -445,7 +464,24 @@ class AnyaPlugin:
                             all_outputs = "\n".join(
                                 o for o in pending_tool_outputs if o
                             )
-                            if all_outputs:
+
+                            # For edit tool, use the dedicated edit_view renderer
+                            if is_edit_tool and all_outputs:
+                                collected_content.append(all_outputs)
+                                if not self._request_cancelled:
+                                    # Flush streaming queue first
+                                    self.nvim.async_call(
+                                        lambda: self.nvim.exec_lua(
+                                            "require('anya.text').flush_queue()"
+                                        )
+                                    )
+                                    # Render edit blocks with proper UI
+                                    self.nvim.async_call(
+                                        self._render_edit_blocks,
+                                        chat_bufnr,
+                                        all_outputs,
+                                    )
+                            elif all_outputs:
                                 collected_content.append(all_outputs)
                                 if not self._request_cancelled:
                                     self.nvim.async_call(
@@ -454,16 +490,18 @@ class AnyaPlugin:
                                         all_outputs,
                                     )
 
-                            fold_end_marker = (
-                                "\n" + markers.make_marker("fold_end") + "\n\n"
-                            )
-                            collected_content.append(fold_end_marker)
-                            if not self._request_cancelled:
-                                self.nvim.async_call(
-                                    self._stream_text_to_buffer,
-                                    chat_bufnr,
-                                    fold_end_marker,
+                            # Skip fold markers for edit tool - edit_view handles its own display
+                            if not is_edit_tool:
+                                fold_end_marker = (
+                                    "\n" + markers.make_marker("fold_end") + "\n\n"
                                 )
+                                collected_content.append(fold_end_marker)
+                                if not self._request_cancelled:
+                                    self.nvim.async_call(
+                                        self._stream_text_to_buffer,
+                                        chat_bufnr,
+                                        fold_end_marker,
+                                    )
 
                             pending_tool_outputs = []
                             expected_outputs = 0
@@ -660,6 +698,50 @@ class AnyaPlugin:
             return
         self.nvim.exec_lua("require('anya.text').output(...)", bufnr, text)
 
+    def _render_edit_blocks(self, bufnr, edit_str):
+        """Render SEARCH/REPLACE edit blocks using the dedicated edit_view.
+
+        Args:
+            bufnr: Buffer number
+            edit_str: String containing one or more SEARCH/REPLACE blocks
+        """
+        if not self.nvim.api.buf_is_valid(bufnr):
+            return
+
+        from . import search_replace
+
+        blocks = search_replace.parse_search_replace_blocks(edit_str)
+
+        if not blocks:
+            return
+
+        for block in blocks:
+            try:
+                self.nvim.exec_lua(
+                    """
+                    local args = {...}
+                    require('anya.edit_view').render_edit(
+                        args[1], args[2], args[3], args[4], args[5]
+                    )
+                    """,
+                    bufnr,
+                    block.path,
+                    block.search,
+                    block.replace,
+                    block.raw_block,
+                )
+            except Exception as e:
+                self.nvim.err_write(f"Failed to render edit block: {e}\n")
+
+        # Setup keymaps after rendering
+        self.nvim.exec_lua(
+            "require('anya.edit_view').setup_keymaps(...)",
+            bufnr,
+        )
+
+        # Autoscroll to show the edit blocks
+        self._autoscroll(bufnr)
+
     def _flush_parallel_tools(
         self,
         tools: list[dict],
@@ -710,6 +792,7 @@ class AnyaPlugin:
             Formatted header like **tool_name | arg**
         """
         import json
+        import re
 
         from .tools.utils import format_tool_header
 
@@ -718,13 +801,35 @@ class AnyaPlugin:
         try:
             if tool_args:
                 args_dict = json.loads(tool_args)
-                # Get the first non-empty value
-                for key, value in args_dict.items():
-                    if isinstance(value, str):
-                        first_arg = value
-                    else:
-                        first_arg = str(value)
-                    break
+
+                # Special handling for edit tool - extract filename from edit_blocks
+                if tool_name == "edit" and "edit_blocks" in args_dict:
+                    edit_blocks = args_dict["edit_blocks"]
+                    # Extract filename from first line or before <<<<<<< SEARCH
+                    lines = edit_blocks.strip().split("\n")
+                    for line in lines:
+                        line = line.strip()
+                        if (
+                            line
+                            and not line.startswith("<")
+                            and not line.startswith("=")
+                        ):
+                            # This looks like a filename
+                            first_arg = line
+                            break
+                    if not first_arg:
+                        first_arg = "(edit)"
+                else:
+                    # Get the first non-empty value
+                    for key, value in args_dict.items():
+                        if isinstance(value, str):
+                            # Truncate long strings (like edit blocks)
+                            first_arg = value[:50] if len(value) > 50 else value
+                            # Remove newlines for display
+                            first_arg = first_arg.replace("\n", " ").strip()
+                        else:
+                            first_arg = str(value)
+                        break
         except (json.JSONDecodeError, AttributeError):
             first_arg = tool_args[:50] if tool_args else ""
 
@@ -1161,3 +1266,282 @@ Usage:
             return
         base, callback_id = args
         buffers.get_file_completions_async(self.nvim, base, callback_id)
+
+    @pynvim.function("AnyaApplyEdit", sync=True)
+    def apply_edit(self, args):
+        """Apply a pending edit block from the chat buffer.
+
+        Finds the edit block content at the given line, applies the patch,
+        and updates the marker to edit_applied or edit_failed.
+
+        Args:
+            args[0]: Buffer number
+            args[1]: Line number of the edit header (1-indexed)
+
+        Returns:
+            dict with {success: bool, message: str}
+        """
+        if len(args) < 2:
+            return {"success": False, "message": "Requires bufnr and line_num"}
+
+        bufnr = args[0]
+        header_line = args[1]  # 1-indexed from Lua
+
+        # Get the buffer content
+        if not self.nvim.api.buf_is_valid(bufnr):
+            return {"success": False, "message": "Invalid buffer"}
+
+        if header_line is None:
+            return {"success": False, "message": "No header line provided"}
+
+        lines = self.nvim.api.buf_get_lines(bufnr, 0, -1, False)
+
+        # Find the fold_start marker after the header line
+        # header_line is 1-indexed, convert to 0-indexed for array access
+        fold_start_idx = None
+        fold_end_idx = None
+
+        for i in range(
+            header_line - 1, len(lines)
+        ):  # header_line - 1 to convert to 0-indexed
+            line = lines[i]
+            if "<!-- at:" in line and "fold_start" in line:
+                fold_start_idx = i
+            elif "<!-- at:" in line and "fold_end" in line:
+                fold_end_idx = i
+                break
+
+        if fold_start_idx is None or fold_end_idx is None:
+            return {"success": False, "message": "Could not find edit block boundaries"}
+
+        # Extract the content between fold markers
+        edit_content = "\n".join(lines[fold_start_idx + 1 : fold_end_idx])
+
+        # Apply the edit using search_replace
+        from . import search_replace
+
+        cwd = self.nvim.call("getcwd")
+        results = search_replace.apply_edit_blocks(edit_content, cwd)
+
+        if not results:
+            return {"success": False, "message": "No edit blocks found"}
+
+        # Check results and build message
+        all_success = all(r.success for r in results)
+        messages = [r.message for r in results]
+
+        # Update the marker in the buffer
+        if all_success:
+            new_marker = markers.make_marker("fold_start", "edit_applied")
+        else:
+            new_marker = markers.make_marker("fold_start", "edit_failed")
+
+        self.nvim.api.buf_set_lines(
+            bufnr, fold_start_idx, fold_start_idx + 1, False, [new_marker]
+        )
+
+        # Reprocess markers to update extmarks
+        self._process_markers(bufnr)
+
+        return {
+            "success": all_success,
+            "message": "; ".join(messages),
+            "results": [
+                {
+                    "path": r.path,
+                    "success": r.success,
+                    "message": r.message,
+                    "match_type": r.match_type,
+                }
+                for r in results
+            ],
+        }
+
+    @pynvim.function("AnyaRejectEdit", sync=True)
+    def reject_edit(self, args):
+        """Reject a pending edit block.
+
+        Updates the marker to edit_rejected without applying changes.
+
+        Args:
+            args[0]: Buffer number
+            args[1]: Line number of the edit header (1-indexed)
+
+        Returns:
+            dict with {success: bool, message: str}
+        """
+        if len(args) < 2:
+            return {"success": False, "message": "Requires bufnr and line_num"}
+
+        bufnr = args[0]
+        header_line = args[1]  # 1-indexed from Lua
+
+        # Get the buffer content
+        if not self.nvim.api.buf_is_valid(bufnr):
+            return {"success": False, "message": "Invalid buffer"}
+
+        if header_line is None:
+            return {"success": False, "message": "No header line provided"}
+
+        lines = self.nvim.api.buf_get_lines(bufnr, 0, -1, False)
+
+        # Find the fold_start marker after the header line
+        # header_line is 1-indexed, convert to 0-indexed for array access
+        fold_start_idx = None
+
+        for i in range(
+            header_line - 1, len(lines)
+        ):  # header_line - 1 to convert to 0-indexed
+            line = lines[i]
+            if "<!-- at:" in line and "fold_start" in line:
+                fold_start_idx = i
+                break
+
+        if fold_start_idx is None:
+            return {"success": False, "message": "Could not find edit marker"}
+
+        # Update the marker to rejected
+        new_marker = markers.make_marker("fold_start", "edit_rejected")
+        self.nvim.api.buf_set_lines(
+            bufnr, fold_start_idx, fold_start_idx + 1, False, [new_marker]
+        )
+
+        # Reprocess markers to update extmarks
+        self._process_markers(bufnr)
+
+        return {"success": True, "message": "Edit rejected"}
+
+    @pynvim.function("AnyaFindEditAtLine", sync=True)
+    def find_edit_at_line(self, args):
+        """Find the edit header line for a given cursor position.
+
+        Searches upward from the cursor to find the edit header line.
+
+        Args:
+            args[0]: Buffer number
+            args[1]: Current line number (1-indexed)
+
+        Returns:
+            Line number of edit header (1-indexed) or None if not in an edit block
+        """
+        if len(args) < 2:
+            return None
+
+        bufnr = args[0]
+        current_line = args[1]
+
+        if not self.nvim.api.buf_is_valid(bufnr):
+            return None
+
+        lines = self.nvim.api.buf_get_lines(bufnr, 0, -1, False)
+
+        # Search upward for fold_start with edit_pending
+        for i in range(current_line - 1, -1, -1):
+            line = lines[i]
+            if "<!-- at:" in line and "fold_end" in line:
+                # We hit a fold_end, so we're not in an edit block
+                return None
+            if "<!-- at:" in line and "edit_pending" in line:
+                # Found the edit marker (0-indexed at i)
+                # The header line is the line above it (0-indexed: i-1, 1-indexed: i)
+                # Return 1-indexed header line number
+                return i  # This is correct: marker at 0-idx i means header at 0-idx i-1 = 1-idx i
+
+        return None
+
+    @pynvim.function("AnyaApplyEditContent", sync=True)
+    def apply_edit_content(self, args):
+        """Apply an edit block from its raw content string.
+
+        This is called by the Lua edit_view when user presses 1 to apply.
+
+        Args:
+            args[0]: Raw edit block content (the SEARCH/REPLACE text)
+
+        Returns:
+            dict with {success: bool, message: str}
+        """
+        if not args or not args[0]:
+            return {"success": False, "message": "No edit content provided"}
+
+        raw_block = args[0]
+
+        # Apply the edit using search_replace
+        from . import search_replace
+
+        cwd = self.nvim.call("getcwd")
+        results = search_replace.apply_edit_blocks(raw_block, cwd)
+
+        if not results:
+            return {"success": False, "message": "No edit blocks found in content"}
+
+        # Check results and build message
+        all_success = all(r.success for r in results)
+        messages = [r.message for r in results]
+
+        return {
+            "success": all_success,
+            "message": "; ".join(messages),
+            "results": [
+                {
+                    "path": r.path,
+                    "success": r.success,
+                    "message": r.message,
+                    "match_type": r.match_type,
+                }
+                for r in results
+            ],
+        }
+
+    @pynvim.function("AnyaRenderEditBlocks", sync=True)
+    def render_edit_blocks(self, args):
+        """Render SEARCH/REPLACE edit blocks using Lua edit_view.
+
+        Args:
+            args[0]: Buffer number
+            args[1]: Edit blocks string content
+
+        Returns:
+            True if successful
+        """
+        if len(args) < 2:
+            return False
+
+        bufnr = args[0]
+        edit_str = args[1]
+
+        if not self.nvim.api.buf_is_valid(bufnr):
+            return False
+
+        from . import search_replace
+
+        blocks = search_replace.parse_search_replace_blocks(edit_str)
+
+        if not blocks:
+            return False
+
+        for block in blocks:
+            try:
+                self.nvim.exec_lua(
+                    """
+                    local args = {...}
+                    require('anya.edit_view').render_edit(
+                        args[1], args[2], args[3], args[4], args[5]
+                    )
+                    """,
+                    bufnr,
+                    block.path,
+                    block.search,
+                    block.replace,
+                    block.raw_block,
+                )
+            except Exception as e:
+                self.nvim.err_write(f"Failed to render edit block: {e}\n")
+
+        # Setup keymaps after rendering
+        self.nvim.exec_lua(
+            "require('anya.edit_view').setup_keymaps(...)",
+            bufnr,
+        )
+
+        return True

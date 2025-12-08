@@ -23,3 +23,6 @@ vim.opt_local.foldtext = [[v:lua.require'anya.foldtext'.get_foldtext()]]
 vim.keymap.set("n", "<C-c>", function()
   vim.cmd("Anya cancel")
 end, { buffer = true, desc = "Cancel agent response" })
+
+-- Edit approval keymaps are set up by edit_view.setup_keymaps() when edit blocks are rendered
+-- This ensures the 1/2 keys only work within edit block extmark ranges
