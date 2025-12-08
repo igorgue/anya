@@ -140,6 +140,7 @@ class AnyaPlugin:
         self._streaming_started = False  # Track if we've received any content
         self._request_cancelled = False  # Flag for async handler to check
         self.session_id = str(uuid.uuid4())  # Session ID for this Neovim instance
+        self.allowed_commands = set()  # Persist allowed commands across agent runs
 
     def _ensure_loop(self):
         """Ensure the asyncio event loop is running (lazy initialization)."""
@@ -298,7 +299,9 @@ class AnyaPlugin:
         from .agents import code
         from .agents.context import NvimPluginContext
 
-        context = NvimPluginContext(nvim=self.nvim, session_id=self.session_id)
+        context = NvimPluginContext(
+            nvim=self.nvim, session_id=self.session_id, allowed_commands=self.allowed_commands
+        )
 
         # Emit fidget start event
         fidget.emit_user_event(
