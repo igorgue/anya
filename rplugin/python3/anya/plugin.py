@@ -17,7 +17,7 @@ from .mcp_loader import MCPManager
 
 VERSION = "0.0.1"
 
-DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-3-turbo")
+DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-4.1")
 
 
 def filter_anya_markers(text: str, in_marker: bool) -> tuple[str, bool]:
