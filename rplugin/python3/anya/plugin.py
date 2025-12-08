@@ -264,10 +264,9 @@ class AnyaPlugin:
         # Collect streamed content for saving
         collected_content: list[str] = []
         parallel_tools: list[dict] = []  # Collect parallel tool calls
-        skip_next_fold_start = False  # Skip fold_start for first delta after parallel flush
-        tool_name = None  # Track if we're in a tool call
-        tool_args = ""  # Accumulate tool arguments
-        tool_was_called = False  # Track if any tool was called
+        pending_tool_outputs: list[str] = []  # Collect outputs for parallel tools
+        expected_outputs = 0  # Number of outputs we're waiting for
+        tool_was_called = False  # Track if any tool was called (for unclosed folds)
 
         try:
             # Record start time
@@ -284,63 +283,77 @@ class AnyaPlugin:
                 if self._request_cancelled:
                     raise asyncio.CancelledError()
 
-                # Only process events that have a data attribute
-                if not hasattr(event, "data"):
-                    continue
+                # Handle higher-level run item events for tool calls and outputs
+                if event.type == "run_item_stream_event":
+                    item = event.item
+                    item_type = getattr(item, "type", None)
 
-                # Handle tool call detection - use OutputItemDoneEvent to get complete tool info
-                from openai.types.responses import ResponseOutputItemDoneEvent
+                    if item_type == "tool_call_item":
+                        # Tool is being called - collect info for header
+                        raw_item = getattr(item, "raw_item", None)
+                        tool_name = getattr(item, "name", None) or getattr(raw_item, "name", "") if raw_item else ""
+                        tool_args = getattr(item, "arguments", "") or getattr(raw_item, "arguments", "") if raw_item else ""
+                        if tool_name:
+                            tool_was_called = True
+                            self._streaming_started = True
+                            parallel_tools.append({
+                                "name": tool_name,
+                                "args": tool_args,
+                                "status": "tool_pending",
+                            })
+                            expected_outputs += 1
 
-                if isinstance(event.data, ResponseOutputItemDoneEvent):
-                    # Check if this is a function call output item
-                    item = getattr(event.data, "item", None)
-                    if item is not None:
-                        item_type = getattr(item, "type", None)
-                        if item_type == "function_call":
-                            tool_name = getattr(item, "name", None)
-                            tool_args = getattr(item, "arguments", "")
-                            if tool_name:
-                                tool_was_called = True
-                                self._streaming_started = True
+                    elif item_type == "tool_call_output_item":
+                        # Tool output received - this is the raw tool result
+                        tool_output = getattr(item, "output", "")
+                        pending_tool_outputs.append(tool_output)
 
-                                # Determine tool status based on item status
-                                item_status = getattr(item, "status", "completed")
-                                tool_status = (
-                                    "tool_success"
-                                    if item_status == "completed"
-                                    else "tool_failure"
+                        # Check if we've received all expected outputs
+                        if len(pending_tool_outputs) >= expected_outputs and expected_outputs > 0:
+                            # Flush tool headers first
+                            if parallel_tools:
+                                for t in parallel_tools:
+                                    t["status"] = "tool_success"
+                                self._flush_parallel_tools(
+                                    parallel_tools, collected_content, chat_bufnr
+                                )
+                                parallel_tools = []
+
+                            # Output all collected tool outputs
+                            for output in pending_tool_outputs:
+                                if output:
+                                    collected_content.append(output)
+                                    if not self._request_cancelled:
+                                        self.nvim.async_call(
+                                            self._stream_text_to_buffer, chat_bufnr, output
+                                        )
+
+                            # Close the fold after all tool outputs
+                            fold_end_marker = "\n" + markers.make_marker("fold_end") + "\n\n"
+                            collected_content.append(fold_end_marker)
+                            if not self._request_cancelled:
+                                self.nvim.async_call(
+                                    self._stream_text_to_buffer, chat_bufnr, fold_end_marker
                                 )
 
-                                # Collect parallel tool info (will be shown after all tools finish)
-                                parallel_tools.append({
-                                    "name": tool_name,
-                                    "args": tool_args,
-                                    "status": tool_status,
-                                })
+                            # Reset state
+                            pending_tool_outputs = []
+                            expected_outputs = 0
+                            tool_was_called = False
 
-                if isinstance(event.data, ResponseTextDeltaEvent):
+                if hasattr(event, "data") and isinstance(event.data, ResponseTextDeltaEvent):
                     delta = event.data.delta
                     if delta:
                         # Mark that streaming has started
                         self._streaming_started = True
 
-                        # If we've collected parallel tools and text is starting, flush them now
-                        if parallel_tools and delta.strip():
-                            self._flush_parallel_tools(
-                                parallel_tools, collected_content, chat_bufnr
-                            )
-                            parallel_tools = []
-                            skip_next_fold_start = True
-
-                        # Wrap tool outputs with markers (skip if we just flushed parallel tools)
-                        wrapped_delta = self._wrap_tool_output_delta(delta, skip_fold_markers=skip_next_fold_start)
-                        skip_next_fold_start = False  # Reset for next delta
-                        collected_content.append(wrapped_delta)
+                        # LLM text output - this is the agent's response (after tool results)
+                        collected_content.append(delta)
 
                         # Don't queue text if cancellation is in progress
                         if not self._request_cancelled:
                             self.nvim.async_call(
-                                self._stream_text_to_buffer, chat_bufnr, wrapped_delta
+                                self._stream_text_to_buffer, chat_bufnr, delta
                             )
 
             # Flush any remaining parallel tools before message end
@@ -659,36 +672,6 @@ class AnyaPlugin:
 
         # Add opening fold marker with status and newline so it's on its own line
         return header + "\n" + markers.make_marker("fold_start", status) + "\n"
-
-    def _wrap_tool_output_delta(self, delta: str, skip_fold_markers: bool = False) -> str:
-        """Wrap tool output sections with markers.
-
-        Detects tool headers and wraps them with fold markers.
-        
-        Args:
-            delta: Text delta to process
-            skip_fold_markers: If True, don't add fold markers (already added by parallel flush)
-        """
-        from .tools.output import extract_tool_call, format_tool_header
-
-        lines = delta.split("\n")
-        result = []
-
-        for line in lines:
-            # Check if line is a tool header
-            tool_info = extract_tool_call(line)
-            if tool_info:
-                tool_name, first_arg = tool_info
-                # Reformat with trimmed argument
-                formatted = format_tool_header(tool_name, first_arg)
-                result.append(formatted)
-                # Add opening marker only if not skipped
-                if not skip_fold_markers:
-                    result.append(markers.make_marker("fold_start", "tool_pending"))
-            else:
-                result.append(line)
-
-        return "\n".join(result)
 
     def _autoscroll(self, bufnr):
         """Scroll all windows showing buffer to bottom."""
