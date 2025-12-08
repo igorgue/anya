@@ -64,16 +64,15 @@ def CodeAgent(mcp_servers=None):
         ],
     }
 
-    if mcp_servers:
-        mcp_agent = MCPAgent(mcp_servers)
-        if mcp_agent:
-            mcp_tool = mcp_agent.as_tool(
-                tool_name="mcp",
-                tool_description="Access external systems and data via MCP (Model Context Protocol) servers. "
-                "Use this when you need to query databases, APIs, or other external services."
-                "you can also use this as a last resort if you don't know how to ansewer a question.",
-            )
-            config["tools"] = config["tools"] + [mcp_tool]
+    mcp_agent = MCPAgent(mcp_servers)
+    if mcp_agent:
+        mcp_tool = mcp_agent.as_tool(
+            tool_name="mcp",
+            tool_description="Access external systems and data via MCP (Model Context Protocol) servers. "
+            "Use this when you need to query databases, APIs, or other external services."
+            "you can also use this as a last resort if you don't know how to answer a question.",
+        )
+        config["tools"] = [mcp_tool] + config["tools"]
 
     return Agent[NvimPluginContext](**config)
 
