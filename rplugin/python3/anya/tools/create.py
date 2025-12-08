@@ -13,7 +13,7 @@ async def create(path: str, content: str = "", cwd: str = None) -> str:
     it will return an error. Use the edit tool to modify existing files.
 
     Args:
-        path: File path where the new file should be created (supports ~ expansion)
+        path: File path where the new file should be created (supports ~ expansion, and environment variables)
         content: Optional content to write to the file (default: empty file)
         cwd: Current working directory for relative path resolution
 
@@ -22,8 +22,10 @@ async def create(path: str, content: str = "", cwd: str = None) -> str:
 
     Examples:
         create("~/notes.txt", "Hello, World!")
+        create("$PROJECT_DIR/main.py", "# Main application file\\n")
         create("src/new_module.py", "# New module\\n")
         create("config/settings.json", "{}")
+        create("logs/app.log", "", "/var/www/myapp")
     """
     # Expand ~ to home directory and environment variables
     path = os.path.expandvars(os.path.expanduser(path))
