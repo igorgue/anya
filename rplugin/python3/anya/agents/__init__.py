@@ -42,6 +42,9 @@ def CodeAgent(mcp_servers=None):
 
     When MCP servers are available, they're added as an 'mcp_tools' tool
     that the agent can call on-demand. This avoids blocking on MCP startup.
+
+    Note: For dynamic instruction generation based on MCP servers, use CodeAgentAsync
+    from async_creation.py instead.
     """
     config = {
         "name": "Code",

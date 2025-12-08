@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Dict, List, TypedDict
 
 
 class MCPServerConfig(TypedDict, total=False):
@@ -198,3 +198,41 @@ class MCPManager:
     def is_loaded(self) -> bool:
         """Check if servers are loaded and connected."""
         return self._servers_loaded and len(self._active_servers) > 0
+
+    async def get_server_tools(self) -> List[Dict[str, Any]]:
+        """Get tool information from all connected servers.
+
+        Returns:
+            List of dictionaries containing server name and tools
+        """
+        if not self._active_servers:
+            return []
+
+        server_tools = []
+        for server in self._active_servers:
+            try:
+                name = getattr(server, "name", "unknown")
+                if hasattr(server, "list_tools"):
+                    # list_tools might be async
+                    tools = server.list_tools
+                    if callable(tools):
+                        # Check if it's async
+                        if asyncio.iscoroutinefunction(tools):
+                            tools = await tools()
+                        else:
+                            tools = tools()
+                    else:
+                        # It might be a coroutine object already
+                        if asyncio.iscoroutine(tools):
+                            tools = await tools
+
+                    if tools:
+                        server_tools.append({
+                            "name": name,
+                            "tools": tools
+                        })
+            except Exception as e:
+                self._log(f"Failed to get tools from server: {e}", is_error=True)
+                continue
+
+        return server_tools

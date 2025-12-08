@@ -382,7 +382,9 @@ class AnyaPlugin:
                 except asyncio.TimeoutError:
                     pass
 
-            agent_for_run = CodeAgent(mcp_servers=mcp_servers)
+            # Create agent with dynamic instructions based on MCP servers
+            from .agents.async_creation import CodeAgentAsync
+            agent_for_run = await CodeAgentAsync(mcp_servers=mcp_servers)
 
             result = Runner.run_streamed(
                 starting_agent=agent_for_run,
