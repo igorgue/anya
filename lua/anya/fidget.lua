@@ -151,11 +151,11 @@ end
 
 function M:report_exit_status(handle, event)
   if event.data.status == "success" then
-    handle.message = "  done"
+    handle.message = "done"
   elseif event.data.status == "error" then
-    handle.message = "󰗖  error"
+    handle.message = "error"
   else
-    handle.message = "  cancelled"
+    handle.message = "cancelled"
   end
 end
 
