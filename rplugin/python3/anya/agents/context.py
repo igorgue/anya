@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pynvim import Nvim
 
 
@@ -6,3 +6,4 @@ from pynvim import Nvim
 class NvimPluginContext:
     nvim: Nvim
     session_id: str
+    allowed_commands: set[str] = field(default_factory=set)

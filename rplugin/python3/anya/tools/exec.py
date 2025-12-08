@@ -1,10 +1,41 @@
 import asyncio
 import os
 import subprocess
+import shlex
 from agents import function_tool, RunContextWrapper
 
 from ..agents.context import NvimPluginContext
 from .utils import create_error_handler
+
+
+def _extract_command_name(command: str) -> str:
+    """Extract the command name from a full shell command.
+
+    Examples:
+        'ls -la' -> 'ls'
+        'grep -r pattern' -> 'grep'
+        '/usr/bin/python script.py' -> 'python'
+    """
+    try:
+        # Use shlex to parse the command properly
+        parts = shlex.split(command)
+        if not parts:
+            return command
+
+        # Get the first part
+        cmd = parts[0]
+
+        # If it's a path, get just the basename
+        if "/" in cmd:
+            return os.path.basename(cmd)
+
+        return cmd
+    except ValueError:
+        # If shlex fails, fallback to simple space split
+        cmd = command.split()[0] if command.split() else command
+        if "/" in cmd:
+            return os.path.basename(cmd)
+        return cmd
 
 
 async def _nvim_ui_select(nvim, options: list, prompt: str) -> str:
@@ -58,6 +89,7 @@ async def exec(
     """Execute a shell command and return stdout and stderr.
 
     SAFETY: This tool requires user confirmation before executing commands.
+    Commands can be allowed for the current session.
 
     Args:
         command: Shell command to execute
@@ -68,14 +100,28 @@ async def exec(
         Combined output with stdout and stderr, or error message
     """
     nvim = ctx.context.nvim
+    plugin_context = ctx.context
 
-    # Ask user for confirmation using vim.ui.select
-    choice = await _nvim_ui_select(
-        nvim, ["Execute", "Cancel"], f"Execute command?\n\n{command[:100]}"
-    )
+    # Extract just the command name
+    cmd_name = _extract_command_name(command)
 
-    if choice != "Execute":
-        raise Exception("Command execution cancelled by user")
+    # Check if this command is already allowed in this session
+    if cmd_name in plugin_context.allowed_commands:
+        # Execute without asking
+        pass
+    else:
+        # Ask user for confirmation using vim.ui.select
+        choice = await _nvim_ui_select(
+            nvim,
+            ["Execute", "Allow for this session", "Cancel"],
+            f"Execute command?\n\n{command[:100]}",
+        )
+
+        if choice == "Allow for this session":
+            # Add to allowed commands and execute
+            plugin_context.allowed_commands.add(cmd_name)
+        elif choice != "Execute":
+            raise Exception("Command execution cancelled by user")
 
     if cwd is None:
         cwd = os.getcwd()
