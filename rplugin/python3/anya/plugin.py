@@ -338,6 +338,7 @@ class AnyaPlugin:
         expected_outputs = 0  # Number of outputs we're waiting for
         tool_was_called = False  # Track if any tool was called (for unclosed folds)
         in_anya_marker = False  # Track if LLM is outputting an anya marker
+        needs_blank_before_text = False  # Add blank line before next text after tool
 
         try:
             # Record start time
@@ -465,22 +466,11 @@ class AnyaPlugin:
                                 o for o in pending_tool_outputs if o
                             )
 
-                            # For edit tool, use the dedicated edit_view renderer
-                            if is_edit_tool and all_outputs:
-                                collected_content.append(all_outputs)
-                                if not self._request_cancelled:
-                                    # Flush streaming queue first
-                                    self.nvim.async_call(
-                                        lambda: self.nvim.exec_lua(
-                                            "require('anya.text').flush_queue()"
-                                        )
-                                    )
-                                    # Render edit blocks with proper UI
-                                    self.nvim.async_call(
-                                        self._render_edit_blocks,
-                                        chat_bufnr,
-                                        all_outputs,
-                                    )
+                            # For edit tool, skip rendering - edit tool handles its own UI
+                            # The tool output is the result message (EDIT_APPLIED, etc)
+                            if is_edit_tool:
+                                # Don't render anything - edit tool already rendered via UI
+                                pass
                             elif all_outputs:
                                 collected_content.append(all_outputs)
                                 if not self._request_cancelled:
@@ -493,7 +483,7 @@ class AnyaPlugin:
                             # Skip fold markers for edit tool - edit_view handles its own display
                             if not is_edit_tool:
                                 fold_end_marker = (
-                                    "\n" + markers.make_marker("fold_end") + "\n\n"
+                                    "\n" + markers.make_marker("fold_end") + "\n"
                                 )
                                 collected_content.append(fold_end_marker)
                                 if not self._request_cancelled:
@@ -507,6 +497,7 @@ class AnyaPlugin:
                             expected_outputs = 0
                             tool_was_called = False
                             parallel_tools = []
+                            needs_blank_before_text = True
 
                 if hasattr(event, "data") and isinstance(
                     event.data, ResponseTextDeltaEvent
@@ -523,6 +514,15 @@ class AnyaPlugin:
 
                         # Mark that streaming has started
                         self._streaming_started = True
+
+                        # Add blank line before text if we just finished a tool call
+                        if needs_blank_before_text:
+                            collected_content.append("\n")
+                            if not self._request_cancelled:
+                                self.nvim.async_call(
+                                    self._stream_text_to_buffer, chat_bufnr, "\n"
+                                )
+                            needs_blank_before_text = False
 
                         # LLM text output - this is the agent's response (after tool results)
                         collected_content.append(delta)

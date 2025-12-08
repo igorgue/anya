@@ -256,16 +256,9 @@ function M.render_edit(bufnr, filename, search_content, replace_content, raw_blo
   local markers = require("anya.markers")
 
   local line_count = vim.api.nvim_buf_line_count(bufnr)
-  local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1] or ""
 
-  -- Ensure there's a blank line before the edit block
-  local start_line
-  if last_line == "" then
-    start_line = line_count
-  else
-    vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, { "" })
-    start_line = line_count + 1
-  end
+  -- Start on the next line (no blank line before)
+  local start_line = line_count
 
   -- Calculate stats
   local adds, dels = parse_edit_stats(search_content, replace_content)
