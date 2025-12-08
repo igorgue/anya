@@ -102,6 +102,11 @@ local function load_conversation(conversation_id)
   local text = require("anya.text")
   text._process_markers(chat_buf)
 
+  -- Setup keymaps for edit widgets (if any)
+  local edit_view = require("anya.edit_view")
+  edit_view.rebuild_registry(chat_buf)
+  edit_view.setup_keymaps(chat_buf)
+
   -- Scroll to bottom
   text._autoscroll_to_bottom(chat_buf)
 

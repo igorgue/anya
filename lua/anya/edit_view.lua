@@ -201,7 +201,7 @@ function M.handle_keypress(bufnr, key)
 
     if edit_registry[id] then
       local start_row = mark[2]
-      local end_row = mark[4].end_row
+      local end_row = mark[4].end_row or edit_registry[id].end_row
 
       if end_row and row >= start_row and row <= end_row then
         local current_state = edit_registry[id].state
@@ -343,6 +343,8 @@ function M.render_edit(bufnr, filename, search_content, replace_content, raw_blo
   table.insert(block_lines, markers.make_marker(markers.fold_start, markers.edit_pending))
   -- Start code fence to prevent markdown rendering
   table.insert(block_lines, "``````")
+  -- Add filename for parsing
+  table.insert(block_lines, filename)
   table.insert(block_lines, "<<<<<<< SEARCH")
 
   local search_lines = vim.split(search_content or "", "\n")
@@ -440,6 +442,82 @@ function M.render_edit(bufnr, filename, search_content, replace_content, raw_blo
   end
 
   return id
+end
+
+-- Rebuild edit registry from buffer extmarks (needed when loading from database)
+-- This extracts the raw edit block from the buffer for each edit widget
+function M.rebuild_registry(bufnr)
+  edit_registry = {}
+
+  local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns_id, 0, -1, { details = true })
+
+  for _, mark in ipairs(extmarks) do
+    local id = mark[1]
+    local start_row = mark[2]
+    local end_row = mark[4].end_row
+
+    -- Find the fold_end marker to determine the actual end_row if not in extmark
+    if not end_row then
+      local lines = vim.api.nvim_buf_get_lines(bufnr, start_row, -1, false)
+      for i, line in ipairs(lines) do
+        if markers.is_marker_line(line) then
+          local found_markers = markers.parse_marker(line)
+          if found_markers then
+            for _, marker_name in ipairs(found_markers) do
+              if marker_name == markers.fold_end then
+                end_row = start_row + i - 1
+                break
+              end
+            end
+          end
+        end
+        if end_row then
+          break
+        end
+      end
+    end
+
+    if end_row then
+      -- Extract raw block from buffer lines
+      -- Includes: header, fold_start marker (hidden), code fences, SEARCH/REPLACE
+      -- Excludes: fold_end marker (on end_row)
+      local lines = vim.api.nvim_buf_get_lines(bufnr, start_row, end_row, false)
+      local raw_block = table.concat(lines, "\n")
+
+      -- Determine state from marker on line after header
+      local marker_line_idx = start_row + 1
+      local marker_lines = vim.api.nvim_buf_get_lines(bufnr, marker_line_idx, marker_line_idx + 1, false)
+      local state = STATE_PENDING
+
+      if #marker_lines > 0 then
+        local marker_line = marker_lines[1]
+        if marker_line:find(markers.edit_applied) then
+          state = STATE_APPLIED
+        elseif marker_line:find(markers.edit_rejected) then
+          state = STATE_REJECTED
+        elseif marker_line:find(markers.edit_failed) then
+          state = STATE_FAILED
+        end
+      end
+
+      -- Extract filename from the line after code fence (start_row + 3)
+      -- Layout: header(0), marker(1), fence(2), filename(3), <<<<<<< SEARCH(4)
+      local filename_line_idx = start_row + 3
+      local filename_lines = vim.api.nvim_buf_get_lines(bufnr, filename_line_idx, filename_line_idx + 1, false)
+      local filename = ""
+      if #filename_lines > 0 then
+        filename = vim.trim(filename_lines[1])
+      end
+
+      edit_registry[id] = {
+        state = state,
+        filename = filename,
+        raw_block = raw_block,
+        header_row = start_row,
+        end_row = end_row,
+      }
+    end
+  end
 end
 
 -- Setup keymaps for the buffer

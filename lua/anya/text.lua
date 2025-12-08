@@ -808,7 +808,7 @@ function M._apply_edit_header(bufnr, line_num, state, diff_info)
     hl_mode = "combine",
   }
 
-  local extmark_id = vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, 0, opts)
+  local extmark_id = vim.api.nvim_buf_set_extmark(bufnr, edit_view_ns_id, line_idx, 0, opts)
 
   -- Store for later updates
   _G.anya_edit_extmarks[extmark_id] = {
