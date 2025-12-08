@@ -16,10 +16,12 @@ local STATE_REJECTED = 2
 local STATE_FAILED = 3
 
 -- Icons
-local ICON_PENDING = "○"
-local ICON_APPLIED = ""
-local ICON_REJECTED = ""
-local ICON_FAILED = ""
+-- NOTE: Do not change these lines, LLMs can't deal with nerdfonts.
+-- so don't change them please!
+local ICON_PENDING = ""
+local ICON_APPLIED = ""
+local ICON_REJECTED = ""
+local ICON_FAILED = "󰗖"
 
 -- Highlight group names
 local HL_ACCEPT = "AnyaEditAccept"
@@ -46,10 +48,10 @@ local function setup_highlights()
   local comment_hl = vim.api.nvim_get_hl(0, { name = "Comment", link = false })
   local directory_hl = vim.api.nvim_get_hl(0, { name = "Directory", link = false })
 
-  -- Control button highlights
-  vim.api.nvim_set_hl(0, HL_ACCEPT, { fg = ok_hl.fg, bg = visual_hl.bg })
-  vim.api.nvim_set_hl(0, HL_REJECT, { fg = err_hl.fg, bg = visual_hl.bg })
-  vim.api.nvim_set_hl(0, HL_PENDING, { fg = normal_hl.fg, bg = visual_hl.bg })
+  -- Control button highlights (transparent bg)
+  vim.api.nvim_set_hl(0, HL_ACCEPT, { fg = ok_hl.fg })
+  vim.api.nvim_set_hl(0, HL_REJECT, { fg = err_hl.fg })
+  vim.api.nvim_set_hl(0, HL_PENDING, { fg = comment_hl.fg })
 
   -- Search/Replace content highlights
   vim.api.nvim_set_hl(0, HL_SEARCH, { bg = diff_del.bg, fg = diff_del.fg })
@@ -136,6 +138,7 @@ local function update_edit_header(bufnr, extmark_id)
     id = extmark_id,
     virt_text = virt_text,
     virt_text_pos = "right_align",
+    hl_mode = "combine",
     end_row = edit_data.end_row,
   })
 
@@ -338,6 +341,7 @@ function M.render_edit(bufnr, filename, search_content, replace_content, raw_blo
   local id = vim.api.nvim_buf_set_extmark(bufnr, ns_id, header_row, 0, {
     virt_text = virt_text,
     virt_text_pos = "right_align",
+    hl_mode = "combine",
     end_row = end_row,
   })
 
