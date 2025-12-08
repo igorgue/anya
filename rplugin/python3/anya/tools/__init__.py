@@ -1,5 +1,6 @@
 from .buffer_name import buffer_name
 from .create import create
+from .exec import exec
 from .exec_lua import exec_lua
 from .gh import gh
 from .list_files import list_files
@@ -11,6 +12,7 @@ from .search import search
 _ = (
     buffer_name,
     create,
+    exec,
     exec_lua,
     gh,
     list_files,
@@ -24,6 +26,7 @@ _ = None
 __all__ = [
     "buffer_name",
     "create",
+    "exec",
     "exec_lua",
     "gh",
     "list_files",
