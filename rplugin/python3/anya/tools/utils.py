@@ -33,7 +33,7 @@ def nvim_call_sync(nvim: Nvim, func: callable) -> any:
     return result[0]
 
 
-def format_tool_header(tool_name: str, first_arg: str, max_len: int = 30) -> str:
+def format_tool_header(tool_name: str, first_arg: str, max_len: int = 60) -> str:
     """Format tool header with trimmed argument.
 
     Args:
