@@ -14,6 +14,7 @@ from . import ids
 from . import markers
 from . import history
 from . import fidget
+from .mcp_loader import MCPManager
 
 VERSION = "0.0.1"
 
@@ -142,6 +143,7 @@ class AnyaPlugin:
         self.session_id = str(uuid.uuid4())  # Session ID for this Neovim instance
         self.allowed_commands = set()  # Persist allowed commands across agent runs
         self._tool_fold_open = False  # Track if a tool fold is currently open
+        self._mcp_manager = MCPManager(nvim)  # MCP server manager with caching
 
     def _ensure_loop(self):
         """Ensure the asyncio event loop is running (lazy initialization)."""
@@ -302,8 +304,7 @@ class AnyaPlugin:
         """Run the agent with streaming and write to chat buffer."""
         from agents import Runner
         from openai.types.responses import ResponseTextDeltaEvent
-        from .agents import code, create_code_agent, _mcp_server_configs
-        from .mcp_loader import create_mcp_servers
+        from .agents import code, create_code_agent
         from .agents.context import NvimPluginContext
 
         context = NvimPluginContext(
@@ -357,22 +358,11 @@ class AnyaPlugin:
             # Record start time
             start_time = time.time()
 
-            # Connect MCP servers if enabled
+            # Get MCP servers (uses cached connections if available)
             agent_for_run = code
             mcp_enabled = os.environ.get("ANYA_DISABLE_MCP", "0") != "1"
-            if _mcp_server_configs and mcp_enabled:
-                mcp_servers = create_mcp_servers(_mcp_server_configs)
-                connected = []
-                for server in mcp_servers:
-                    try:
-                        if hasattr(server, "connect"):
-                            await asyncio.wait_for(server.connect(), timeout=10.0)
-                        connected.append(server)
-                    except Exception as e:
-                        self.nvim.async_call(
-                            self.nvim.err_write,
-                            f"Anya: MCP {getattr(server, 'name', '?')}: {e}\n",
-                        )
+            if mcp_enabled:
+                connected = await self._mcp_manager.get_connected_servers()
                 if connected:
                     agent_for_run = create_code_agent(mcp_servers=connected)
 

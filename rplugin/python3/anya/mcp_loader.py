@@ -1,10 +1,6 @@
-"""Load MCP server configurations from file.
+"""Load MCP server configurations from file and manage server lifecycle."""
 
-Note: MCP server support in Anya requires proper async context management.
-Currently disabled pending resolution of initialization issues with the OpenAI Agents SDK.
-See: https://github.com/igorgue/anya/issues/XXX
-"""
-
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -68,12 +64,9 @@ def create_mcp_servers(configs: list[MCPServerConfig]) -> list:
 
         try:
             if server_type == "stdio":
-                # Expand env vars in params
                 command = server_config.get("command")
                 args = server_config.get("args", [])
                 env = server_config.get("env", {})
-
-                # Expand environment variables
                 env = _expand_env_vars(env)
 
                 params = {"command": command, "args": args}
@@ -90,12 +83,10 @@ def create_mcp_servers(configs: list[MCPServerConfig]) -> list:
 
             elif server_type == "streamable_http":
                 url = server_config.get("url")
-                # Expand environment variables in URL
                 url = _expand_env_vars(url)
 
                 params = {"url": url}
 
-                # Add headers if present
                 headers = server_config.get("headers", {})
                 if headers:
                     params["headers"] = headers
@@ -115,3 +106,93 @@ def create_mcp_servers(configs: list[MCPServerConfig]) -> list:
             print(f"Warning: Failed to initialize MCP server '{name}': {e}")
 
     return servers
+
+
+class MCPManager:
+    """Manages MCP server connections with caching for performance."""
+
+    def __init__(self, nvim=None):
+        self._nvim = nvim
+        self._active_servers: list = []
+        self._servers_loaded = False
+        self._configs: list[MCPServerConfig] = []
+
+    def _log(self, msg: str, is_error: bool = False):
+        """Log a message to Neovim if available."""
+        if self._nvim:
+            if is_error:
+                self._nvim.async_call(self._nvim.err_write, f"Anya MCP: {msg}\n")
+            else:
+                pass
+
+    def load_configs(self) -> list[MCPServerConfig]:
+        """Load MCP server configurations from file."""
+        if not self._configs:
+            self._configs = load_mcp_server_configs()
+        return self._configs
+
+    async def get_connected_servers(self) -> list:
+        """Get connected MCP servers, connecting if needed.
+
+        Returns cached servers if already connected, otherwise connects
+        all servers in parallel and caches them.
+        """
+        if self._servers_loaded and self._active_servers:
+            return self._active_servers
+
+        configs = self.load_configs()
+        if not configs:
+            return []
+
+        servers = create_mcp_servers(configs)
+        if not servers:
+            return []
+
+        connected = await self._connect_servers_parallel(servers)
+        if connected:
+            self._active_servers = connected
+            self._servers_loaded = True
+
+        return self._active_servers
+
+    async def _connect_servers_parallel(self, servers: list) -> list:
+        """Connect to all servers in parallel for faster startup."""
+
+        async def connect_single(server) -> tuple:
+            """Connect a single server, returning (server, success)."""
+            name = getattr(server, "name", "unknown")
+            try:
+                if hasattr(server, "connect"):
+                    await asyncio.wait_for(server.connect(), timeout=10.0)
+                return (server, True, None)
+            except asyncio.TimeoutError:
+                return (server, False, f"{name}: connection timeout")
+            except Exception as e:
+                return (server, False, f"{name}: {e}")
+
+        results = await asyncio.gather(
+            *[connect_single(s) for s in servers],
+            return_exceptions=True,
+        )
+
+        connected = []
+        for result in results:
+            if isinstance(result, Exception):
+                self._log(f"Connection exception: {result}", is_error=True)
+                continue
+            server, success, error = result
+            if success:
+                connected.append(server)
+            elif error:
+                self._log(error, is_error=True)
+
+        return connected
+
+    def reset(self):
+        """Reset the server cache to force re-connection on next request."""
+        self._active_servers = []
+        self._servers_loaded = False
+
+    def is_loaded(self) -> bool:
+        """Check if servers are loaded and connected."""
+        return self._servers_loaded and len(self._active_servers) > 0
