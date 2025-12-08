@@ -16,30 +16,8 @@ from ..tools import (
     search,
 )
 
-# Base agent configuration (will be reused to create agents with/without MCP servers)
-_BASE_AGENT_CONFIG = {
-    "name": "Code",
-    "instructions": get_instructions("code.md"),
-    "tools": [
-        buffer_name,
-        create,
-        edit,
-        exec,
-        exec_lua,
-        gh,
-        list_files,
-        parrot,
-        read_file,
-        read_many_files,
-        search,
-    ],
-}
 
-# Create default agent without MCP servers for backward compatibility
-code = Agent[NvimPluginContext](**_BASE_AGENT_CONFIG)
-
-
-def create_mcp_agent(
+def MCPAgent(
     mcp_servers: list[dict] | None = None,
 ) -> Agent[NvimPluginContext] | None:
     """Create an MCP agent with MCP server tools.
@@ -57,23 +35,35 @@ def create_mcp_agent(
     )
 
 
-def create_code_agent_with_mcp_tool(
-    mcp_servers: list[dict] | None = None,
-) -> Agent[NvimPluginContext] | None:
-    """Create a code agent with MCP servers as a delegated tool.
+def CodeAgent(mcp_servers=None):
+    """Create a code agent with optional MCP servers as a delegated tool.
 
-    Instead of directly including MCP servers, this creates an MCP Agent
-    as a tool that can be called on-demand. This avoids blocking the
-    main agent while waiting for MCP servers to connect.
+    When MCP servers are available, they're added as an 'mcp_tools' tool
+    that the agent can call on-demand. This avoids blocking on MCP startup.
     """
-    config = _BASE_AGENT_CONFIG.copy()
+    config = {
+        "name": "Code",
+        "instructions": get_instructions("code.md"),
+        "tools": [
+            buffer_name,
+            create,
+            edit,
+            exec,
+            exec_lua,
+            gh,
+            list_files,
+            parrot,
+            read_file,
+            read_many_files,
+            search,
+        ],
+    }
 
-    # If MCP servers are available, create an MCP Agent and convert to tool
     if mcp_servers:
-        mcp_agent = create_mcp_agent(mcp_servers)
+        mcp_agent = MCPAgent(mcp_servers)
         if mcp_agent:
             mcp_tool = mcp_agent.as_tool(
-                tool_name="mcp_tools",
+                tool_name="mcp",
                 tool_description="Access external systems and data via MCP (Model Context Protocol) servers. "
                 "Use this when you need to query databases, APIs, or other external services.",
             )
@@ -82,18 +72,7 @@ def create_code_agent_with_mcp_tool(
     return Agent[NvimPluginContext](**config)
 
 
-def create_code_agent(mcp_servers=None):
-    """Create a code agent with optional MCP servers as a delegated tool.
-
-    When MCP servers are available, they're added as an 'mcp_tools' tool
-    that the agent can call on-demand. This avoids blocking on MCP startup.
-    """
-    return create_code_agent_with_mcp_tool(mcp_servers)
-
-
 __all__ = [
-    "code",
     "NvimPluginContext",
-    "create_code_agent",
-    "create_mcp_agent",
+    "CodeAgent",
 ]

@@ -4,7 +4,6 @@ import pynvim
 import asyncio
 import threading
 import os
-import time
 import uuid
 from datetime import datetime, timezone
 
@@ -321,7 +320,7 @@ class AnyaPlugin:
         """Run the agent with streaming and write to chat buffer."""
         from agents import Runner
         from openai.types.responses import ResponseTextDeltaEvent
-        from .agents import code, create_code_agent
+        from .agents import CodeAgent
         from .agents.context import NvimPluginContext
 
         context = NvimPluginContext(
@@ -346,7 +345,7 @@ class AnyaPlugin:
 
         msg_id = ids.new(conversation=conversation_id)
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        agent_name = code.name.lower()
+        agent_name = "Code"
 
         header = "# Anya\n"
         header += markers.make_agent_message_start(
@@ -373,12 +372,17 @@ class AnyaPlugin:
 
         try:
             # Get MCP servers (uses cached connections if available)
-            agent_for_run = code
             mcp_enabled = os.environ.get("ANYA_DISABLE_MCP", "0") != "1"
+            mcp_servers = None
             if mcp_enabled:
-                connected = await self._mcp_manager.get_connected_servers()
-                if connected:
-                    agent_for_run = create_code_agent(mcp_servers=connected)
+                try:
+                    mcp_servers = await asyncio.wait_for(
+                        self._mcp_manager.get_connected_servers(), timeout=5.0
+                    )
+                except asyncio.TimeoutError:
+                    pass
+
+            agent_for_run = CodeAgent(mcp_servers=mcp_servers)
 
             result = Runner.run_streamed(
                 starting_agent=agent_for_run,
@@ -650,14 +654,12 @@ class AnyaPlugin:
             # Add message end marker
             if tool_was_called:
                 fold_end_marker = "\n" + markers.make_marker("fold_end")
-                full_content = fixed_content + fold_end_marker
                 self.nvim.async_call(
                     self._append_to_chat_buffer, chat_bufnr, fold_end_marker
                 )
                 # Mark that the tool fold is now closed
                 self.nvim.async_call(self._set_tool_fold_open, False)
-            else:
-                full_content = fixed_content
+
             footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
             self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, footer)
 
@@ -850,7 +852,6 @@ class AnyaPlugin:
             Formatted header like **tool_name | arg**
         """
         import json
-        import re
 
         from .tools.utils import format_tool_header
 
@@ -1071,7 +1072,6 @@ class AnyaPlugin:
         # The buffer contains the entire conversation, so we need to extract just
         # this message's content between its start and end markers
         buf_lines = self.nvim.api.buf_get_lines(chat_bufnr, 0, -1, False)
-        buf_content = "\n".join(buf_lines)
 
         # Extract just the message content (between message start and end markers)
         msg_start_marker = markers.make_agent_message_start(
