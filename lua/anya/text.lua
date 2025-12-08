@@ -96,6 +96,9 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, "AnyaEditAccept", { fg = ok_hl.fg })
   vim.api.nvim_set_hl(0, "AnyaEditReject", { fg = err_hl.fg })
   vim.api.nvim_set_hl(0, "AnyaEditPending", { fg = comment_hl.fg })
+
+  -- File reference highlight (@filepath)
+  set_hl_fg_only("AnyaFileRef", "Constant", { underline = true })
 end
 
 -- Ensure highlights are set up
@@ -260,6 +263,10 @@ function M._autoscroll_to_bottom(bufnr)
       local ft = vim.api.nvim_get_option_value("filetype", { buf = bufnr })
       if ft == "anya-chat" then
         vim.api.nvim_exec_autocmds("CursorMoved", { buffer = bufnr })
+        -- Refresh @filepath highlights
+        if _G.anya_highlight_chat_file_refs then
+          _G.anya_highlight_chat_file_refs()
+        end
       end
     end
   end

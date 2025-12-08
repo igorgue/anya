@@ -114,3 +114,26 @@ vim.keymap.set("n", "2", function()
     -- (2 key does nothing in prompt buffer)
   end
 end, { buffer = true, desc = "Reject pending edit" })
+
+-- Highlight @filepath references using extmarks (works with treesitter)
+vim.api.nvim_set_hl(0, "AnyaFileRef", { link = "Constant", default = true })
+
+local fileref_ns = vim.api.nvim_create_namespace("anya_fileref")
+local bufnr = vim.api.nvim_get_current_buf()
+
+local function highlight_file_refs()
+  vim.api.nvim_buf_clear_namespace(bufnr, fileref_ns, 0, -1)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  for lnum, line in ipairs(lines) do
+    for start_col, end_col in line:gmatch("()@[A-Za-z0-9_.~/-]+()") do
+      vim.api.nvim_buf_add_highlight(bufnr, fileref_ns, "AnyaFileRef", lnum - 1, start_col - 1, end_col - 1)
+    end
+  end
+end
+
+vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+  buffer = bufnr,
+  callback = highlight_file_refs,
+  desc = "Highlight @filepath references",
+})
+highlight_file_refs()
