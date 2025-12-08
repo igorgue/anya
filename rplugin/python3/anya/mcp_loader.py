@@ -227,10 +227,7 @@ class MCPManager:
                             tools = await tools
 
                     if tools:
-                        server_tools.append({
-                            "name": name,
-                            "tools": tools
-                        })
+                        server_tools.append({"name": name, "tools": tools})
             except Exception as e:
                 self._log(f"Failed to get tools from server: {e}", is_error=True)
                 continue

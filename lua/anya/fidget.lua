@@ -40,6 +40,9 @@ M.status_phrases = {
   "summoning",
 }
 
+-- Store the last message for each handle to restore after tool execution
+M.last_messages = {}
+
 function M:get_random_phrase()
   local idx = math.random(1, #M.status_phrases)
   return M.status_phrases[idx]
@@ -75,10 +78,47 @@ function M:init()
       end
     end,
   })
+
+  vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AnyaToolExecution",
+    group = group,
+    callback = function(event)
+      local handle = M:get_progress_handle(event.data.request_id)
+      if handle and event.data.tool_name then
+        -- Update the message to show the current tool being executed
+        handle:report({
+          message = event.data.tool_name,
+        })
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AnyaToolExecutionComplete",
+    group = group,
+    callback = function(event)
+      local handle = M:get_progress_handle(event.data.request_id)
+      if handle then
+        -- Restore the previous message or generate a new random one
+        local last_msg = M.last_messages[event.data.request_id]
+        if last_msg and last_msg ~= "" then
+          handle:report({
+            message = last_msg,
+          })
+        else
+          handle:report({
+            message = M:get_random_phrase(),
+          })
+        end
+      end
+    end,
+  })
 end
 
 function M:store_progress_handle(id, handle)
   M.handles[id] = handle
+  -- Store the initial message to restore later
+  M.last_messages[id] = handle.message
 end
 
 function M:get_progress_handle(id)
@@ -88,6 +128,7 @@ end
 function M:pop_progress_handle(id)
   local handle = M.handles[id]
   M.handles[id] = nil
+  M.last_messages[id] = nil -- Clean up stored message
   return handle
 end
 
@@ -110,11 +151,11 @@ end
 
 function M:report_exit_status(handle, event)
   if event.data.status == "success" then
-    handle.message = "✓ completed"
+    handle.message = "  done"
   elseif event.data.status == "error" then
-    handle.message = " error"
+    handle.message = "󰗖  error"
   else
-    handle.message = "󰜺 cancelled"
+    handle.message = "  cancelled"
   end
 end
 

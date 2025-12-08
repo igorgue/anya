@@ -43,6 +43,7 @@ def _extract_tool_info(tool: Any) -> tuple[str, str, dict]:
                 elif isinstance(schema, str):
                     try:
                         import json
+
                         input_schema = json.loads(schema)
                     except:
                         pass
@@ -84,13 +85,12 @@ async def generate_dynamic_code_instructions(mcp_servers: List[Any]) -> str:
                         tools = await tools
 
                 if tools:
-                    server_tools.append({
-                        "name": name,
-                        "tools": tools
-                    })
+                    server_tools.append({"name": name, "tools": tools})
         except Exception as e:
             # Skip servers that don't expose tool information
-            print(f"Warning: Failed to get tools from server {getattr(server, 'name', 'unknown')}: {e}")
+            print(
+                f"Warning: Failed to get tools from server {getattr(server, 'name', 'unknown')}: {e}"
+            )
             continue
 
     if not server_tools:
@@ -136,7 +136,9 @@ async def generate_dynamic_code_instructions(mcp_servers: List[Any]) -> str:
 
         instructions += "\n"
 
-    instructions += "To use these services, call the `mcp` tool with the appropriate parameters. "
+    instructions += (
+        "To use these services, call the `mcp` tool with the appropriate parameters. "
+    )
     instructions += "The MCP agent will handle the interaction with the external service and return results.\n"
 
     return instructions
@@ -206,10 +208,14 @@ def generate_dynamic_code_instructions_sync(mcp_servers: List[Any]) -> str:
         if loop.is_running():
             # If we're already in an event loop, we can't use run()
             # This shouldn't happen in normal operation, but let's handle it gracefully
-            print("Warning: generate_dynamic_code_instructions_sync called in running event loop")
+            print(
+                "Warning: generate_dynamic_code_instructions_sync called in running event loop"
+            )
             return ""
         else:
-            return loop.run_until_complete(generate_dynamic_code_instructions(mcp_servers))
+            return loop.run_until_complete(
+                generate_dynamic_code_instructions(mcp_servers)
+            )
     except Exception:
         # Fallback if async fails
         return ""
@@ -221,10 +227,14 @@ def generate_dynamic_mcp_instructions_sync(mcp_servers: List[Any]) -> str:
         loop = asyncio.get_event_loop()
         if loop.is_running():
             # If we're already in an event loop, we can't use run()
-            print("Warning: generate_dynamic_mcp_instructions_sync called in running event loop")
+            print(
+                "Warning: generate_dynamic_mcp_instructions_sync called in running event loop"
+            )
             return ""
         else:
-            return loop.run_until_complete(generate_dynamic_mcp_instructions(mcp_servers))
+            return loop.run_until_complete(
+                generate_dynamic_mcp_instructions(mcp_servers)
+            )
     except Exception:
         # Fallback if async fails
         return ""

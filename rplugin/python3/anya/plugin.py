@@ -323,6 +323,9 @@ class AnyaPlugin:
         from .agents import CodeAgent
         from .agents.context import NvimPluginContext
 
+        # Store the request ID for use in tool execution events
+        self._request_id = request_id
+
         context = NvimPluginContext(
             nvim=self.nvim,
             session_id=self.session_id,
@@ -384,6 +387,7 @@ class AnyaPlugin:
 
             # Create agent with dynamic instructions based on MCP servers
             from .agents.async_creation import CodeAgentAsync
+
             agent_for_run = await CodeAgentAsync(mcp_servers=mcp_servers)
 
             result = Runner.run_streamed(
@@ -418,6 +422,18 @@ class AnyaPlugin:
                         if tool_name:
                             tool_was_called = True
                             self._streaming_started = True
+
+                            # Emit tool execution event for fidget
+                            from .fidget import emit_user_event
+
+                            emit_user_event(
+                                self.nvim,
+                                "AnyaToolExecution",
+                                {
+                                    "request_id": self._request_id,
+                                    "tool_name": tool_name,
+                                },
+                            )
 
                             # Use edit_pending for edit tool, tool_pending for others
                             status = (
@@ -548,6 +564,19 @@ class AnyaPlugin:
                                     self.nvim.async_call(
                                         self._set_tool_fold_open, False
                                     )
+
+                            # Emit tool execution complete event for fidget
+                            for tool in parallel_tools:
+                                from .fidget import emit_user_event
+
+                                emit_user_event(
+                                    self.nvim,
+                                    "AnyaToolExecutionComplete",
+                                    {
+                                        "request_id": self._request_id,
+                                        "tool_name": tool["name"],
+                                    },
+                                )
 
                             pending_tool_outputs = []
                             expected_outputs = 0
