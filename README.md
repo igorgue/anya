@@ -1,6 +1,10 @@
 # Anya
-
 An AI-powered Neovim plugin built on the OpenAI Agents SDK.
+
+> Named after Anya Forger from Spy x Family - she can read minds, this plugin reads your code.
+
+## Features
+---
 
 > Named after Anya Forger from Spy x Family - she can read minds, this plugin reads your code.
 

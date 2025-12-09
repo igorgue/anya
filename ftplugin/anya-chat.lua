@@ -16,6 +16,7 @@ vim.opt_local.foldmethod = "manual"
 vim.opt_local.foldenable = true
 vim.opt_local.modifiable = true
 vim.opt_local.spell = false
+vim.opt_local.winbar = ""
 -- Custom foldtext that handles concealed markers
 vim.opt_local.foldtext = [[v:lua.require'anya.foldtext'.get_foldtext()]]
 

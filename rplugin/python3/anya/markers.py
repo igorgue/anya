@@ -15,6 +15,7 @@ EDIT_PENDING = "edit_pending"
 EDIT_APPLIED = "edit_applied"
 EDIT_REJECTED = "edit_rejected"
 EDIT_FAILED = "edit_failed"
+THINKING = "thinking"
 
 PREFIX = "<!-- at:"
 SUFFIX = "-->"

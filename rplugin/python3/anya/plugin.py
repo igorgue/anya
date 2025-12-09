@@ -19,6 +19,7 @@ from .agents import CodeAgent, MCPAgent, MAIN_AGENT_NAME, MAIN_ASSISTANT_NAME
 VERSION = "0.0.1"
 
 DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-4.1")
+DEFAULT_THINKING_BUDGET = os.environ.get("ANYA_THINKING_BUDGET")
 
 
 def filter_anya_markers(text: str, in_marker: bool) -> tuple[str, bool]:
@@ -188,7 +189,10 @@ class AnyaPlugin:
                 mcp_servers = await self._mcp_manager.get_connected_servers()
 
                 # Initialize the main CodeAgent with MCP servers
-                self._agent = await CodeAgent(mcp_servers=mcp_servers)
+                self._agent = await CodeAgent(
+                    mcp_servers=mcp_servers,
+                    thinking_budget=DEFAULT_THINKING_BUDGET,
+                )
 
                 # Initialize MCP agent if servers are available
                 if mcp_servers:
@@ -215,7 +219,10 @@ class AnyaPlugin:
 
             try:
                 # Initialize the main CodeAgent without MCP servers
-                self._agent = await CodeAgent(mcp_servers=None)
+                self._agent = await CodeAgent(
+                    mcp_servers=None,
+                    thinking_budget=DEFAULT_THINKING_BUDGET,
+                )
 
                 self.nvim.async_call(
                     self.nvim.out_write,
@@ -237,7 +244,10 @@ class AnyaPlugin:
                         mcp_servers = await asyncio.wait_for(
                             self._mcp_manager.get_connected_servers(), timeout=5.0
                         )
-                        self._agent = await CodeAgent(mcp_servers=mcp_servers)
+                        self._agent = await CodeAgent(
+                            mcp_servers=mcp_servers,
+                            thinking_budget=DEFAULT_THINKING_BUDGET,
+                        )
                         if mcp_servers:
                             self._mcp_agent = await MCPAgent(mcp_servers)
                     except asyncio.TimeoutError:
@@ -429,7 +439,9 @@ class AnyaPlugin:
 
         msg_id = ids.new(conversation=conversation_id)
         now = datetime.now(timezone.utc)
-        timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+        timestamp = (
+            now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+        )
         agent_name = MAIN_AGENT_NAME
         assistant_name = MAIN_ASSISTANT_NAME
 
@@ -444,8 +456,13 @@ class AnyaPlugin:
         # Initialize tool fold state at start of request
         self.nvim.async_call(self._set_tool_fold_open, False)
 
+        # Thinking/reasoning state tracking
+        thinking_started = False  # Track if we've started outputting thinking content
+        thinking_finalized = False  # Track if we've finalized thinking section
+
         # Collect streamed content for saving
         collected_content: list[str] = []
+        thinking_content: list[str] = []  # Collect thinking blocks separately
         parallel_tools: list[dict] = []  # Collect parallel tool calls
         pending_tool_outputs: list[str] = []  # Collect outputs for parallel tools
         expected_outputs = 0  # Number of outputs we're waiting for
@@ -471,6 +488,68 @@ class AnyaPlugin:
                 # Check if cancellation was requested
                 if self._request_cancelled:
                     raise asyncio.CancelledError()
+
+                # Detect reasoning/thinking content from streaming events
+                # OpenAI reasoning models emit these event types:
+                #   - response.reasoning_summary_text.delta (summary tokens)
+                #   - response.reasoning_text.delta (full reasoning, if available)
+                is_reasoning_event = False
+                reasoning_delta = None
+                if event.type == "raw_response_event" and hasattr(event, "data"):
+                    data = event.data
+                    data_type = getattr(data, "type", "")
+                    if data_type in (
+                        "response.reasoning_summary_text.delta",
+                        "response.reasoning_text.delta",
+                    ):
+                        is_reasoning_event = True
+                        reasoning_delta = getattr(data, "delta", "")
+
+                # Handle reasoning/thinking events
+                if is_reasoning_event:
+                    # First reasoning event - output header with fold
+                    if not thinking_started:
+                        thinking_started = True
+
+                        thinking_header = "**thinking**\n"
+                        thinking_header += markers.make_marker("fold_start", "thinking")
+                        thinking_header += "\n"
+
+                        collected_content.append(thinking_header)
+                        thinking_content.append(thinking_header)
+                        if not self._request_cancelled:
+                            self.nvim.async_call(
+                                self._stream_text_to_buffer, chat_bufnr, thinking_header
+                            )
+                        self._streaming_started = True
+                        last_output_was_marker = True
+
+                    # Stream the reasoning delta
+                    if reasoning_delta:
+                        thinking_content.append(reasoning_delta)
+                        collected_content.append(reasoning_delta)
+                        if not self._request_cancelled:
+                            self.nvim.async_call(
+                                self._stream_text_to_buffer, chat_bufnr, reasoning_delta
+                            )
+                    continue  # Skip other processing for reasoning events
+
+                # Handle finalization transition (first non-reasoning event after reasoning started)
+                if thinking_started and not thinking_finalized:
+                    # Finalize thinking section
+                    thinking_finalized = True
+
+                    # Close thinking fold
+                    thinking_footer = "\n" + markers.make_marker("fold_end") + "\n"
+                    collected_content.append(thinking_footer)
+                    thinking_content.append(thinking_footer)
+                    if not self._request_cancelled:
+                        self.nvim.async_call(
+                            self._stream_text_to_buffer, chat_bufnr, thinking_footer
+                        )
+
+                    last_output_was_marker = True
+                    needs_blank_before_text = False
 
                 # Handle higher-level run item events for tool calls and outputs
                 if event.type == "run_item_stream_event":
@@ -614,7 +693,7 @@ class AnyaPlugin:
                                 collected_content.append(wrapped_output)
                                 if not self._request_cancelled:
                                     self.nvim.async_call(
-                                        self._stream_text_to_buffer,
+                                        self._stream_text_to_buffer_sync,
                                         chat_bufnr,
                                         wrapped_output,
                                     )
@@ -681,7 +760,7 @@ class AnyaPlugin:
                                 )
                             needs_blank_before_text = False
 
-                        # LLM text output - this is the agent's response (after tool results)
+                        # LLM text output - this is the agent's response
                         collected_content.append(delta)
                         last_output_was_marker = False
 
@@ -696,7 +775,10 @@ class AnyaPlugin:
             parallel_tools = []
 
             now = datetime.now(timezone.utc)
-            end_timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+            end_timestamp = (
+                now.strftime("%Y-%m-%dT%H:%M:%S.")
+                + f"{int(now.microsecond / 1000):03d}Z"
+            )
             # Close any open tool folds before message end marker
             if tool_was_called:
                 fold_end_marker = "\n" + markers.make_marker("fold_end")
@@ -737,7 +819,10 @@ class AnyaPlugin:
         except asyncio.CancelledError:
             # Handle cancellation
             now = datetime.now(timezone.utc)
-            end_timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+            end_timestamp = (
+                now.strftime("%Y-%m-%dT%H:%M:%S.")
+                + f"{int(now.microsecond / 1000):03d}Z"
+            )
 
             # Close any open code blocks in the collected content
             original_content = "".join(collected_content)
@@ -861,6 +946,12 @@ class AnyaPlugin:
         if not self.nvim.api.buf_is_valid(bufnr):
             return
         self.nvim.exec_lua("require('anya.text').output(...)", bufnr, text)
+
+    def _stream_text_to_buffer_sync(self, bufnr, text):
+        """Output text to buffer immediately without animation."""
+        if not self.nvim.api.buf_is_valid(bufnr):
+            return
+        self.nvim.exec_lua("require('anya.text').output_sync(...)", bufnr, text)
 
     def _render_edit_blocks(self, bufnr, edit_str):
         """Render SEARCH/REPLACE edit blocks using the dedicated edit_view.
@@ -1329,7 +1420,9 @@ For more help, see :h anya"""
         # Generate message ID and timestamp
         msg_id = ids.new(conversation=conv_id)
         now = datetime.now(timezone.utc)
-        timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+        timestamp = (
+            now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+        )
 
         # Stream message with proper markers
         self._stream_text_to_buffer(chat_buf.number, "\n# Anya\n")
@@ -1383,7 +1476,9 @@ For more help, see :h anya"""
         """Get current UTC timestamp in ISO 8601 format with milliseconds."""
         now = datetime.now(timezone.utc)
         # Produce e.g. 2024-06-06T03:21:19.348Z
-        return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+        return (
+            now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+        )
 
     def _help_text(self):
         return f"""anya v{VERSION}

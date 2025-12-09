@@ -1,3 +1,4 @@
+import os
 from agents import Agent
 
 from .dynamic_instructions import (
@@ -17,13 +18,15 @@ from ..tools import (
     read_file,
     read_many_files,
     search,
+    parrot,
+    buffer_name,
 )
 
 MAIN_AGENT_NAME = "Code"
 MAIN_ASSISTANT_NAME = "Anya"
 
 
-async def CodeAgent(mcp_servers=None) -> Agent:
+async def CodeAgent(mcp_servers=None, thinking_budget=None) -> Agent:
     """Create a code agent with dynamically generated instructions based on MCP servers.
 
     This async version handles the generation of dynamic instructions that may
@@ -31,6 +34,8 @@ async def CodeAgent(mcp_servers=None) -> Agent:
 
     Args:
         mcp_servers: List of connected MCP server instances
+        thinking_budget: Optional thinking budget for reasoning models (e.g., o3)
+                        If not provided, reads from ANYA_THINKING_BUDGET env var
 
     Returns:
         Configured Agent instance with dynamic instructions
@@ -48,6 +53,10 @@ async def CodeAgent(mcp_servers=None) -> Agent:
     # Combine instructions
     instructions = update_agent_instructions(base_instructions, dynamic_instructions)
 
+    # Get thinking budget (model is handled via OPENAI_MODEL_ID env var)
+    if thinking_budget is None:
+        thinking_budget = os.environ.get("ANYA_THINKING_BUDGET")
+
     config = {
         "name": MAIN_AGENT_NAME,
         "instructions": instructions,
@@ -61,6 +70,8 @@ async def CodeAgent(mcp_servers=None) -> Agent:
             read_file,
             read_many_files,
             search,
+            parrot,
+            buffer_name,
         ],
     }
 

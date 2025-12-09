@@ -25,6 +25,7 @@ local HL_DIVIDER = "AnyaEditDivider"
 if not _G.anya_stream_queue then
   _G.anya_stream_queue = {}
   _G.anya_stream_timer = nil
+  _G.anya_stream_paused = false -- Pause flag for animation queue
 end
 
 -- Track edit extmarks for state updates: { [extmark_id] = { bufnr, line_num, state, diff_info } }
@@ -187,6 +188,11 @@ function M._ensure_timer_running()
   end
 
   local function timer_callback()
+    -- Check if paused - skip processing but keep timer running
+    if _G.anya_stream_paused then
+      return
+    end
+
     -- Check if queue is empty
     if #_G.anya_stream_queue == 0 then
       if _G.anya_stream_timer then
@@ -340,9 +346,13 @@ function M._calculate_duration(start_timestamp, end_timestamp)
   -- Parse ISO 8601: YYYY-MM-DDTHH:MM:SS.sssZ (or YYYY-MM-DDTHH:MM:SSZ for backwards compatibility)
   local function parse_iso8601(ts)
     local y, mo, d, h, mi, s, frac = ts:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)%.?(%d*)")
-    if not y then return nil end
+    if not y then
+      return nil
+    end
     y, mo, d, h, mi, s = tonumber(y), tonumber(mo), tonumber(d), tonumber(h), tonumber(mi), tonumber(s)
-    if not (y and mo and d and h and mi and s) then return nil end
+    if not (y and mo and d and h and mi and s) then
+      return nil
+    end
     local base = os.time({ year = y, month = mo, day = d, hour = h, min = mi, sec = s, isdst = false })
     local frac_secs = 0
     if frac and #frac > 0 then
@@ -580,8 +590,11 @@ function M._process_markers(bufnr)
             -- Highlight the header line (line above marker) with pending icon
             M._apply_header_highlight(bufnr, i - 1, "AnyaToolPending", icons.pending)
           elseif marker_name == markers.thinking then
-            -- Highlight the header line (line above marker) with thinking icon
-            M._apply_header_highlight(bufnr, i - 1, "AnyaThinking", icons.thinking)
+            -- Thinking block: treat like a fold, no icon on header
+            fold_start_line = i - 1
+            fold_is_edit = false
+            -- Highlight header with thinking text color (subtle)
+            M._apply_header_highlight(bufnr, i - 1, "AnyaThinking", nil)
           elseif
             marker_name == markers.edit_pending
             or marker_name == markers.edit_applied
@@ -912,6 +925,24 @@ function M.output_sync(bufnr, text, marker_list)
 
   -- Autoscroll to bottom
   M._autoscroll_to_bottom(bufnr)
+end
+
+-- Pause the streaming queue (stop writing but keep items queued)
+function M.pause_queue()
+  _G.anya_stream_paused = true
+  if _G.anya_stream_timer then
+    _G.anya_stream_timer:stop()
+    _G.anya_stream_timer = nil
+  end
+end
+
+-- Resume the streaming queue (continue writing from where it paused)
+function M.resume_queue()
+  _G.anya_stream_paused = false
+  -- Restart timer if queue has items
+  if #_G.anya_stream_queue > 0 then
+    M._ensure_timer_running()
+  end
 end
 
 -- Clear the streaming queue and stop timer

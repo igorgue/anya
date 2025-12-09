@@ -213,39 +213,97 @@ function M.handle_keypress(bufnr, key)
 
         if key == "1" then
           if current_state == STATE_PENDING then
-            -- Apply the edit
-            local apply_result = vim.fn.AnyaApplyEditContent(edit_registry[id].raw_block)
-            if apply_result and apply_result.success then
-              edit_registry[id].state = STATE_APPLIED
-              success = true
-              message = apply_result.message or ""
-              action = "apply"
-              old_marker = markers.edit_pending
-              new_marker = markers.edit_applied
-            else
-              edit_registry[id].state = STATE_FAILED
-              success = false
-              message = apply_result and apply_result.message or "Unknown error"
-              action = "failed"
-              old_marker = markers.edit_pending
-              new_marker = markers.edit_failed
-            end
+            -- Apply the edit - schedule asynchronously to avoid RPC channel issues
+            vim.schedule(function()
+              local ok, apply_result = pcall(vim.fn.AnyaApplyEditContent, edit_registry[id].raw_block)
+              if not ok then
+                vim.notify(
+                  "Plugin connection lost. Please restart Neovim or run :UpdateRemotePlugins",
+                  vim.log.levels.ERROR
+                )
+                edit_registry[id].state = STATE_FAILED
+                if decision_callback then
+                  decision_callback(
+                    "failed",
+                    false,
+                    "Plugin connection lost. Please restart Neovim or run :UpdateRemotePlugins"
+                  )
+                  decision_callback = nil
+                end
+                return
+              end
+
+              if apply_result and apply_result.success then
+                edit_registry[id].state = STATE_APPLIED
+                success = true
+                message = apply_result.message or ""
+                action = "apply"
+                old_marker = markers.edit_pending
+                new_marker = markers.edit_applied
+              else
+                edit_registry[id].state = STATE_FAILED
+                success = false
+                message = apply_result and apply_result.message or "Failed to apply edit"
+                action = "failed"
+                old_marker = markers.edit_pending
+                new_marker = markers.edit_failed
+              end
+
+              update_edit_header(bufnr, id)
+              if old_marker and new_marker and old_marker ~= new_marker then
+                M.update_marker_in_db(bufnr, old_marker, new_marker)
+              end
+              if decision_callback then
+                decision_callback(action, success, message)
+                decision_callback = nil
+              end
+            end)
+            return true
           elseif current_state == STATE_REJECTED then
             -- Toggle from rejected to applied
-            local apply_result = vim.fn.AnyaApplyEditContent(edit_registry[id].raw_block)
-            if apply_result and apply_result.success then
-              edit_registry[id].state = STATE_APPLIED
-              success = true
-              message = apply_result.message or ""
-              action = "toggle_apply"
-              old_marker = markers.edit_rejected
-              new_marker = markers.edit_applied
-            else
-              edit_registry[id].state = STATE_FAILED
-              success = false
-              message = apply_result and apply_result.message or "Unknown error"
-              action = "failed"
-            end
+            vim.schedule(function()
+              local ok, apply_result = pcall(vim.fn.AnyaApplyEditContent, edit_registry[id].raw_block)
+              if not ok then
+                vim.notify(
+                  "Plugin connection lost. Please restart Neovim or run :UpdateRemotePlugins",
+                  vim.log.levels.ERROR
+                )
+                edit_registry[id].state = STATE_FAILED
+                if decision_callback then
+                  decision_callback(
+                    "failed",
+                    false,
+                    "Plugin connection lost. Please restart Neovim or run :UpdateRemotePlugins"
+                  )
+                  decision_callback = nil
+                end
+                return
+              end
+
+              if apply_result and apply_result.success then
+                edit_registry[id].state = STATE_APPLIED
+                success = true
+                message = apply_result.message or ""
+                action = "toggle_apply"
+                old_marker = markers.edit_rejected
+                new_marker = markers.edit_applied
+              else
+                edit_registry[id].state = STATE_FAILED
+                success = false
+                message = apply_result and apply_result.message or "Failed to apply edit"
+                action = "failed"
+              end
+
+              update_edit_header(bufnr, id)
+              if old_marker and new_marker and old_marker ~= new_marker then
+                M.update_marker_in_db(bufnr, old_marker, new_marker)
+              end
+              if decision_callback then
+                decision_callback(action, success, message)
+                decision_callback = nil
+              end
+            end)
+            return true
           elseif current_state == STATE_APPLIED or current_state == STATE_FAILED then
             vim.notify("Edit already applied", vim.log.levels.INFO)
             return true
@@ -258,21 +316,51 @@ function M.handle_keypress(bufnr, key)
             action = "reject"
             old_marker = markers.edit_pending
             new_marker = markers.edit_rejected
+
+            update_edit_header(bufnr, id)
+            if old_marker and new_marker and old_marker ~= new_marker then
+              M.update_marker_in_db(bufnr, old_marker, new_marker)
+            end
+            if decision_callback then
+              decision_callback(action, success, message)
+              decision_callback = nil
+            end
+            return true
           elseif current_state == STATE_APPLIED then
             -- Toggle from applied to rejected (unapply)
-            local unapply_result = vim.fn.AnyaUnapplyEdit(edit_registry[id].raw_block)
-            if unapply_result and unapply_result.success then
-              edit_registry[id].state = STATE_REJECTED
-              success = true
-              message = "Edit unapplied"
-              action = "toggle_reject"
-              old_marker = markers.edit_applied
-              new_marker = markers.edit_rejected
-            else
-              local err_msg = unapply_result and unapply_result.message or "Failed to unapply"
-              vim.notify("Failed to unapply: " .. err_msg, vim.log.levels.ERROR)
-              return true
-            end
+            vim.schedule(function()
+              local ok, unapply_result = pcall(vim.fn.AnyaUnapplyEdit, edit_registry[id].raw_block)
+              if not ok then
+                vim.notify(
+                  "Plugin connection lost while unapplying edit. Please restart Neovim or run :UpdateRemotePlugins",
+                  vim.log.levels.ERROR
+                )
+                return
+              end
+
+              if unapply_result and unapply_result.success then
+                edit_registry[id].state = STATE_REJECTED
+                success = true
+                message = "Edit unapplied"
+                action = "toggle_reject"
+                old_marker = markers.edit_applied
+                new_marker = markers.edit_rejected
+              else
+                local err_msg = unapply_result and unapply_result.message or "Failed to unapply"
+                vim.notify("Failed to unapply: " .. err_msg, vim.log.levels.ERROR)
+                return
+              end
+
+              update_edit_header(bufnr, id)
+              if old_marker and new_marker and old_marker ~= new_marker then
+                M.update_marker_in_db(bufnr, old_marker, new_marker)
+              end
+              if decision_callback then
+                decision_callback(action, success, message)
+                decision_callback = nil
+              end
+            end)
+            return true
           elseif current_state == STATE_FAILED then
             -- Can change failed to rejected
             edit_registry[id].state = STATE_REJECTED
@@ -280,6 +368,16 @@ function M.handle_keypress(bufnr, key)
             action = "toggle_reject"
             old_marker = markers.edit_failed
             new_marker = markers.edit_rejected
+
+            update_edit_header(bufnr, id)
+            if old_marker and new_marker and old_marker ~= new_marker then
+              M.update_marker_in_db(bufnr, old_marker, new_marker)
+            end
+            if decision_callback then
+              decision_callback(action, success, message)
+              decision_callback = nil
+            end
+            return true
           elseif current_state == STATE_REJECTED then
             vim.notify("Edit already rejected", vim.log.levels.INFO)
             return true
@@ -287,21 +385,6 @@ function M.handle_keypress(bufnr, key)
         else
           return false
         end
-
-        update_edit_header(bufnr, id)
-
-        -- Update marker in database if we changed states (for toggle operations)
-        if old_marker and new_marker and old_marker ~= new_marker then
-          M.update_marker_in_db(bufnr, old_marker, new_marker)
-        end
-
-        -- Call decision callback if set (for edit tool polling)
-        if decision_callback then
-          decision_callback(action, success, message)
-          decision_callback = nil
-        end
-
-        return true
       end
     end
   end
@@ -319,6 +402,7 @@ function M.update_marker_in_db(bufnr, old_marker, new_marker, from_line)
   end
 
   local result = vim.fn.AnyaUpdateEditMarker(message_id, old_marker, new_marker)
+
   if not result or not result.success then
     local err_msg = result and result.message or "Unknown error"
     vim.notify("Error syncing edit marker: " .. err_msg, vim.log.levels.ERROR)
@@ -598,8 +682,16 @@ function M.handle_keypress_any_edit(key)
   local new_marker = nil
 
   if key == "1" then
-    local apply_result = vim.fn.AnyaApplyEditContent(edit_data.raw_block)
-    if apply_result and apply_result.success then
+    local ok, apply_result = pcall(vim.fn.AnyaApplyEditContent, edit_data.raw_block)
+    if not ok then
+      -- Channel error - plugin likely crashed or restarted
+      edit_data.state = STATE_FAILED
+      success = false
+      message = "Plugin connection lost. Please restart Neovim or run :UpdateRemotePlugins"
+      action = "failed"
+      old_marker = markers.edit_pending
+      new_marker = markers.edit_failed
+    elseif apply_result and apply_result.success then
       edit_data.state = STATE_APPLIED
       success = true
       message = apply_result.message or ""
@@ -609,7 +701,7 @@ function M.handle_keypress_any_edit(key)
     else
       edit_data.state = STATE_FAILED
       success = false
-      message = apply_result and apply_result.message or "Unknown error"
+      message = apply_result and apply_result.message or "Failed to apply edit"
       action = "failed"
       old_marker = markers.edit_pending
       new_marker = markers.edit_failed
