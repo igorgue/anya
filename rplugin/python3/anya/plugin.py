@@ -14,7 +14,7 @@ from . import markers
 from . import history
 from . import fidget
 from .mcp_loader import MCPManager
-from .agents import MAIN_AGENT_NAME, MAIN_ASSISTANT_NAME
+from .agents import CodeAgent, MCPAgent, MAIN_AGENT_NAME, MAIN_ASSISTANT_NAME
 
 VERSION = "0.0.1"
 
@@ -145,12 +145,23 @@ class AnyaPlugin:
         self._tool_fold_open = False  # Track if a tool fold is currently open
         self._mcp_manager = MCPManager(nvim)  # MCP server manager with caching
 
+        # Agent instances (initialized later when MCP servers are ready)
+        self._agent = None  # Main CodeAgent instance
+        self._mcp_agent = None  # MCPAgent instance (if MCP servers are available)
+        self._agent_initialization_lock = (
+            asyncio.Lock()
+        )  # Prevent concurrent agent initialization
+
         # Start MCP server connection in background on plugin load
         mcp_enabled = os.environ.get("ANYA_DISABLE_MCP", "0") != "1"
         if mcp_enabled and self._mcp_manager.load_configs():
             loop = self._ensure_loop()
+            asyncio.run_coroutine_threadsafe(self._initialize_agents_with_mcp(), loop)
+        else:
+            # Initialize without MCP servers
+            loop = self._ensure_loop()
             asyncio.run_coroutine_threadsafe(
-                self._mcp_manager.get_connected_servers(), loop
+                self._initialize_agents_without_mcp(), loop
             )
 
     def _ensure_loop(self):
@@ -165,6 +176,76 @@ class AnyaPlugin:
         """Run the event loop forever in a background thread."""
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
+
+    async def _initialize_agents_with_mcp(self):
+        """Initialize agents with MCP servers support."""
+        async with self._agent_initialization_lock:
+            if self._agent is not None:
+                return  # Already initialized
+
+            try:
+                # Get MCP servers
+                mcp_servers = await self._mcp_manager.get_connected_servers()
+
+                # Initialize the main CodeAgent with MCP servers
+                self._agent = await CodeAgent(mcp_servers=mcp_servers)
+
+                # Initialize MCP agent if servers are available
+                if mcp_servers:
+                    self._mcp_agent = await MCPAgent(mcp_servers)
+
+                # TODO: handle this on fidget
+                # self.nvim.async_call(
+                #     self.nvim.out_write,
+                #     f"Anya: Initialized agents with {len(mcp_servers or [])} MCP servers.\n",
+                # )
+            except Exception as e:
+                self.nvim.async_call(
+                    self.nvim.err_write,
+                    f"Anya: Failed to initialize agents with MCP: {e}\n",
+                )
+                # Fallback to initialization without MCP
+                await self._initialize_agents_without_mcp()
+
+    async def _initialize_agents_without_mcp(self):
+        """Initialize agents without MCP servers."""
+        async with self._agent_initialization_lock:
+            if self._agent is not None:
+                return  # Already initialized
+
+            try:
+                # Initialize the main CodeAgent without MCP servers
+                self._agent = await CodeAgent(mcp_servers=None)
+
+                self.nvim.async_call(
+                    self.nvim.out_write,
+                    "Anya: Initialized agents without MCP servers.\n",
+                )
+            except Exception as e:
+                self.nvim.async_call(
+                    self.nvim.err_write, f"Anya: Failed to initialize agents: {e}\n"
+                )
+
+    async def _get_or_initialize_agent(self):
+        """Get the initialized agent, initializing if necessary."""
+        async with self._agent_initialization_lock:
+            if self._agent is None:
+                # Not initialized yet, do it now
+                mcp_enabled = os.environ.get("ANYA_DISABLE_MCP", "0") != "1"
+                if mcp_enabled and self._mcp_manager.load_configs():
+                    try:
+                        mcp_servers = await asyncio.wait_for(
+                            self._mcp_manager.get_connected_servers(), timeout=5.0
+                        )
+                        self._agent = await CodeAgent(mcp_servers=mcp_servers)
+                        if mcp_servers:
+                            self._mcp_agent = await MCPAgent(mcp_servers)
+                    except asyncio.TimeoutError:
+                        await self._initialize_agents_without_mcp()
+                else:
+                    await self._initialize_agents_without_mcp()
+
+            return self._agent
 
     def _ensure_db(self):
         """Ensure the database is initialized (lazy initialization)."""
@@ -375,21 +456,8 @@ class AnyaPlugin:
         )
 
         try:
-            # Get MCP servers (uses cached connections if available)
-            mcp_enabled = os.environ.get("ANYA_DISABLE_MCP", "0") != "1"
-            mcp_servers = None
-            if mcp_enabled:
-                try:
-                    mcp_servers = await asyncio.wait_for(
-                        self._mcp_manager.get_connected_servers(), timeout=5.0
-                    )
-                except asyncio.TimeoutError:
-                    pass
-
-            # Create agent with dynamic instructions based on MCP servers
-            from .agents import CodeAgent
-
-            agent_for_run = await CodeAgent(mcp_servers=mcp_servers)
+            # Get the pre-initialized agent
+            agent_for_run = await self._get_or_initialize_agent()
 
             result = Runner.run_streamed(
                 starting_agent=agent_for_run,
