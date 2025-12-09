@@ -1171,6 +1171,11 @@ class AnyaPlugin:
         text = args[0]
         conversation_id = args[1] if len(args) > 1 else None
 
+        # Handle slash commands
+        if text and text.strip().startswith("/"):
+            self._handle_slash_command(text.strip(), conversation_id)
+            return
+
         # Save to history via Lua
         if text and text.strip():
             self.nvim.exec_lua(
@@ -1184,6 +1189,101 @@ class AnyaPlugin:
             )
 
         self.send(text, conversation_id)
+
+    def _handle_slash_command(self, command, conversation_id=None):
+        """Handle slash commands like /clear, /cancel, /help."""
+        parts = command.split()
+        cmd = parts[0].lower()
+
+        if cmd == "/clear":
+            self.nvim.async_call(self._clear_command)
+        elif cmd == "/cancel":
+            self.cancel_agent()
+        elif cmd == "/help":
+            self.nvim.async_call(self._help_command)
+        elif cmd == "/file":
+            self.nvim.async_call(self._file_command)
+        elif cmd == "/compact":
+            self.nvim.async_call(self._compact_command)
+        else:
+            # Unknown command - treat as regular prompt
+            # Don't save to history again since it was already saved before slash command handling
+            self.send(command, conversation_id)
+
+    def _clear_command(self):
+        """Handle /clear command."""
+        self.nvim.exec_lua(
+            'require("anya.conversation").clear_conversation()',
+            []
+        )
+
+    def _help_command(self):
+        """Handle /help command by showing help in the chat buffer."""
+        from . import markers
+        from . import ids
+
+        help_text = f"""Anya v{VERSION}
+
+Available slash commands:
+  /clear     Clear the current conversation
+  /cancel    Cancel the current agent response
+  /help      Show this help message
+  /file      Open file picker to add files to prompt
+  /compact   Compact conversation context
+
+Usage:
+  Type a message in the prompt buffer and press Enter to send.
+  Use slash commands at the beginning of a line to execute them.
+
+Examples:
+  /clear
+  /help
+  How do I create a Python function?
+
+For more help, see :h anya"""
+
+        # Get the chat buffer number and conversation ID
+        chat_buf = self._get_chat_buffer()
+        if not chat_buf or not self.nvim.api.buf_is_valid(chat_buf):
+            return
+
+        # Get conversation ID from buffer
+        conv_id = None
+        try:
+            conv_id = self.nvim.api.buf_get_var(chat_buf, "anya_conversation_id")
+        except:
+            pass
+
+        # Generate message ID and timestamp
+        msg_id = ids.new(conversation=conv_id)
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Stream message with proper markers
+        self._stream_text_to_buffer(chat_buf.number, f"\n# Anya\n")
+        self._stream_text_to_buffer(chat_buf.number, markers.make_agent_message_start(msg_id, "Anya", DEFAULT_MODEL, timestamp))
+        self._stream_text_to_buffer(chat_buf.number, help_text)
+        self._stream_text_to_buffer(chat_buf.number, "\n")
+        self._stream_text_to_buffer(chat_buf.number, markers.make_message_end(msg_id, timestamp))
+        self._stream_text_to_buffer(chat_buf.number, "\n\n")
+
+    def _file_command(self):
+        """Handle /file command."""
+        # TODO: Implement file picker integration
+        chat_buf = self._get_chat_buffer()
+        if chat_buf and self.nvim.api.buf_is_valid(chat_buf):
+            self._stream_text_to_buffer(chat_buf.number, "File picker not yet implemented.\n\n")
+
+    def _compact_command(self):
+        """Handle /compact command."""
+        # TODO: Implement context compaction
+        chat_buf = self._get_chat_buffer()
+        if chat_buf and self.nvim.api.buf_is_valid(chat_buf):
+            self._stream_text_to_buffer(chat_buf.number, "Context compaction not yet implemented.\n\n")
+
+    @pynvim.function("AnyaCancel", sync=False)
+    def anya_cancel(self, args):
+        """Cancel the current agent response."""
+        self.cancel_agent()
 
     @pynvim.function("AnyaNewConversationId", sync=True)
     def new_conversation_id(self, args):
