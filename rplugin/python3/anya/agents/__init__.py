@@ -8,14 +8,12 @@ from .dynamic_instructions import (
 
 from .utils import get_instructions
 from ..tools import (
-    buffer_name,
     create,
     edit,
     exec,
     exec_lua,
     gh,
     list_files,
-    parrot,
     read_file,
     read_many_files,
     search,
@@ -54,14 +52,12 @@ async def CodeAgent(mcp_servers=None) -> Agent:
         "name": MAIN_AGENT_NAME,
         "instructions": instructions,
         "tools": [
-            buffer_name,
             create,
             edit,
             exec,
             exec_lua,
             gh,
             list_files,
-            parrot,
             read_file,
             read_many_files,
             search,

@@ -161,4 +161,4 @@ async def exec(
         output_parts.append(f"Exit code: {process.returncode}")
 
     result = "\n".join(output_parts) if output_parts else "(no output)"
-    return f"``````\n{result}\n``````"
+    return f"n{result}\n"

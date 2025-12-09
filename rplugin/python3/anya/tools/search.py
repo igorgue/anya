@@ -29,7 +29,7 @@ async def search(query: str, cwd: str = None, max_results: int = 2000) -> str:
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
             output = result.stdout[:2000]  # Limit output
-            return f"``````\n{output}\n``````"
+            return f"n{output}\n"
     except FileNotFoundError:
         # Fallback to grep
         cmd = ["grep", "-rn", query, cwd]
@@ -37,7 +37,7 @@ async def search(query: str, cwd: str = None, max_results: int = 2000) -> str:
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
                 output = result.stdout[:max_results]
-                return f"``````\n{output}\n``````"
+                return f"n{output}\n"
         except FileNotFoundError:
             raise Exception(
                 "Neither ripgrep (rg) nor grep found. Please install one of them."

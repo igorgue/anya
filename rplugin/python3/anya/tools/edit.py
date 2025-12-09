@@ -83,7 +83,6 @@ async def _wait_for_edit_decision(nvim, edit_id: str, timeout: float = 300.0) ->
 async def edit(
     ctx: RunContextWrapper[NvimPluginContext],
     edit_blocks: str,
-    cwd: str = None,
 ) -> str:
     """Propose code edits using SEARCH/REPLACE blocks.
 
@@ -125,7 +124,6 @@ async def edit(
 
     Args:
         edit_blocks: String containing one or more SEARCH/REPLACE blocks
-        cwd: Current working directory (optional, for path resolution)
 
     Returns:
         Result of the edit operation (applied, rejected, or failed)

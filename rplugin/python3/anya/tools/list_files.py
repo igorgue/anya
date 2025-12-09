@@ -59,6 +59,6 @@ async def list_files(path: str = ".", cwd: str = None, max_results: int = 100) -
             )
         else:
             output = result.stdout.strip()
-        return f"``````\n{output}\n``````"
+        return f"\n{output}\n"
     else:
         raise Exception(f"fd command failed: {result.stderr}")
