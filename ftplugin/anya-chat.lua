@@ -24,6 +24,26 @@ vim.keymap.set("n", "<C-c>", function()
   vim.cmd("Anya cancel")
 end, { buffer = true, desc = "Cancel agent response" })
 
+-- Section navigation: jump between # headers (# User, # Anya, etc.)
+local function jump_to_header(direction)
+  local pattern = "^# "
+  local flags = direction == "next" and "W" or "bW"
+  local found = vim.fn.search(pattern, flags)
+  if found == 0 then
+    -- Wrap around if not found
+    local wrap_flags = direction == "next" and "w" or "bw"
+    vim.fn.search(pattern, wrap_flags)
+  end
+end
+
+vim.keymap.set("n", "]]", function()
+  jump_to_header("next")
+end, { buffer = true, desc = "Jump to next header" })
+
+vim.keymap.set("n", "[[", function()
+  jump_to_header("prev")
+end, { buffer = true, desc = "Jump to previous header" })
+
 -- Edit approval keymaps are set up by edit_view.setup_keymaps() when edit blocks are rendered
 -- This ensures the 1/2 keys only work within edit block extmark ranges
 
