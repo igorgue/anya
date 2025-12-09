@@ -124,9 +124,7 @@ async def read_file(path_with_range: str, cwd: str = None) -> str:
         )
 
     info_parts.append("--- FILE CONTENT ---\n")
-    info_parts.append(content)
+    info_parts.append(f"``````\ncontent\n``````")
     info_parts.append("\n--- END FILE ---")
 
-    res = "".join(info_parts)
-
-    return f"``````\n{res}\n``````"
+    return = "".join(info_parts)
