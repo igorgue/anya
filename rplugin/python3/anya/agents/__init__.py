@@ -1,5 +1,4 @@
 from agents import Agent
-from typing import Any, List
 
 from .dynamic_instructions import (
     generate_dynamic_code_instructions,
@@ -22,8 +21,11 @@ from ..tools import (
     search,
 )
 
+MAIN_AGENT_NAME = "Code"
+MAIN_ASSISTANT_NAME = "Anya"
 
-async def CodeAgent(mcp_servers=None):
+
+async def CodeAgent(mcp_servers=None) -> Agent:
     """Create a code agent with dynamically generated instructions based on MCP servers.
 
     This async version handles the generation of dynamic instructions that may
@@ -45,7 +47,7 @@ async def CodeAgent(mcp_servers=None):
     instructions = update_agent_instructions(base_instructions, dynamic_instructions)
 
     config = {
-        "name": "Code",
+        "name": MAIN_AGENT_NAME,
         "instructions": instructions,
         "tools": [
             buffer_name,
@@ -77,7 +79,7 @@ async def CodeAgent(mcp_servers=None):
 
 
 async def MCPAgent(
-    mcp_servers: List[Any] | None = None,
+    mcp_servers: list[object] | None = None,
 ) -> Agent | None:
     """Create an MCP agent with dynamically generated instructions.
 
@@ -114,4 +116,6 @@ async def MCPAgent(
 __all__ = [
     "NvimPluginContext",
     "CodeAgent",
+    "MAIN_AGENT_NAME",
+    "MAIN_ASSISTANT_NAME",
 ]

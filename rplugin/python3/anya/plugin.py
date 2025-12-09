@@ -14,6 +14,7 @@ from . import markers
 from . import history
 from . import fidget
 from .mcp_loader import MCPManager
+from .agents import MAIN_AGENT_NAME, MAIN_ASSISTANT_NAME
 
 VERSION = "0.0.1"
 
@@ -347,9 +348,10 @@ class AnyaPlugin:
 
         msg_id = ids.new(conversation=conversation_id)
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        agent_name = "Code"
+        agent_name = MAIN_AGENT_NAME
+        assistant_name = MAIN_ASSISTANT_NAME
 
-        header = "# Anya\n"
+        header = f"# {assistant_name}\n"
         header += markers.make_agent_message_start(
             msg_id, agent_name, DEFAULT_MODEL, timestamp
         )
@@ -1247,7 +1249,7 @@ For more help, see :h anya"""
         conv_id = None
         try:
             conv_id = self.nvim.api.buf_get_var(chat_buf, "anya_conversation_id")
-        except:
+        except Exception:
             pass
 
         # Generate message ID and timestamp
@@ -1255,7 +1257,7 @@ For more help, see :h anya"""
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         # Stream message with proper markers
-        self._stream_text_to_buffer(chat_buf.number, f"\n# Anya\n")
+        self._stream_text_to_buffer(chat_buf.number, "\n# Anya\n")
         self._stream_text_to_buffer(
             chat_buf.number,
             markers.make_agent_message_start(msg_id, "Anya", DEFAULT_MODEL, timestamp),
