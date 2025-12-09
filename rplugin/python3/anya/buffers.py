@@ -41,6 +41,9 @@ def set_prompt_window_options(nvim: Nvim, winid: int):
     nvim.api.win_set_option(winid, "wrap", True)
     nvim.api.win_set_option(winid, "linebreak", True)
 
+    # Delay winbar setting to avoid conflicts with other configurations
+    nvim.async_call(lambda: nvim.api.win_set_option(winid, "winbar", ""))
+
 
 def get_buffer_content(nvim: Nvim, bufnr: int) -> str:
     """Read entire buffer content as a single string with markers intact.
@@ -135,6 +138,11 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
         nvim.api.win_set_option(chat_win, "wrap", True)
         nvim.api.win_set_option(chat_win, "linebreak", True)
         nvim.api.win_set_option(chat_win, "showbreak", "")
+        # Delay winbar setting to avoid conflicts with other configurations
+        nvim.exec_lua(
+            "local win_id = ... vim.defer_fn(function() vim.api.nvim_set_option_value('winbar', '', {win = win_id}) end, 100)",
+            chat_win,
+        )
         # Mark chat window as preferred main for Snacks.picker
         nvim.api.win_set_var(chat_win, "snacks_main", True)
 
@@ -189,6 +197,11 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
             nvim.api.win_set_option(chat_win, "wrap", True)
             nvim.api.win_set_option(chat_win, "linebreak", True)
             nvim.api.win_set_option(chat_win, "showbreak", "")
+            # Delay winbar setting to avoid conflicts with other configurations
+            nvim.exec_lua(
+                "local win_id = ... vim.defer_fn(function() vim.api.nvim_set_option_value('winbar', '', {win = win_id}) end, 100)",
+                chat_win,
+            )
             # Mark chat window as preferred main for Snacks.picker
             nvim.api.win_set_var(chat_win, "snacks_main", True)
 
@@ -221,6 +234,11 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
         nvim.api.win_set_option(chat_win, "wrap", True)
         nvim.api.win_set_option(chat_win, "linebreak", True)
         nvim.api.win_set_option(chat_win, "showbreak", "")
+        # Delay winbar setting to avoid conflicts with other configurations
+        nvim.exec_lua(
+            "local win_id = ... vim.defer_fn(function() vim.api.nvim_set_option_value('winbar', '', {win = win_id}) end, 100)",
+            chat_win,
+        )
         # Mark chat window as preferred main for Snacks.picker
         nvim.api.win_set_var(chat_win, "snacks_main", True)
 

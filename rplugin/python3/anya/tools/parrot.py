@@ -15,3 +15,7 @@ async def parrot(message: str) -> str:
     """
     time.sleep(3)  # Simulate processing delay
     return message.upper()
+
+
+# Set skip_output attribute to prevent tool announcements and output
+parrot.skip_output = True

@@ -464,6 +464,7 @@ class AnyaPlugin:
         collected_content: list[str] = []
         thinking_content: list[str] = []  # Collect thinking blocks separately
         parallel_tools: list[dict] = []  # Collect parallel tool calls
+        parallel_skip_tools: list[dict] = []  # Track tools that skip output
         pending_tool_outputs: list[str] = []  # Collect outputs for parallel tools
         expected_outputs = 0  # Number of outputs we're waiting for
         tool_was_called = False  # Track if any tool was called (for unclosed folds)
@@ -573,7 +574,17 @@ class AnyaPlugin:
                             tool_was_called = True
                             self._streaming_started = True
 
-                            # Emit tool execution event for fidget
+                            # Check if tool should skip output
+                            from . import tools
+
+                            tool_func = getattr(tools, tool_name, None)
+                            skip_output = (
+                                getattr(tool_func, "skip_output", False)
+                                if tool_func
+                                else False
+                            )
+
+                            # Emit tool execution event for fidget (still emit even if skip_output for status tracking)
                             from .fidget import emit_user_event
 
                             emit_user_event(
@@ -585,64 +596,75 @@ class AnyaPlugin:
                                 },
                             )
 
-                            # Use edit_pending for edit tool, tool_pending for others
-                            status = (
-                                "edit_pending"
-                                if tool_name == "edit"
-                                else "tool_pending"
-                            )
-                            parallel_tools.append(
-                                {
-                                    "name": tool_name,
-                                    "args": tool_args,
-                                    "status": status,
-                                }
-                            )
-                            expected_outputs += 1
-
-                            # Skip header output for edit tool - edit_view handles its own display
-                            if tool_name == "edit":
-                                pass  # edit_view will render its own header
+                            # If tool should skip output, don't add to parallel_tools or display header
+                            if skip_output:
+                                expected_outputs += 1
+                                # Add to a separate list for tracking skip_output tools
+                                parallel_skip_tools.append(
+                                    {
+                                        "name": tool_name,
+                                        "args": tool_args,
+                                    }
+                                )
                             else:
-                                # Build combined header with all tools so far
-                                tool_headers = [
-                                    self._format_tool_header(t["name"], t["args"])
-                                    for t in parallel_tools
-                                ]
-                                combined_header = " | ".join(tool_headers)
+                                # Use edit_pending for edit tool, tool_pending for others
+                                status = (
+                                    "edit_pending"
+                                    if tool_name == "edit"
+                                    else "tool_pending"
+                                )
+                                parallel_tools.append(
+                                    {
+                                        "name": tool_name,
+                                        "args": tool_args,
+                                        "status": status,
+                                    }
+                                )
+                                expected_outputs += 1
 
-                                if len(parallel_tools) == 1:
-                                    # First tool - output header with pending marker
-                                    # Add blank line if last output wasn't a marker
-                                    prefix = "" if last_output_was_marker else "\n"
-                                    # Use the status from the tool (edit_pending or tool_pending)
-                                    pending_header = (
-                                        prefix
-                                        + combined_header
-                                        + "\n"
-                                        + markers.make_marker("fold_start", status)
-                                        + "\n"
-                                    )
-                                    collected_content.append(pending_header)
-                                    if not self._request_cancelled:
-                                        self.nvim.async_call(
-                                            self._stream_text_to_buffer,
-                                            chat_bufnr,
-                                            pending_header,
-                                        )
-                                        # Mark that a tool fold is now open
-                                        self.nvim.async_call(
-                                            self._set_tool_fold_open, True
-                                        )
-                                    last_output_was_marker = True
+                                # Skip header output for edit tool - edit_view handles its own display
+                                if tool_name == "edit":
+                                    pass  # edit_view will render its own header
                                 else:
-                                    # Additional parallel tool - update header line
-                                    if not self._request_cancelled:
-                                        self.nvim.async_call(
-                                            self._update_tool_header_line,
-                                            chat_bufnr,
-                                            combined_header,
+                                    # Build combined header with all tools so far
+                                    tool_headers = [
+                                        self._format_tool_header(t["name"], t["args"])
+                                        for t in parallel_tools
+                                    ]
+                                    combined_header = " | ".join(tool_headers)
+
+                                    if len(parallel_tools) == 1:
+                                        # First tool - output header with pending marker
+                                        # Add blank line if last output wasn't a marker
+                                        prefix = "" if last_output_was_marker else "\n"
+                                        # Use the status from the tool (edit_pending or tool_pending)
+                                        pending_header = (
+                                            prefix
+                                            + combined_header
+                                            + "\n"
+                                            + markers.make_marker("fold_start", status)
+                                            + "\n"
                                         )
+                                        collected_content.append(pending_header)
+                                        if not self._request_cancelled:
+                                            self.nvim.async_call(
+                                                self._stream_text_to_buffer,
+                                                chat_bufnr,
+                                                pending_header,
+                                            )
+                                            # Mark that a tool fold is now open
+                                            self.nvim.async_call(
+                                                self._set_tool_fold_open, True
+                                            )
+                                        last_output_was_marker = True
+                                    else:
+                                        # Additional parallel tool - update header line
+                                        if not self._request_cancelled:
+                                            self.nvim.async_call(
+                                                self._update_tool_header_line,
+                                                chat_bufnr,
+                                                combined_header,
+                                            )
 
                     elif item_type == "tool_call_output_item":
                         tool_output = getattr(item, "output", "")
@@ -666,6 +688,7 @@ class AnyaPlugin:
 
                             # Update pending markers to success or failure
                             # Skip marker update for edit tool - user will approve/reject
+                            # Skip marker update for skip_output tools - no UI was shown
                             if not self._request_cancelled and not is_edit_tool:
                                 if has_failure:
                                     self.nvim.async_call(
@@ -684,8 +707,10 @@ class AnyaPlugin:
 
                             # For edit tool, skip rendering - edit tool handles its own UI
                             # The tool output is the result message (EDIT_APPLIED, etc)
-                            if is_edit_tool:
+                            # For skip_output tools, don't render anything
+                            if is_edit_tool or parallel_skip_tools:
                                 # Don't render anything - edit tool already rendered via UI
+                                # or skip_output tools don't want any output
                                 pass
                             elif all_outputs:
                                 # Wrap MCP server output with backticks
@@ -699,7 +724,8 @@ class AnyaPlugin:
                                     )
 
                             # Skip fold markers for edit tool - edit_view handles its own display
-                            if not is_edit_tool:
+                            # Skip fold markers for skip_output tools - no UI was shown
+                            if not is_edit_tool and not parallel_skip_tools:
                                 fold_end_marker = (
                                     "\n" + markers.make_marker("fold_end") + "\n"
                                 )
@@ -716,7 +742,9 @@ class AnyaPlugin:
                                     )
 
                             # Emit tool execution complete event for fidget
-                            for tool in parallel_tools:
+                            # Emit for all tools including skip_output (for status tracking)
+                            all_tools = parallel_tools + parallel_skip_tools
+                            for tool in all_tools:
                                 from .fidget import emit_user_event
 
                                 emit_user_event(
@@ -732,6 +760,7 @@ class AnyaPlugin:
                             expected_outputs = 0
                             tool_was_called = False
                             parallel_tools = []
+                            parallel_skip_tools = []
                             needs_blank_before_text = True
                             last_output_was_marker = True
 
