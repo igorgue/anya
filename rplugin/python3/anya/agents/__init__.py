@@ -1,54 +1,53 @@
-from agents import Agent, function_tool
+from agents import Agent
+from typing import Any, List
 
-from .context import NvimPluginContext
-from .utils import get_instructions
-from ..tools import (
-    buffer_name,
-    create,
-    edit,
-    exec,
-    exec_lua,
-    gh,
-    list_files,
-    parrot,
-    read_file,
-    read_many_files,
-    search,
+from .dynamic_instructions import (
+    generate_dynamic_code_instructions,
+    generate_dynamic_mcp_instructions,
+    update_agent_instructions,
 )
 
 
-def MCPAgent(
-    mcp_servers: list[dict] | None = None,
-) -> Agent[NvimPluginContext] | None:
-    """Create an MCP agent with MCP server tools.
+async def CodeAgent(mcp_servers=None):
+    """Create a code agent with dynamically generated instructions based on MCP servers.
 
-    This agent is designed to be called as a tool by the Code Agent.
-    It focuses on using MCP server tools to query external systems.
+    This async version handles the generation of dynamic instructions that may
+    require async calls to MCP servers.
+
+    Args:
+        mcp_servers: List of connected MCP server instances
+
+    Returns:
+        Configured Agent instance with dynamic instructions
     """
-    if not mcp_servers:
-        return None
-
-    # We don't need custom tools anymore since the logging will be done
-    # in the agent's responses directly
-    return Agent[NvimPluginContext](
-        name="MCP Tools",
-        instructions=get_instructions("mcp.md"),
-        mcp_servers=mcp_servers,
+    # Import here to avoid circular imports
+    from .utils import get_instructions
+    from ..tools import (
+        buffer_name,
+        create,
+        edit,
+        exec,
+        exec_lua,
+        gh,
+        list_files,
+        parrot,
+        read_file,
+        read_many_files,
+        search,
     )
 
+    # Get base instructions
+    base_instructions = get_instructions("code.md")
 
-def CodeAgent(mcp_servers=None):
-    """Create a code agent with optional MCP servers as a delegated tool.
+    # Generate dynamic instructions based on available MCP servers
+    dynamic_instructions = await generate_dynamic_code_instructions(mcp_servers or [])
 
-    When MCP servers are available, they're added as an 'mcp_tools' tool
-    that the agent can call on-demand. This avoids blocking on MCP startup.
+    # Combine instructions
+    instructions = update_agent_instructions(base_instructions, dynamic_instructions)
 
-    Note: For dynamic instruction generation based on MCP servers, use CodeAgentAsync
-    from async_creation.py instead.
-    """
     config = {
         "name": "Code",
-        "instructions": get_instructions("code.md"),
+        "instructions": instructions,
         "tools": [
             buffer_name,
             create,
@@ -64,17 +63,56 @@ def CodeAgent(mcp_servers=None):
         ],
     }
 
-    mcp_agent = MCPAgent(mcp_servers)
-    if mcp_agent:
-        mcp_tool = mcp_agent.as_tool(
-            tool_name="mcp",
-            tool_description="Access external systems and data via MCP (Model Context Protocol) servers. "
-            "Use this when you need to query databases, APIs, or other external services."
-            "you can also use this as a last resort if you don't know how to answer a question.",
-        )
-        config["tools"] = [mcp_tool] + config["tools"]
+    if mcp_servers:
+        mcp_agent = await MCPAgent(mcp_servers)
+        if mcp_agent:
+            mcp_tool = mcp_agent.as_tool(
+                tool_name="mcp",
+                tool_description="Access external systems and data via MCP (Model Context Protocol) servers. "
+                "Use this when you need to query databases, APIs, or other external services."
+                "you can also use this as a last resort if you don't know how to ansewer a question.",
+            )
+            config["tools"] = config["tools"] + [mcp_tool]
 
-    return Agent[NvimPluginContext](**config)
+    return Agent(**config)
+
+
+async def MCPAgent(
+    mcp_servers: List[Any] | None = None,
+) -> Agent | None:
+    """Create an MCP agent with dynamically generated instructions.
+
+    This async version handles the generation of dynamic instructions that may
+    require async calls to MCP servers.
+
+    Args:
+        mcp_servers: List of connected MCP server instances
+
+    Returns:
+        Configured Agent instance with dynamic instructions, or None if no servers
+    """
+    if not mcp_servers:
+        return None
+
+    # Import here to avoid circular imports
+    from .utils import get_instructions
+
+    # Get base instructions
+    base_instructions = get_instructions("mcp.md")
+
+    # Generate dynamic instructions based on available servers
+    dynamic_instructions = await generate_dynamic_mcp_instructions(mcp_servers)
+
+    # Combine instructions
+    instructions = update_agent_instructions(base_instructions, dynamic_instructions)
+
+    # We don't need custom tools anymore since the logging will be done
+    # in the agent's responses directly
+    return Agent(
+        name="MCP Tools",
+        instructions=instructions,
+        mcp_servers=mcp_servers,
+    )
 
 
 __all__ = [

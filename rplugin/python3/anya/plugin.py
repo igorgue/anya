@@ -320,7 +320,6 @@ class AnyaPlugin:
         """Run the agent with streaming and write to chat buffer."""
         from agents import Runner
         from openai.types.responses import ResponseTextDeltaEvent
-        from .agents import CodeAgent
         from .agents.context import NvimPluginContext
 
         # Store the request ID for use in tool execution events
@@ -386,9 +385,9 @@ class AnyaPlugin:
                     pass
 
             # Create agent with dynamic instructions based on MCP servers
-            from .agents.async_creation import CodeAgentAsync
+            from .agents import CodeAgent
 
-            agent_for_run = await CodeAgentAsync(mcp_servers=mcp_servers)
+            agent_for_run = await CodeAgent(mcp_servers=mcp_servers)
 
             result = Runner.run_streamed(
                 starting_agent=agent_for_run,
