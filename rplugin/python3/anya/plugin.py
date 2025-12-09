@@ -1212,10 +1212,7 @@ class AnyaPlugin:
 
     def _clear_command(self):
         """Handle /clear command."""
-        self.nvim.exec_lua(
-            'require("anya.conversation").clear_conversation()',
-            []
-        )
+        self.nvim.exec_lua('require("anya.conversation").clear_conversation()', [])
 
     def _help_command(self):
         """Handle /help command by showing help in the chat buffer."""
@@ -1260,10 +1257,15 @@ For more help, see :h anya"""
 
         # Stream message with proper markers
         self._stream_text_to_buffer(chat_buf.number, f"\n# Anya\n")
-        self._stream_text_to_buffer(chat_buf.number, markers.make_agent_message_start(msg_id, "Anya", DEFAULT_MODEL, timestamp))
+        self._stream_text_to_buffer(
+            chat_buf.number,
+            markers.make_agent_message_start(msg_id, "Anya", DEFAULT_MODEL, timestamp),
+        )
         self._stream_text_to_buffer(chat_buf.number, help_text)
         self._stream_text_to_buffer(chat_buf.number, "\n")
-        self._stream_text_to_buffer(chat_buf.number, markers.make_message_end(msg_id, timestamp))
+        self._stream_text_to_buffer(
+            chat_buf.number, markers.make_message_end(msg_id, timestamp)
+        )
         self._stream_text_to_buffer(chat_buf.number, "\n\n")
 
     def _file_command(self):
@@ -1271,14 +1273,18 @@ For more help, see :h anya"""
         # TODO: Implement file picker integration
         chat_buf = self._get_chat_buffer()
         if chat_buf and self.nvim.api.buf_is_valid(chat_buf):
-            self._stream_text_to_buffer(chat_buf.number, "File picker not yet implemented.\n\n")
+            self._stream_text_to_buffer(
+                chat_buf.number, "File picker not yet implemented.\n\n"
+            )
 
     def _compact_command(self):
         """Handle /compact command."""
         # TODO: Implement context compaction
         chat_buf = self._get_chat_buffer()
         if chat_buf and self.nvim.api.buf_is_valid(chat_buf):
-            self._stream_text_to_buffer(chat_buf.number, "Context compaction not yet implemented.\n\n")
+            self._stream_text_to_buffer(
+                chat_buf.number, "Context compaction not yet implemented.\n\n"
+            )
 
     @pynvim.function("AnyaCancel", sync=False)
     def anya_cancel(self, args):
