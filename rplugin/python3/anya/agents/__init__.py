@@ -7,6 +7,21 @@ from .dynamic_instructions import (
     update_agent_instructions,
 )
 
+from .utils import get_instructions
+from ..tools import (
+    buffer_name,
+    create,
+    edit,
+    exec,
+    exec_lua,
+    gh,
+    list_files,
+    parrot,
+    read_file,
+    read_many_files,
+    search,
+)
+
 
 async def CodeAgent(mcp_servers=None):
     """Create a code agent with dynamically generated instructions based on MCP servers.
@@ -20,22 +35,6 @@ async def CodeAgent(mcp_servers=None):
     Returns:
         Configured Agent instance with dynamic instructions
     """
-    # Import here to avoid circular imports
-    from .utils import get_instructions
-    from ..tools import (
-        buffer_name,
-        create,
-        edit,
-        exec,
-        exec_lua,
-        gh,
-        list_files,
-        parrot,
-        read_file,
-        read_many_files,
-        search,
-    )
-
     # Get base instructions
     base_instructions = get_instructions("code.md")
 
@@ -93,9 +92,6 @@ async def MCPAgent(
     """
     if not mcp_servers:
         return None
-
-    # Import here to avoid circular imports
-    from .utils import get_instructions
 
     # Get base instructions
     base_instructions = get_instructions("mcp.md")
