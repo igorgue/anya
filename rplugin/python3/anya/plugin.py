@@ -428,7 +428,8 @@ class AnyaPlugin:
         llm_history = history.build_llm_history(records)
 
         msg_id = ids.new(conversation=conversation_id)
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now(timezone.utc)
+        timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         agent_name = MAIN_AGENT_NAME
         assistant_name = MAIN_ASSISTANT_NAME
 
@@ -463,6 +464,7 @@ class AnyaPlugin:
                 starting_agent=agent_for_run,
                 input=llm_history,
                 context=context,
+                max_turns=1000,
             )
 
             async for event in result.stream_events():
@@ -693,7 +695,8 @@ class AnyaPlugin:
             # (Headers already displayed with pending status, just clear the list)
             parallel_tools = []
 
-            end_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            now = datetime.now(timezone.utc)
+            end_timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
             # Close any open tool folds before message end marker
             if tool_was_called:
                 fold_end_marker = "\n" + markers.make_marker("fold_end")
@@ -733,7 +736,8 @@ class AnyaPlugin:
 
         except asyncio.CancelledError:
             # Handle cancellation
-            end_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            now = datetime.now(timezone.utc)
+            end_timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
 
             # Close any open code blocks in the collected content
             original_content = "".join(collected_content)
@@ -982,19 +986,20 @@ class AnyaPlugin:
                     # Get the first non-empty value
                     for key, value in args_dict.items():
                         if isinstance(value, str):
-                            # Truncate long strings (like edit blocks)
-                            first_arg = value[:50] if len(value) > 50 else value
-                            # Remove newlines for display
+                            # Don't truncate here - let format_tool_header handle it
+                            first_arg = value
+                            # Remove newlines for display but keep the content
                             first_arg = first_arg.replace("\n", " ").strip()
                         else:
                             first_arg = str(value)
                         break
         except (json.JSONDecodeError, AttributeError):
-            first_arg = tool_args[:50] if tool_args else ""
+            first_arg = tool_args if tool_args else ""
 
         if not first_arg:
             first_arg = "(no args)"
 
+        # Use the utility function with proper truncation (default 60 chars)
         return format_tool_header(tool_name, first_arg)
 
     def _format_tool_call(self, tool_name: str, tool_args: str) -> str:
@@ -1034,17 +1039,18 @@ class AnyaPlugin:
                 # Get the first non-empty value
                 for key, value in args_dict.items():
                     if isinstance(value, str):
-                        first_arg = value
+                        # Don't truncate here - let format_tool_header handle it
+                        first_arg = value.replace("\n", " ").strip()
                     else:
                         first_arg = str(value)
                     break
         except (json.JSONDecodeError, AttributeError):
-            first_arg = tool_args[:50] if tool_args else ""
+            first_arg = tool_args if tool_args else ""
 
         if not first_arg:
             first_arg = "(no args)"
 
-        # Format header
+        # Format header with proper truncation
         header = format_tool_header(tool_name, first_arg)
 
         # Add opening fold marker with status and newline so it's on its own line
@@ -1322,7 +1328,8 @@ For more help, see :h anya"""
 
         # Generate message ID and timestamp
         msg_id = ids.new(conversation=conv_id)
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        now = datetime.now(timezone.utc)
+        timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
 
         # Stream message with proper markers
         self._stream_text_to_buffer(chat_buf.number, "\n# Anya\n")
@@ -1373,8 +1380,10 @@ For more help, see :h anya"""
 
     @pynvim.function("AnyaTimestamp", sync=True)
     def timestamp(self, args):
-        """Get current UTC timestamp in ISO 8601 format."""
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        """Get current UTC timestamp in ISO 8601 format with milliseconds."""
+        now = datetime.now(timezone.utc)
+        # Produce e.g. 2024-06-06T03:21:19.348Z
+        return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
 
     def _help_text(self):
         return f"""anya v{VERSION}

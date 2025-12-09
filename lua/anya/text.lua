@@ -337,42 +337,30 @@ end
 -- @param end_timestamp string ISO 8601 UTC timestamp
 -- @return string|nil Formatted duration string (e.g., "13.4s", "1m23.5s")
 function M._calculate_duration(start_timestamp, end_timestamp)
-  -- Parse ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ
-  local start_year, start_month, start_day, start_hour, start_min, start_sec =
-    start_timestamp:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
-  local end_year, end_month, end_day, end_hour, end_min, end_sec =
-    end_timestamp:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
-
-  if not start_year or not end_year then
-    return nil
+  -- Parse ISO 8601: YYYY-MM-DDTHH:MM:SS.sssZ (or YYYY-MM-DDTHH:MM:SSZ for backwards compatibility)
+  local function parse_iso8601(ts)
+    local y, mo, d, h, mi, s, frac = ts:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)%.?(%d*)")
+    if not y then return nil end
+    y, mo, d, h, mi, s = tonumber(y), tonumber(mo), tonumber(d), tonumber(h), tonumber(mi), tonumber(s)
+    if not (y and mo and d and h and mi and s) then return nil end
+    local base = os.time({ year = y, month = mo, day = d, hour = h, min = mi, sec = s, isdst = false })
+    local frac_secs = 0
+    if frac and #frac > 0 then
+      local padded = frac .. string.rep("0", 6 - #frac) -- pad to microseconds
+      frac_secs = tonumber("0." .. padded)
+    end
+    return base + frac_secs
   end
 
-  -- Create epoch timestamps
-  local start_ts = os.time({
-    year = tonumber(start_year),
-    month = tonumber(start_month),
-    day = tonumber(start_day),
-    hour = tonumber(start_hour),
-    min = tonumber(start_min),
-    sec = tonumber(start_sec),
-    isdst = false,
-  })
-
-  local end_ts = os.time({
-    year = tonumber(end_year),
-    month = tonumber(end_month),
-    day = tonumber(end_day),
-    hour = tonumber(end_hour),
-    min = tonumber(end_min),
-    sec = tonumber(end_sec),
-    isdst = false,
-  })
-
-  local duration_seconds = end_ts - start_ts
+  local start_sec = parse_iso8601(start_timestamp)
+  local end_sec = parse_iso8601(end_timestamp)
+  if not start_sec or not end_sec then
+    return nil
+  end
+  local duration_seconds = end_sec - start_sec
   if duration_seconds < 0 then
     return nil
   end
-
   -- Format duration
   if duration_seconds >= 60 then
     local minutes = math.floor(duration_seconds / 60)
