@@ -650,12 +650,17 @@ class AnyaPlugin:
 
                                     if len(parallel_tools) == 1:
                                         # First tool - output header with pending marker
-                                        # Add blank line if last output wasn't a marker
-                                        prefix = "" if last_output_was_marker else "\n"
+                                        # Ensure blank line before tool if preceded by text
+                                        if not last_output_was_marker:
+                                            if not self._request_cancelled:
+                                                self.nvim.async_call(
+                                                    self._ensure_blank_line_before_tool,
+                                                    chat_bufnr,
+                                                )
+                                            collected_content.append("\n")
                                         # Use the status from the tool (edit_pending or tool_pending)
                                         pending_header = (
-                                            prefix
-                                            + combined_header
+                                            combined_header
                                             + "\n"
                                             + markers.make_marker("fold_start", status)
                                             + "\n"
@@ -992,6 +997,26 @@ class AnyaPlugin:
         if not self.nvim.api.buf_is_valid(bufnr):
             return
         self.nvim.exec_lua("require('anya.text').output(...)", bufnr, text)
+
+    def _ensure_blank_line_before_tool(self, bufnr):
+        """Ensure there's a blank line before tool output.
+
+        Flushes the streaming queue and adds a blank line if the last
+        line has content.
+        """
+        if not self.nvim.api.buf_is_valid(bufnr):
+            return
+        # Flush the streaming queue first so we can check actual buffer state
+        self.nvim.exec_lua("require('anya.text').flush_queue()")
+        # Check if last line has content
+        line_count = self.nvim.api.buf_line_count(bufnr)
+        if line_count > 0:
+            last_line = self.nvim.api.buf_get_lines(
+                bufnr, line_count - 1, line_count, False
+            )
+            if last_line and last_line[0] != "":
+                # Add blank line
+                self.nvim.api.buf_set_lines(bufnr, line_count, line_count, False, [""])
 
     def _stream_text_to_buffer_sync(self, bufnr, text):
         """Output text to buffer immediately without animation."""

@@ -413,7 +413,29 @@ end
 function M.render_edit(bufnr, filename, search_content, replace_content, raw_block)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
 
-  -- Start on the next line (no blank line before)
+  -- Collapse trailing blank lines to at most one so tools don't add extra spacing
+  while line_count > 1 do
+    local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1]
+    if last_line ~= "" then
+      break
+    end
+    local prev_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 2, line_count - 1, false)[1] or ""
+    if prev_line ~= "" then
+      break
+    end
+    vim.api.nvim_buf_set_lines(bufnr, line_count - 1, line_count, false, {})
+    line_count = line_count - 1
+  end
+
+  -- Check if we need to add a blank line before the edit block
+  -- We want a blank line between LLM text and tool output
+  local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1] or ""
+  if last_line ~= "" then
+    -- Last line has content, add a blank line
+    vim.api.nvim_buf_set_lines(bufnr, line_count, line_count, false, { "" })
+    line_count = line_count + 1
+  end
+
   local start_line = line_count
 
   -- Calculate stats
@@ -448,6 +470,9 @@ function M.render_edit(bufnr, filename, search_content, replace_content, raw_blo
   table.insert(block_lines, "``````")
   -- Add fold_end marker
   table.insert(block_lines, markers.make_marker(markers.fold_end))
+  local fold_end_index = #block_lines
+  -- Add a trailing blank line to separate from following LLM messages
+  table.insert(block_lines, "")
 
   vim.api.nvim_buf_set_lines(bufnr, start_line, -1, false, block_lines)
 
@@ -484,7 +509,7 @@ function M.render_edit(bufnr, filename, search_content, replace_content, raw_blo
   vim.api.nvim_buf_add_highlight(bufnr, ns_id, HL_MARKER, current_row, 0, -1)
 
   -- Hide the fold_end marker line
-  local fold_end_row = start_line + #block_lines - 2
+  local fold_end_row = start_line + fold_end_index - 1
   require("anya.text")._hide_line(bufnr, fold_end_row + 1) -- 1-indexed
 
   local end_row = start_line + #block_lines - 1
