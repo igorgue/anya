@@ -308,29 +308,57 @@ end
 
 -- Apply message info extmark (right-aligned virtual text)
 -- For user messages: displays local time (e.g., "2:30pm")
--- For agent messages: displays "agent_type | model" (e.g., "code | gpt-4.1")
+-- For agent messages: displays "<agent> | <model> · <duration>"
 -- @param bufnr number: Buffer number
--- @param line_num number: Line number to apply extmark to (1-indexed, the line above the marker)
--- @param msg_info table: Parsed message info from markers.parse_message_marker
-function M._apply_message_info(bufnr, line_num, msg_info)
-  if line_num < 1 then
+-- @param line_num number: Line number to apply extmark to (1-indexed)
+-- @param meta table: Message metadata from the database
+function M._apply_message_info(bufnr, line_num, meta)
+  if line_num < 1 or not meta then
     return
   end
 
-  -- Convert to 0-indexed for API
-  local line_idx = line_num - 1
-
-  -- Build the display text
-  local display_text
-  if msg_info.is_agent then
-    -- Agent message: "code | gpt-4.1"
-    display_text = msg_info.agent_type .. " | " .. msg_info.model
-  else
-    -- User message: convert UTC timestamp to local time
-    display_text = markers.utc_to_local_time(msg_info.timestamp)
+  local function as_string(value)
+    if value == nil or value == vim.NIL then
+      return nil
+    end
+    if type(value) ~= "string" then
+      value = tostring(value)
+    end
+    if value == "" then
+      return nil
+    end
+    return value
   end
 
-  -- Create right-aligned virtual text
+  local line_idx = line_num - 1
+  local display_text = ""
+
+  local is_agent = meta.role == "assistant"
+
+  if is_agent then
+    local agent_label = as_string(meta.author) or "assistant"
+    local model_label = as_string(meta.model) or "unknown"
+    display_text = agent_label .. " | " .. model_label
+
+    local start_ts = as_string(meta.created_at)
+    local end_ts = as_string(meta.ended_at)
+    if start_ts and end_ts then
+      local duration = M._calculate_duration(start_ts, end_ts)
+      if duration then
+        display_text = display_text .. " · " .. duration
+      end
+    end
+  else
+    local start_ts = as_string(meta.created_at)
+    if start_ts then
+      display_text = markers.utc_to_local_time(start_ts)
+    end
+  end
+
+  if display_text == "" then
+    return
+  end
+
   vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, 0, {
     virt_text = { { display_text, "AnyaToolSuccess" } },
     virt_text_pos = "right_align",
@@ -345,6 +373,15 @@ end
 function M._calculate_duration(start_timestamp, end_timestamp)
   -- Parse ISO 8601: YYYY-MM-DDTHH:MM:SS.sssZ (or YYYY-MM-DDTHH:MM:SSZ for backwards compatibility)
   local function parse_iso8601(ts)
+    if not ts then
+      return nil
+    end
+    if type(ts) ~= "string" then
+      ts = tostring(ts)
+    end
+    if not ts or ts == "" then
+      return nil
+    end
     local y, mo, d, h, mi, s, frac = ts:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)%.?(%d*)")
     if not y then
       return nil
@@ -512,53 +549,34 @@ function M._process_markers(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local fold_start_line = nil
   local fold_is_edit = false -- Track if current fold is an edit (should be open)
-  -- Track message fold starts by id: { [id] = line_number }
-  local message_fold_starts = {}
-  -- Track message start info for duration calculation: { [id] = { timestamp, is_agent } }
-  local message_start_info = {}
+  local message_markers = {}
+
+  local conv_id = nil
+  local ok_conv, conv_var = pcall(vim.api.nvim_buf_get_var, bufnr, "anya_conversation_id")
+  if ok_conv then
+    conv_id = conv_var
+  end
+
+  local message_lookup = {}
+  if conv_id then
+    local ok_data, data = pcall(vim.fn.AnyaLoadConversation, conv_id)
+    if ok_data and data and data.messages then
+      for _, msg in ipairs(data.messages) do
+        message_lookup[msg.id] = msg
+      end
+    end
+  end
+
+  local function get_message_meta(id)
+    return message_lookup[id]
+  end
 
   for i, line in ipairs(lines) do
-    -- Check for conversation markers (hide them)
-    if markers.is_conversation_marker(line) then
-      M._hide_line(bufnr, i)
-    -- Check for message markers (different pattern)
-    elseif markers.is_message_marker(line) then
-      -- Hide the marker line
-      M._hide_line(bufnr, i)
+    if markers.is_message_marker(line) then
       local msg_info = markers.parse_message_marker(line)
-      if msg_info then
-        if msg_info.type == "start" then
-          -- Apply extmark to the line above the marker (the header line)
-          M._apply_message_info(bufnr, i - 1, msg_info)
-          -- Record fold start: the header line (line above marker)
-          message_fold_starts[msg_info.id] = i - 1
-          -- Store start info for duration calculation
-          message_start_info[msg_info.id] = {
-            timestamp = msg_info.timestamp,
-            is_agent = msg_info.is_agent,
-          }
-        elseif msg_info.type == "end" then
-          -- Create fold from start to this end marker (open by default)
-          local start_line = message_fold_starts[msg_info.id]
-          if start_line and i > start_line then
-            M._create_fold_range(bufnr, start_line, i, true)
-          end
-
-          -- Calculate and apply duration for agent messages
-          local start_info = message_start_info[msg_info.id]
-          if start_info and start_info.is_agent then
-            local duration = M._calculate_duration(start_info.timestamp, msg_info.timestamp)
-            if duration then
-              M._hide_line_with_duration(bufnr, i, duration)
-            end
-          else
-            -- Hide the marker line normally for non-agent messages
-            M._hide_line(bufnr, i)
-          end
-
-          message_fold_starts[msg_info.id] = nil
-          message_start_info[msg_info.id] = nil
-        end
+      if msg_info and msg_info.id then
+        table.insert(message_markers, { id = msg_info.id, line = i })
+        M._hide_line(bufnr, i)
       end
     elseif markers.is_marker_line(line) then
       -- Hide the marker line
@@ -629,6 +647,38 @@ function M._process_markers(bufnr)
           end
         end
       end
+    end
+  end
+
+  for idx, msg_marker in ipairs(message_markers) do
+    local start_line = msg_marker.line
+    local next_marker = message_markers[idx + 1]
+    local end_line = next_marker and (next_marker.line - 1) or #lines
+    if end_line < start_line then
+      end_line = start_line
+    end
+
+    -- Create fold spanning the message marker through the end of its content
+    M._create_fold_range(bufnr, start_line, end_line, true)
+
+    -- Choose header line: first non-marker line within the message, fallback to marker line
+    local header_line = start_line
+    for l = start_line + 1, end_line do
+      local candidate = lines[l]
+      if
+        candidate
+        and candidate:match("%S")
+        and not markers.is_message_marker(candidate)
+        and not markers.is_marker_line(candidate)
+      then
+        header_line = l
+        break
+      end
+    end
+
+    local meta = get_message_meta(msg_marker.id)
+    if meta then
+      M._apply_message_info(bufnr, header_line, meta)
     end
   end
 end

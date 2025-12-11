@@ -443,15 +443,30 @@ class AnyaPlugin:
             now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         )
         agent_name = MAIN_AGENT_NAME
-        assistant_name = MAIN_ASSISTANT_NAME
 
-        header = f"# {assistant_name}\n"
-        header += markers.make_agent_message_start(
-            msg_id, agent_name, DEFAULT_MODEL, timestamp
-        )
-        header += "\n"
+        header = markers.make_message_marker(msg_id) + "\n"
 
         self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, header)
+
+        # Ensure DB has a placeholder message row for metadata-based rendering
+        if conversation_id:
+            try:
+                self._ensure_db()
+                inserted = db.save_message_dict(
+                    msg_id=msg_id,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content="",
+                    author=agent_name,
+                    model=DEFAULT_MODEL,
+                    created_at=timestamp,
+                    ended_at=None,
+                    markers=None,
+                )
+                if not inserted:
+                    db.update_message(msg_id, content="", ended_at=None, markers=None)
+            except Exception:
+                pass
 
         # Initialize tool fold state at start of request
         self.nvim.async_call(self._set_tool_fold_open, False)
@@ -817,8 +832,8 @@ class AnyaPlugin:
                 )
                 # Mark that the tool fold is now closed
                 self.nvim.async_call(self._set_tool_fold_open, False)
-            footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
-            self.nvim.async_call(self._stream_text_to_buffer, chat_bufnr, footer)
+
+            message_text = "".join(collected_content)
 
             # Flush streaming queue and save agent message to database
             # We do this inline after the footer is sent (but before returning)
@@ -831,6 +846,7 @@ class AnyaPlugin:
                     conversation_id,
                     timestamp,
                     end_timestamp,
+                    message_text,
                 )
 
             self.nvim.async_call(save_after_streaming)
@@ -872,14 +888,14 @@ class AnyaPlugin:
             # Add message end marker
             if tool_was_called:
                 fold_end_marker = "\n" + markers.make_marker("fold_end")
+                collected_content.append(fold_end_marker)
                 self.nvim.async_call(
                     self._append_to_chat_buffer, chat_bufnr, fold_end_marker
                 )
                 # Mark that the tool fold is now closed
                 self.nvim.async_call(self._set_tool_fold_open, False)
 
-            footer = "\n" + markers.make_message_end(msg_id, end_timestamp) + "\n"
-            self.nvim.async_call(self._append_to_chat_buffer, chat_bufnr, footer)
+            message_text = "".join(collected_content)
 
             # Flush streaming queue and save agent message to database
             # We do this inline after the footer is sent (but before returning)
@@ -892,6 +908,7 @@ class AnyaPlugin:
                     conversation_id,
                     timestamp,
                     end_timestamp,
+                    message_text,
                 )
 
             self.nvim.async_call(save_after_streaming)
@@ -1274,6 +1291,7 @@ class AnyaPlugin:
         conversation_id,
         timestamp,
         end_timestamp,
+        message_text,
     ):
         """Save agent message to database reading final buffer content with correct markers.
 
@@ -1281,76 +1299,49 @@ class AnyaPlugin:
         are properly synchronized. Ensures pending markers have been updated to
         success/failure before extracting and saving the message.
         """
-        # Check if buffer is still valid
-        if not self.nvim.api.buf_is_valid(chat_bufnr):
-            self.nvim.err_write(
-                f"Warning: Chat buffer {chat_bufnr} is no longer valid\n"
-            )
-            return
-
         # Flush the streaming queue to ensure all buffer updates are written
         self.nvim.exec_lua("require('anya.text').flush_queue()")
 
         # Initialize database if needed
         self._ensure_db()
 
-        # Read the final buffer content (after all marker updates)
-        # The buffer contains the entire conversation, so we need to extract just
-        # this message's content between its start and end markers
-        buf_lines = self.nvim.api.buf_get_lines(chat_bufnr, 0, -1, False)
-
-        # Extract just the message content (between message start and end markers)
-        msg_start_marker = markers.make_agent_message_start(
-            msg_id, agent_name, DEFAULT_MODEL, timestamp
-        )
-        msg_end_marker = markers.make_message_end(msg_id, end_timestamp)
-
-        message_content = None
-        try:
-            # Find start marker (may have extra whitespace due to marker format)
-            start_idx = next(
-                i for i, line in enumerate(buf_lines) if msg_start_marker in line
-            )
-            # Find end marker (backwards from end)
-            end_idx = next(
-                i
-                for i in range(len(buf_lines) - 1, start_idx, -1)
-                if msg_end_marker in buf_lines[i]
-            )
-            # Extract content between markers
-            message_lines = buf_lines[start_idx + 1 : end_idx]
-            message_content = "\n".join(message_lines)
-        except (StopIteration, IndexError):
-            # Fallback: if we can't find markers, log and abort
+        if not conversation_id:
             self.nvim.err_write(
-                f"Warning: Could not find message markers for {msg_id}\n"
+                f"Warning: Missing conversation_id for message {msg_id}\n"
             )
             return
 
-        if not message_content:
+        if not message_text:
             self.nvim.err_write(f"Warning: Empty message content for {msg_id}\n")
             return
 
-        # Extract markers from the message content (markers are removed from content)
         cleaned_content, markers_json = history.extract_markers_from_content(
-            message_content
+            message_text
         )
 
-        # Save to database with correct marker status
-        db.save_message_dict(
-            msg_id=msg_id,
-            conversation_id=conversation_id,
-            role="assistant",
+        updated = db.update_message(
+            msg_id,
             content=cleaned_content,
-            author=agent_name,
-            model=DEFAULT_MODEL,
-            created_at=timestamp,
             ended_at=end_timestamp,
             markers=markers_json,
         )
 
+        if not updated:
+            db.save_message_dict(
+                msg_id=msg_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=cleaned_content,
+                author=agent_name,
+                model=DEFAULT_MODEL,
+                created_at=timestamp,
+                ended_at=end_timestamp,
+                markers=markers_json,
+            )
+
         # Update conversation timestamp
-        db.update_conversation_timestamp(conversation_id, end_timestamp)
+        if conversation_id:
+            db.update_conversation_timestamp(conversation_id, end_timestamp)
 
     @pynvim.function("AnyaSend", sync=False)
     def anya_send(self, args):
@@ -1453,17 +1444,11 @@ For more help, see :h anya"""
             now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         )
 
-        # Stream message with proper markers
-        self._stream_text_to_buffer(chat_buf.number, "\n# Anya\n")
+        # Stream message with proper marker
         self._stream_text_to_buffer(
-            chat_buf.number,
-            markers.make_agent_message_start(msg_id, "Anya", DEFAULT_MODEL, timestamp),
+            chat_buf.number, "\n" + markers.make_message_marker(msg_id) + "\n"
         )
         self._stream_text_to_buffer(chat_buf.number, help_text)
-        self._stream_text_to_buffer(chat_buf.number, "\n")
-        self._stream_text_to_buffer(
-            chat_buf.number, markers.make_message_end(msg_id, timestamp)
-        )
         self._stream_text_to_buffer(chat_buf.number, "\n\n")
 
     def _file_command(self):

@@ -8,9 +8,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-CONVERSATION_PATTERN = re.compile(r"^<!-- ac: ([^,]+), ([^-]+) -->$")
-MESSAGE_START_PATTERN = re.compile(r"^<!-- am: ([^,]+), start, (.+) -->$")
-MESSAGE_END_PATTERN = re.compile(r"^<!-- am: ([^,]+), end, ([^-]+) -->$")
+MESSAGE_PATTERN = re.compile(r"^<!-- am: (.+) -->$")
 TOOLS_PATTERN = re.compile(r"^<!-- at: (.+) -->$")
 
 
@@ -39,80 +37,12 @@ class MessageRecord:
     markers: list[Marker] = field(default_factory=list)
 
 
-@dataclass
-class ConversationRecord:
-    """A conversation marker record."""
-
-    type: str
-    id: str
-    timestamp: str
-    content: str = ""
-    markers: list[Marker] = field(default_factory=list)
-
-
-def parse_conversation_marker(line: str) -> dict[str, str] | None:
-    """Parse a conversation marker line.
-
-    Format: <!-- ac: {id}, {timestamp} -->
-
-    Returns:
-        Dict with 'id' and 'timestamp', or None if not a valid marker.
-    """
-    match = CONVERSATION_PATTERN.match(line.strip())
+def parse_message_marker(line: str) -> str | None:
+    """Parse a simplified message marker line containing only the message ID."""
+    match = MESSAGE_PATTERN.match(line.strip())
     if not match:
         return None
-    return {"id": match.group(1).strip(), "timestamp": match.group(2).strip()}
-
-
-def parse_message_start_marker(line: str) -> dict[str, Any] | None:
-    """Parse a message start marker line.
-
-    User format: <!-- am: {id}, start, {author}, {timestamp} -->
-    Agent format: <!-- am: {id}, start, {agent_type}, {model}, {timestamp} -->
-
-    Returns:
-        Dict with parsed fields, or None if not a valid marker.
-    """
-    match = MESSAGE_START_PATTERN.match(line.strip())
-    if not match:
-        return None
-
-    msg_id = match.group(1).strip()
-    rest = match.group(2).strip()
-
-    parts = [p.strip() for p in rest.split(",")]
-
-    if len(parts) == 2:
-        return {
-            "id": msg_id,
-            "is_agent": False,
-            "author": parts[0],
-            "model": None,
-            "timestamp": parts[1],
-        }
-    elif len(parts) == 3:
-        return {
-            "id": msg_id,
-            "is_agent": True,
-            "author": parts[0],
-            "model": parts[1],
-            "timestamp": parts[2],
-        }
-    return None
-
-
-def parse_message_end_marker(line: str) -> dict[str, str] | None:
-    """Parse a message end marker line.
-
-    Format: <!-- am: {id}, end, {timestamp} -->
-
-    Returns:
-        Dict with 'id' and 'timestamp', or None if not a valid marker.
-    """
-    match = MESSAGE_END_PATTERN.match(line.strip())
-    if not match:
-        return None
-    return {"id": match.group(1).strip(), "timestamp": match.group(2).strip()}
+    return match.group(1).strip()
 
 
 def parse_tool_marker(line: str) -> list[str] | None:
@@ -130,16 +60,11 @@ def parse_tool_marker(line: str) -> list[str] | None:
 
 
 def is_marker_line(line: str) -> bool:
-    """Check if a line is any type of anya marker (at:, am:, ac:)."""
+    """Check if a line is any type of anya marker (at:, am:)."""
     stripped = line.strip()
     if not stripped.endswith("-->"):
         return False
-    # Check for all marker prefixes: at: (tool), am: (message), ac: (conversation)
-    return (
-        stripped.startswith("<!-- at:")
-        or stripped.startswith("<!-- am:")
-        or stripped.startswith("<!-- ac:")
-    )
+    return stripped.startswith("<!-- at:") or stripped.startswith("<!-- am:")
 
 
 def is_header_line(line: str) -> bool:
@@ -231,81 +156,75 @@ def clean_assistant_content(text: str) -> str:
 
 def parse_buffer_content(
     buffer_content: str,
-) -> list[MessageRecord | ConversationRecord]:
+) -> list[MessageRecord]:
     """Parse buffer content with markers into a list of records.
 
     Args:
         buffer_content: Raw buffer text with markers
 
     Returns:
-        List of MessageRecord and ConversationRecord objects
+        List of MessageRecord objects
     """
-    lines = buffer_content.split("\n")
-    records: list[MessageRecord | ConversationRecord] = []
+    from . import db
 
-    current_conversation_id: str | None = None
+    lines = buffer_content.split("\n")
+    records: list[MessageRecord] = []
+
     current_message: MessageRecord | None = None
     content_lines: list[str] = []
-    in_message = False
 
     for line in lines:
-        conv_marker = parse_conversation_marker(line)
-        if conv_marker:
-            current_conversation_id = conv_marker["id"]
-            records.append(
-                ConversationRecord(
-                    type="ac",
-                    id=conv_marker["id"],
-                    timestamp=conv_marker["timestamp"],
-                )
-            )
-            continue
-
-        start_marker = parse_message_start_marker(line)
-        if start_marker:
-            if current_message and in_message:
+        msg_id = parse_message_marker(line)
+        if msg_id:
+            if current_message:
                 current_message.content = "\n".join(content_lines).strip()
                 records.append(current_message)
                 content_lines = []
 
-            role = "assistant" if start_marker["is_agent"] else "user"
+            message_row = db.get_message(msg_id)
+            role = None
+            author = None
+            model = None
+            created_at = None
+            ended_at = None
+            conversation_id = None
+
+            if message_row:
+                role = message_row.get("role")
+                author = message_row.get("author")
+                model = message_row.get("model")
+                created_at = message_row.get("created_at")
+                ended_at = message_row.get("ended_at")
+                conversation_id = message_row.get("conversation_id")
+
             current_message = MessageRecord(
                 type="am",
-                id=start_marker["id"],
+                id=msg_id,
                 role=role,
-                author=start_marker["author"],
-                model=start_marker["model"],
-                timestamp=start_marker["timestamp"],
-                conversation_id=current_conversation_id,
+                author=author,
+                model=model,
+                timestamp=created_at,
+                end_timestamp=ended_at,
+                conversation_id=conversation_id,
             )
-            in_message = True
-            content_lines = []
-            continue
-
-        end_marker = parse_message_end_marker(line)
-        if end_marker:
-            if current_message and current_message.id == end_marker["id"]:
-                current_message.content = "\n".join(content_lines).strip()
-                current_message.end_timestamp = end_marker["timestamp"]
-                records.append(current_message)
-                current_message = None
-                in_message = False
-                content_lines = []
             continue
 
         if is_marker_line(line):
             tool_ids = parse_tool_marker(line)
             if tool_ids and current_message:
-                pos = len("\n".join(content_lines))
+                pos = len(content_lines)
                 current_message.markers.append(Marker(type="at", ids=tool_ids, pos=pos))
             continue
 
-        if in_message:
-            if is_header_line(line):
-                continue
+        if current_message:
             content_lines.append(line)
 
-    if current_message and in_message:
+    if current_message:
+        if not current_message.role:
+            all_blockquote = all(
+                line.startswith(">") or line.strip() == "" for line in content_lines
+            )
+            current_message.role = "user" if all_blockquote else "assistant"
         current_message.content = "\n".join(content_lines).strip()
         records.append(current_message)
 
@@ -313,7 +232,7 @@ def parse_buffer_content(
 
 
 def build_llm_history(
-    records: list[MessageRecord | ConversationRecord],
+    records: list[MessageRecord],
 ) -> list[dict[str, str]]:
     """Build clean history for LLM input from parsed records.
 
@@ -326,9 +245,6 @@ def build_llm_history(
     history: list[dict[str, str]] = []
 
     for record in records:
-        if isinstance(record, ConversationRecord):
-            continue
-
         if record.role and record.content:
             content = record.content
             if record.role == "user":
@@ -346,7 +262,7 @@ def build_llm_history(
 
 
 def build_full_history(
-    records: list[MessageRecord | ConversationRecord],
+    records: list[MessageRecord],
 ) -> list[dict[str, Any]]:
     """Build full history with all metadata from parsed records.
 
@@ -359,34 +275,23 @@ def build_full_history(
     history: list[dict[str, Any]] = []
 
     for record in records:
-        if isinstance(record, ConversationRecord):
-            history.append(
-                {
-                    "type": record.type,
-                    "id": record.id,
-                    "content": "",
-                    "timestamp": record.timestamp,
-                    "markers": [],
-                }
-            )
-        else:
-            history.append(
-                {
-                    "type": record.type,
-                    "id": record.id,
-                    "role": record.role,
-                    "content": record.content,
-                    "author": record.author,
-                    "model": record.model,
-                    "timestamp": record.timestamp,
-                    "end_timestamp": record.end_timestamp,
-                    "conversation_id": record.conversation_id,
-                    "markers": [
-                        {"type": m.type, "ids": m.ids, "pos": m.pos}
-                        for m in record.markers
-                    ],
-                }
-            )
+        history.append(
+            {
+                "type": record.type,
+                "id": record.id,
+                "role": record.role,
+                "content": record.content,
+                "author": record.author,
+                "model": record.model,
+                "timestamp": record.timestamp,
+                "end_timestamp": record.end_timestamp,
+                "conversation_id": record.conversation_id,
+                "markers": [
+                    {"type": m.type, "ids": m.ids, "pos": m.pos}
+                    for m in record.markers
+                ],
+            }
+        )
 
     return history
 

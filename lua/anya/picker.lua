@@ -17,7 +17,6 @@ local function strip_markers(content)
     if
       not markers.is_marker_line(line)
       and not markers.is_message_marker(line)
-      and not markers.is_conversation_marker(line)
     then
       table.insert(result, line)
     end

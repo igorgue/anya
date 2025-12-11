@@ -272,6 +272,41 @@ def get_message(id: str) -> dict[str, Any] | None:
         conn.close()
 
 
+def update_message(
+    id: str,
+    *,
+    content: str | None = None,
+    ended_at: str | None = None,
+    markers: str | None = None,
+) -> bool:
+    """Update an existing message's content, end time, or markers."""
+    conn = get_connection()
+    try:
+        fields = []
+        params: list[Any] = []
+        if content is not None:
+            fields.append("content = ?")
+            params.append(content)
+        if ended_at is not None:
+            fields.append("ended_at = ?")
+            params.append(ended_at)
+        if markers is not None:
+            fields.append("markers = ?")
+            params.append(markers)
+
+        if not fields:
+            return False
+
+        params.append(id)
+        cursor = conn.execute(
+            f"UPDATE messages SET {', '.join(fields)} WHERE id = ?", params
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def update_message_markers(id: str, markers_json: str) -> bool:
     """Update the markers JSON for a message.
 
@@ -319,41 +354,17 @@ def rebuild_buffer_content(
     import json
 
     lines: list[str] = []
-    lines.append(
-        markers.make_conversation_marker(conversation["id"], conversation["created_at"])
-    )
 
-    for msg in messages:
+    for idx, msg in enumerate(messages):
+        lines.append(markers.make_message_marker(msg["id"]))
+
         if msg["role"] == "user":
-            lines.append(f"# {msg['author'] or 'User'}")
-            lines.append(
-                markers.make_user_message_start(
-                    msg["id"], msg["author"] or "User", msg["created_at"]
-                )
-            )
             for line in msg["content"].split("\n"):
                 lines.append(f"> {line}")
-            lines.append(
-                markers.make_message_end(
-                    msg["id"], msg["ended_at"] or msg["created_at"]
-                )
-            )
         else:
-            lines.append("# Anya")
-            lines.append(
-                markers.make_agent_message_start(
-                    msg["id"],
-                    msg["author"] or "code",
-                    msg["model"] or "unknown",
-                    msg["created_at"],
-                )
-            )
-
-            # Rebuild content with tool markers inserted at proper positions
             if msg.get("markers"):
                 try:
                     marker_list = json.loads(msg["markers"])
-                    # Sort markers by position (descending) to insert from end
                     marker_list = sorted(
                         marker_list, key=lambda x: x["pos"], reverse=True
                     )
@@ -361,24 +372,17 @@ def rebuild_buffer_content(
 
                     for marker in marker_list:
                         pos = marker["pos"]
-                        # Support both old format (single "name") and new format (list of "names")
-                        if "names" in marker:
-                            names = marker["names"]
-                        else:
-                            # Backwards compatibility with old "name" format
-                            names = [marker.get("name", "")]
-                        # Insert marker at the line number position
+                        names = marker.get("names") or [marker.get("name", "")]
                         if names and 0 <= pos <= len(content_lines):
                             content_lines.insert(pos, markers.make_marker(*names))
 
                     lines.extend(content_lines)
                 except (json.JSONDecodeError, KeyError):
-                    # If marker parsing fails, just add content as-is
                     lines.append(msg["content"])
             else:
                 lines.append(msg["content"])
 
-            if msg["ended_at"]:
-                lines.append(markers.make_message_end(msg["id"], msg["ended_at"]))
+        if idx < len(messages) - 1:
+            lines.append("")
 
     return "\n".join(lines)

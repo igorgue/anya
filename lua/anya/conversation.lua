@@ -161,25 +161,14 @@ function M.send_message()
   -- Build the message content
   local output_lines = {}
 
-  -- Add conversation marker if this is a new conversation
-  if is_new_conversation then
-    table.insert(output_lines, markers.make_conversation_marker(conv_id, timestamp))
-  end
-
-  -- Add user header (# Username)
-  table.insert(output_lines, "# " .. user_name)
-
-  -- Add message start marker
-  table.insert(output_lines, markers.make_user_message_start(msg_id, user_name, timestamp))
+  -- Add message marker
+  table.insert(output_lines, markers.make_message_marker(msg_id))
 
   -- Add the message content as blockquote
   local formatted_lines = format_user_message(prompt_text)
   for _, line in ipairs(formatted_lines) do
     table.insert(output_lines, line)
   end
-
-  -- Add message end marker
-  table.insert(output_lines, markers.make_message_end(msg_id, timestamp))
 
   -- Add trailing empty line for spacing
   table.insert(output_lines, "")
@@ -225,17 +214,17 @@ function M.send_message()
   -- Clear the prompt buffer
   vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, { "" })
 
+  -- Save to database before rendering extmarks
+  if is_new_conversation then
+    vim.fn.AnyaSaveConversation(conv_id, timestamp)
+  end
+  vim.fn.AnyaSaveMessage(msg_id, conv_id, "user", prompt_text, user_name, nil, timestamp, timestamp, nil)
+
   -- Process markers to create folds and extmarks
   text._process_markers(chat_buf)
 
   -- Scroll chat buffer to bottom
   text._autoscroll_to_bottom(chat_buf)
-
-  -- Save to database
-  if is_new_conversation then
-    vim.fn.AnyaSaveConversation(conv_id, timestamp)
-  end
-  vim.fn.AnyaSaveMessage(msg_id, conv_id, "user", prompt_text, user_name, nil, timestamp, timestamp, nil)
 
   -- Send to agent for response (async)
   vim.fn.AnyaSend(prompt_text, conv_id)
@@ -294,7 +283,7 @@ function M.get_current_message_id(bufnr, from_line)
 
   for i = #lines, 1, -1 do
     local line = lines[i]
-    local msg_id = line:match("<!%-%- am: ([^,]+), start,")
+    local msg_id = line:match("<!%-%- am: ([^%s]+) %-%->")
     if msg_id then
       return msg_id
     end
