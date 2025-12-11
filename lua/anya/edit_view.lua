@@ -448,7 +448,6 @@ function M.render_edit(bufnr, filename, search_content, replace_content, raw_blo
   table.insert(block_lines, "``````")
   -- Add fold_end marker
   table.insert(block_lines, markers.make_marker(markers.fold_end))
-  table.insert(block_lines, "")
 
   vim.api.nvim_buf_set_lines(bufnr, start_line, -1, false, block_lines)
 

@@ -308,11 +308,11 @@ end
 
 -- Apply message info extmark (right-aligned virtual text)
 -- For user messages: displays local time (e.g., "2:30pm")
--- For agent messages: displays "<agent> | <model> · <duration>"
+-- For agent messages: displays "<agent> | <model>"
 -- @param bufnr number: Buffer number
 -- @param line_num number: Line number to apply extmark to (1-indexed)
 -- @param meta table: Message metadata from the database
-function M._apply_message_info(bufnr, line_num, meta)
+function M._apply_message_info(bufnr, line_num, meta, end_line_num)
   if line_num < 1 or not meta then
     return
   end
@@ -340,14 +340,6 @@ function M._apply_message_info(bufnr, line_num, meta)
     local model_label = as_string(meta.model) or "unknown"
     display_text = agent_label .. " | " .. model_label
 
-    local start_ts = as_string(meta.created_at)
-    local end_ts = as_string(meta.ended_at)
-    if start_ts and end_ts then
-      local duration = M._calculate_duration(start_ts, end_ts)
-      if duration then
-        display_text = display_text .. " · " .. duration
-      end
-    end
   else
     local start_ts = as_string(meta.created_at)
     if start_ts then
@@ -364,6 +356,27 @@ function M._apply_message_info(bufnr, line_num, meta)
     virt_text_pos = "right_align",
     hl_mode = "combine",
   })
+
+  -- For agent messages, add duration at the end of the last line
+  if is_agent and end_line_num and end_line_num > line_num then
+    local start_ts = as_string(meta.created_at)
+    local end_ts = as_string(meta.ended_at)
+    if start_ts and end_ts then
+      local duration = M._calculate_duration(start_ts, end_ts)
+      if duration then
+        local end_line_idx = end_line_num - 1
+        local lines = vim.api.nvim_buf_get_lines(bufnr, end_line_idx, end_line_idx + 1, false)
+        if #lines > 0 then
+          local line_content = lines[1]
+          vim.api.nvim_buf_set_extmark(bufnr, ns_id, end_line_idx, #line_content, {
+            virt_text = { { duration .. " 󰾩  ", "Comment" } },
+            virt_text_pos = "eol",
+            hl_mode = "combine",
+          })
+        end
+      end
+    end
+  end
 end
 
 -- Calculate duration between two ISO 8601 timestamps
@@ -457,7 +470,7 @@ function M._hide_line_with_duration(bufnr, line_num, duration)
   })
   -- Add duration as right-aligned text after the concealed marker
   vim.api.nvim_buf_set_extmark(bufnr, ns_id, line_idx, #lines[1], {
-    virt_text = { { duration .. " 󰾩 ", "Comment" } },
+    virt_text = { { duration .. " 󰾩  ", "Comment" } },
     virt_text_pos = "right_align",
     hl_mode = "combine",
   })
@@ -661,24 +674,10 @@ function M._process_markers(bufnr)
     -- Create fold spanning the message marker through the end of its content
     M._create_fold_range(bufnr, start_line, end_line, true)
 
-    -- Choose header line: first non-marker line within the message, fallback to marker line
-    local header_line = start_line
-    for l = start_line + 1, end_line do
-      local candidate = lines[l]
-      if
-        candidate
-        and candidate:match("%S")
-        and not markers.is_message_marker(candidate)
-        and not markers.is_marker_line(candidate)
-      then
-        header_line = l
-        break
-      end
-    end
-
     local meta = get_message_meta(msg_marker.id)
     if meta then
-      M._apply_message_info(bufnr, header_line, meta)
+      local header_line = start_line
+      M._apply_message_info(bufnr, header_line, meta, end_line)
     end
   end
 end

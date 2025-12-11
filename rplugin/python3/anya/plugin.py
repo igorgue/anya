@@ -1343,6 +1343,9 @@ class AnyaPlugin:
         if conversation_id:
             db.update_conversation_timestamp(conversation_id, end_timestamp)
 
+        # Reprocess markers to render duration and other metadata
+        self._process_markers(chat_bufnr)
+
     @pynvim.function("AnyaSend", sync=False)
     def anya_send(self, args):
         """Send a prompt to the agent with streaming response.
