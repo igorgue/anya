@@ -488,6 +488,7 @@ class AnyaPlugin:
         last_output_was_marker = (
             True  # Track if last output was a marker (header counts)
         )
+        last_output_was_tool = False  # Track if last output was a tool header/output
 
         try:
             # Get the pre-initialized agent
@@ -539,6 +540,7 @@ class AnyaPlugin:
                             )
                         self._streaming_started = True
                         last_output_was_marker = True
+                        last_output_was_tool = False
 
                     # Stream the reasoning delta
                     if reasoning_delta:
@@ -639,6 +641,7 @@ class AnyaPlugin:
 
                                 # Skip header output for edit tool - edit_view handles its own display
                                 if tool_name == "edit":
+                                    last_output_was_tool = True  # Track that a tool was just started
                                     pass  # edit_view will render its own header
                                 else:
                                     # Build combined header with all tools so far
@@ -650,8 +653,8 @@ class AnyaPlugin:
 
                                     if len(parallel_tools) == 1:
                                         # First tool - output header with pending marker
-                                        # Ensure blank line before tool if preceded by text
-                                        if not last_output_was_marker:
+                                        # Ensure blank line before tool if preceded by text (but not another tool)
+                                        if not last_output_was_tool:
                                             if not self._request_cancelled:
                                                 self.nvim.async_call(
                                                     self._ensure_blank_line_before_tool,
@@ -677,6 +680,7 @@ class AnyaPlugin:
                                                 self._set_tool_fold_open, True
                                             )
                                         last_output_was_marker = True
+                                        last_output_was_tool = True
                                     else:
                                         # Additional parallel tool - update header line
                                         if not self._request_cancelled:
@@ -812,6 +816,7 @@ class AnyaPlugin:
                         # LLM text output - this is the agent's response
                         collected_content.append(delta)
                         last_output_was_marker = False
+                        last_output_was_tool = False
 
                         # Don't queue text if cancellation is in progress
                         if not self._request_cancelled:
