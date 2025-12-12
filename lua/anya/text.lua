@@ -339,7 +339,6 @@ function M._apply_message_info(bufnr, line_num, meta, end_line_num)
     local agent_label = as_string(meta.author) or "assistant"
     local model_label = as_string(meta.model) or "unknown"
     display_text = agent_label .. " | " .. model_label
-
   else
     local start_ts = as_string(meta.created_at)
     if start_ts then

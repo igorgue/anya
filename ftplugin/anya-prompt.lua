@@ -1,8 +1,8 @@
 -- Filetype plugin for anya-prompt buffer
 -- Configures the prompt input buffer
 
--- Register markdown treesitter for syntax highlighting
-vim.treesitter.language.register("markdown", "anya-prompt")
+-- Disable treesitter for prompt buffer to improve typing performance
+-- vim.treesitter.language.register("markdown", "anya-prompt")
 
 -- Buffer-local options
 vim.opt_local.wrap = true
@@ -123,46 +123,82 @@ vim.api.nvim_set_hl(0, "AnyaSlashCommand", { link = "Special", default = true })
 local highlight_ns = vim.api.nvim_create_namespace("anya_highlights")
 local bufnr = vim.api.nvim_get_current_buf()
 
+local highlight_timer = nil
+local highlight_pending = false
+
 local function highlight_refs()
   vim.api.nvim_buf_clear_namespace(bufnr, highlight_ns, 0, -1)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
   for lnum, line in ipairs(lines) do
-    -- Track file ref ranges to avoid highlighting commands inside them
-    local file_ranges = {}
+    local line_idx = lnum - 1
+    local pos = 1
 
-    -- Highlight @filepath references (e.g., @src/main.lua, @/home/user/file.txt)
-    for start_col, end_col in line:gmatch("()@[A-Za-z0-9_.~/-]+()") do
-      vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaFileRef", lnum - 1, start_col - 1, end_col - 1)
-      table.insert(file_ranges, { start_col - 1, end_col - 1 })
+    -- Find all @filepath references first
+    while true do
+      local start_col, end_col = line:find("@[A-Za-z0-9_.~/-]+", pos)
+      if not start_col then
+        break
+      end
+
+      vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaFileRef", line_idx, start_col - 1, end_col)
+      pos = end_col + 1
     end
 
-    -- Highlight /commands (single word, at start or after space, not inside file refs)
-    -- Pattern: start of line or space, then /letters, then end or space
-    for start_col, cmd, end_col in line:gmatch("()(/[A-Za-z]+)()") do
-      local sc = start_col - 1
+    -- Find /commands (simpler check without tracking ranges)
+    pos = 1
+    while true do
+      local start_col, end_col = line:find("/[A-Za-z]+", pos)
+      if not start_col then
+        break
+      end
+
       -- Check if at start of line or preceded by space
-      local preceded_ok = sc == 0 or line:sub(sc, sc) == " "
+      local preceded_ok = start_col == 1 or line:sub(start_col - 1, start_col - 1) == " "
       -- Check if followed by end of line or space
-      local ec = end_col - 1
-      local followed_ok = ec >= #line or line:sub(end_col, end_col) == " "
-      -- Check not inside a file ref
-      local inside_fileref = false
-      for _, range in ipairs(file_ranges) do
-        if sc >= range[1] and sc < range[2] then
-          inside_fileref = true
-          break
-        end
+      local followed_ok = end_col == #line or line:sub(end_col + 1, end_col + 1) == " "
+
+      if preceded_ok and followed_ok then
+        vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaSlashCommand", line_idx, start_col - 1, end_col)
       end
-      if preceded_ok and followed_ok and not inside_fileref then
-        vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaSlashCommand", lnum - 1, sc, ec)
-      end
+
+      pos = end_col + 1
     end
+  end
+
+  highlight_pending = false
+end
+
+local function schedule_highlight()
+  if highlight_timer then
+    highlight_timer:stop()
+    highlight_timer = nil
+  end
+
+  if not highlight_pending then
+    highlight_pending = true
+    highlight_timer = vim.defer_fn(function()
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        highlight_refs()
+      end
+    end, 100) -- Debounce for 100ms
   end
 end
 
 vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
   buffer = bufnr,
-  callback = highlight_refs,
-  desc = "Highlight @filepath and /command references",
+  callback = schedule_highlight,
+  desc = "Schedule @filepath and /command reference highlighting",
 })
+
+-- Track last-focused float window for navigation
+vim.api.nvim_create_autocmd({ "WinEnter", "BufWinEnter" }, {
+  buffer = bufnr,
+  callback = function()
+    vim.g.anya_last_float_ft = "anya-prompt"
+  end,
+  desc = "Track last focused Anya float (prompt)",
+})
+
+-- Initial highlight
 highlight_refs()

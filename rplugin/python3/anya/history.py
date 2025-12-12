@@ -287,8 +287,7 @@ def build_full_history(
                 "end_timestamp": record.end_timestamp,
                 "conversation_id": record.conversation_id,
                 "markers": [
-                    {"type": m.type, "ids": m.ids, "pos": m.pos}
-                    for m in record.markers
+                    {"type": m.type, "ids": m.ids, "pos": m.pos} for m in record.markers
                 ],
             }
         )

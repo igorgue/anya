@@ -311,7 +311,7 @@ class AnyaPlugin:
         """
         # Remember the layout for reopening
         self._last_layout = layout
-        
+
         if layout == "tab":
             self.nvim.command("tabnew")
         self.chat_buf, self.prompt_buf = buffers.new(self.nvim, layout, direction)
@@ -649,7 +649,9 @@ class AnyaPlugin:
 
                                 # Skip header output for edit tool - edit_view handles its own display
                                 if tool_name == "edit":
-                                    last_output_was_tool = True  # Track that a tool was just started
+                                    last_output_was_tool = (
+                                        True  # Track that a tool was just started
+                                    )
                                     pass  # edit_view will render its own header
                                 else:
                                     # Build combined header with all tools so far
@@ -1716,7 +1718,7 @@ Usage:
     @pynvim.function("AnyaRepositionFloats", sync=True)
     def reposition_floats(self, _args):
         """Reposition floating windows when terminal is resized.
-        
+
         Called by VimResized autocmd.
         """
         buffers.reposition_floats(self.nvim)

@@ -1,11 +1,17 @@
 " Syntax highlighting for anya prompt buffer
+" Loads markdown syntax and adds custom highlighting on top
 
-if exists("b:current_syntax")
-    finish
+" Load markdown syntax if available
+if !exists("b:current_syntax")
+  runtime! syntax/markdown.vim
+  unlet b:current_syntax
 endif
 
 " Clear any existing syntax to avoid conflicts
 syntax clear
+
+" Load markdown syntax
+runtime! syntax/markdown.vim
 
 " Highlight file references like @filename or @path/to/file
 syntax match AnyaFileRef "@[a-zA-Z0-9_.~/-]\+"

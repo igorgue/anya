@@ -14,6 +14,23 @@ _float_state = {
 }
 
 
+def _buf_id(buf):
+    try:
+        return buf.number
+    except Exception:
+        return buf
+
+
+def _win_id(win):
+    """Extract window ID from Window object or return as-is if already an int."""
+    if isinstance(win, int):
+        return win
+    try:
+        return win.handle
+    except Exception:
+        return int(win) if win else 0
+
+
 def set_prompt_buffer_options(nvim: Nvim, bufnr: int):
     """Configure buffer-local options for the prompt buffer.
 
@@ -49,11 +66,13 @@ def _valid_win(nvim: Nvim, winid: int | None) -> bool:
     return bool(winid) and nvim.api.win_is_valid(winid)
 
 
-def _build_float_configs(nvim: Nvim, container_width: int, container_height: int, container_win: int):
+def _build_float_configs(
+    nvim: Nvim, container_width: int, container_height: int, container_win: int
+):
     # Account for border space in prompt height
     # Prompt takes fixed height at bottom, Chat takes the rest
     prompt_height = min(PROMPT_HEIGHT, max(1, container_height - 3))
-    prompt_row = max(0, container_height - prompt_height - 2) # -2 for border/spacing
+    prompt_row = max(0, container_height - prompt_height - 2)  # -2 for border/spacing
     chat_height = max(1, prompt_row)
 
     chat_config = {
@@ -86,38 +105,67 @@ def _build_float_configs(nvim: Nvim, container_width: int, container_height: int
     return chat_config, prompt_config
 
 
+def _get_container_size(nvim: Nvim) -> tuple[int, int] | None:
+    container_win = _float_state["container_win"]
+    if not _valid_win(nvim, container_win):
+        return None
+    width = max(1, nvim.api.win_get_width(container_win))
+    height = max(1, nvim.api.win_get_height(container_win))
+    return (width, height)
+
+
 def _close_float_windows(nvim: Nvim):
     if _valid_win(nvim, _float_state["prompt_win"]):
         nvim.api.win_close(_float_state["prompt_win"], True)
     if _valid_win(nvim, _float_state["chat_win"]):
         nvim.api.win_close(_float_state["chat_win"], True)
-    
+
     # Close container window
     if _valid_win(nvim, _float_state["container_win"]):
         nvim.api.win_close(_float_state["container_win"], True)
-        
+
+    # Remove resize autocommands so they don't fire after the UI is closed.
+    # This avoids "Invalid channel" errors if the python host is stopped.
+    if _float_state.get("resize_group") is not None:
+        try:
+            nvim.api.del_augroup_by_id(_float_state["resize_group"])
+        except Exception:
+            pass
+        _float_state["resize_group"] = None
+
     _float_state["chat_win"] = None
     _float_state["prompt_win"] = None
     _float_state["container_win"] = None
+    _float_state["last_size"] = None
     # Don't wipe container_buf, we might reuse it or let it be garbage collected
 
 
 def _reposition_float_windows(nvim: Nvim):
     if not _valid_win(nvim, _float_state["container_win"]):
         return
-        
+
     # Ensure container window is still showing the container buffer
     container_win = _float_state["container_win"]
+    container_buf = _float_state["container_buf"]
+
+    if not container_buf or not nvim.api.buf_is_valid(container_buf):
+        return
+
     try:
-        if nvim.api.win_get_buf(container_win) != _float_state["container_buf"].number:
+        if nvim.api.win_get_buf(container_win) != _buf_id(container_buf):
             return
     except Exception:
         return
 
-    width = nvim.api.win_get_width(container_win)
-    height = nvim.api.win_get_height(container_win)
+    size = _get_container_size(nvim)
+    if size is None:
+        return
 
-    chat_config, prompt_config = _build_float_configs(nvim, width, height, container_win)
+    width, height = size
+
+    chat_config, prompt_config = _build_float_configs(
+        nvim, width, height, container_win
+    )
 
     if _valid_win(nvim, _float_state["chat_win"]):
         nvim.api.win_set_config(_float_state["chat_win"], chat_config)
@@ -132,11 +180,12 @@ def _ensure_resize_autocmd(nvim: Nvim):
     group = nvim.api.create_augroup("AnyaFloatLayout", {"clear": True})
     _float_state["resize_group"] = group
 
+    # Use silent! to avoid noisy errors if the python host is temporarily unavailable.
     nvim.api.create_autocmd(
         "VimResized",
         {
             "group": group,
-            "command": "call AnyaRepositionFloats()",
+            "command": "silent! call AnyaRepositionFloats()",
         },
     )
     # Also trigger on WinResized to handle split resizing
@@ -144,7 +193,7 @@ def _ensure_resize_autocmd(nvim: Nvim):
         "WinResized",
         {
             "group": group,
-            "command": "call AnyaRepositionFloats()",
+            "command": "silent! call AnyaRepositionFloats()",
         },
     )
 
@@ -180,10 +229,12 @@ def is_in_anya_buffer(nvim: Nvim) -> bool:
 
 
 def _get_or_create_container_buf(nvim: Nvim):
-    if _float_state["container_buf"] and nvim.api.buf_is_valid(_float_state["container_buf"]):
+    if _float_state["container_buf"] and nvim.api.buf_is_valid(
+        _float_state["container_buf"]
+    ):
         return _float_state["container_buf"]
-    
-    buf = nvim.api.create_buf(False, True) # No file, scratch
+
+    buf = nvim.api.create_buf(False, True)  # No file, scratch
     nvim.api.buf_set_name(buf, "AnyaContainer")
     nvim.api.buf_set_option(buf, "bufhidden", "hide")
     nvim.api.buf_set_option(buf, "filetype", "anya-container")
@@ -233,7 +284,7 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
         container_win = _float_state["container_win"]
         chat_win = _float_state["chat_win"]
         prompt_win = _float_state["prompt_win"]
-        
+
         # If inside any Anya window, close
         if current_win in (container_win, chat_win, prompt_win):
             _close_float_windows(nvim)
@@ -243,49 +294,63 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
             if _valid_win(nvim, prompt_win):
                 nvim.api.set_current_win(prompt_win)
             return (chat_buf, prompt_buf)
-    
+
     # 1. Create Container Window
     container_buf = _get_or_create_container_buf(nvim)
-    
+
+    container_buf_id = _buf_id(container_buf)
+
     if layout == "tab":
-        nvim.command(f"tab sbuffer {container_buf.number}")
+        nvim.command(f"tab sbuffer {container_buf_id}")
     elif layout == "pane":
         width = max(1, nvim.api.get_option("columns") // 3)
-        nvim.command(f"botright vertical sbuffer {container_buf.number}")
+        nvim.command(f"botright vertical sbuffer {container_buf_id}")
         nvim.command(f"vertical resize {width}")
     elif layout == "replace":
-        nvim.command(f"buffer {container_buf.number}")
-    else: # split / default
+        nvim.command(f"buffer {container_buf_id}")
+    else:  # split / default
         height = max(1, nvim.api.get_option("lines") // 3)
-        nvim.command(f"botright sbuffer {container_buf.number}")
+        nvim.command(f"botright sbuffer {container_buf_id}")
         nvim.command(f"resize {height}")
-        
+
     container_win = nvim.api.get_current_win()
     _float_state["container_win"] = container_win
-    
-    # Configure Container Window (minimal)
+
+    # Configure Container Window (minimal, non-focusable)
     nvim.api.win_set_option(container_win, "number", False)
     nvim.api.win_set_option(container_win, "relativenumber", False)
     nvim.api.win_set_option(container_win, "signcolumn", "no")
     nvim.api.win_set_option(container_win, "foldcolumn", "0")
-    nvim.api.win_set_option(container_win, "winhighlight", "Normal:NormalNC,EndOfBuffer:NormalNC")
-    
-    # Auto-focus prompt when entering container
-    # Using buffer-local autocmd for the container buffer
-    group = nvim.api.create_augroup(f"AnyaContainerFocus_{container_buf.number}", {"clear": True})
+    nvim.api.win_set_option(
+        container_win, "winhighlight", "Normal:NormalNC,EndOfBuffer:NormalNC"
+    )
+    # Mark container as a layout window (similar to Snacks.nvim approach)
+    nvim.api.win_set_var(container_win, "anya_layout", True)
+
+    # Container window acts as a layout host for the floats.
+    # If focus ever lands on the container (e.g. via <C-w> navigation),
+    # redirect to one of the float windows so navigation between chat/prompt works.
+    group = nvim.api.create_augroup(
+        f"AnyaContainerFocus_{container_buf_id}", {"clear": True}
+    )
     nvim.api.create_autocmd(
         "WinEnter",
         {
             "group": group,
-            "buffer": container_buf.number,
-            "command": "lua require('anya.float_focus').on_container_enter()",
+            "buffer": container_buf_id,
+            "command": "lua require('anya.float_focus').redirect_to_float()",
         },
     )
 
     # 2. Create Floats inside Container
-    width = nvim.api.win_get_width(container_win)
-    height = nvim.api.win_get_height(container_win)
-    chat_config, prompt_config = _build_float_configs(nvim, width, height, container_win)
+    size = _get_container_size(nvim)
+    if size is None:
+        return (chat_buf, prompt_buf)
+
+    width, height = size
+    chat_config, prompt_config = _build_float_configs(
+        nvim, width, height, container_win
+    )
 
     chat_win = nvim.api.open_win(chat_buf, False, chat_config)
     nvim.api.win_set_option(chat_win, "wrap", True)
@@ -298,16 +363,17 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
     )
     nvim.api.win_set_var(chat_win, "snacks_main", True)
 
-    prompt_win = nvim.api.open_win(prompt_buf, True, prompt_config)
+    prompt_win = nvim.api.open_win(prompt_buf, False, prompt_config)
     set_prompt_window_options(nvim, prompt_win)
 
     _float_state["chat_win"] = chat_win
     _float_state["prompt_win"] = prompt_win
 
     _ensure_resize_autocmd(nvim)
-    
+
+    # Focus prompt window without triggering autocmds to avoid recursion
     if _valid_win(nvim, prompt_win):
-        nvim.api.set_current_win(prompt_win)
+        nvim.command(f"noautocmd call nvim_set_current_win({_win_id(prompt_win)})")
 
     # Set up keymaps for the prompt buffer
     nvim.api.buf_set_keymap(
