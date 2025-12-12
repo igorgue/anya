@@ -179,7 +179,13 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
     layout_win = _anya_state.get("layout_win")
 
     # If windows exist and are valid...
+    # If windows exist and are valid...
     if (_valid_win(nvim, chat_win) or _valid_win(nvim, prompt_win)):
+        # If pane layout is requested, always toggle (close) even if not focused
+        if layout == "pane":
+            _close_anya_windows(nvim)
+            return (chat_buf, prompt_buf)
+
         # Check if we're in an Anya window
         if current_win in (chat_win, prompt_win, layout_win):
             _close_anya_windows(nvim)
