@@ -81,22 +81,35 @@ function M.focus_prompt()
   end
 end
 
----Handle entering the container window
----Immediately redirects focus to the prompt window
----This ensures the container never receives focus
+---Track when leaving a float window so we know if navigation came from inside.
+function M.on_float_leave()
+  local cur_buf = vim.api.nvim_get_current_buf()
+  local ft = vim.api.nvim_buf_get_option(cur_buf, "filetype")
+  vim.g.anya_left_float = (ft == "anya-chat" or ft == "anya-prompt")
+end
+
+---Handle entering the container window.
+---If we just left a float in pane layout, allow navigation to leave the pane.
+---Otherwise, redirect focus back into one of the floats.
 function M.on_container_enter()
-  -- Find the prompt window
-  for _, win_id in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_is_valid(win_id) then
-      local buf = vim.api.nvim_win_get_buf(win_id)
-      local ft = vim.api.nvim_buf_get_option(buf, "filetype")
-      if ft == "anya-prompt" then
-        -- Immediately focus prompt window
-        vim.api.nvim_set_current_win(win_id)
-        return
-      end
+  local left_float = vim.g.anya_left_float or false
+  local layout_mode = vim.w.anya_layout_mode
+  local layout_direction = vim.w.anya_layout_direction or "right"
+
+  -- If we're in pane layout and just left a float, allow navigation out.
+  -- Perform the wincmd that would have gone to the next window.
+  if layout_mode == "pane" and left_float then
+    -- For right-side pane, go left; for left-side pane, go right
+    local direction = layout_direction == "left" and "l" or "h"
+    local cur = vim.api.nvim_get_current_win()
+    pcall(vim.cmd, "wincmd " .. direction)
+    if vim.api.nvim_get_current_win() ~= cur then
+      return -- Successfully navigated away
     end
   end
+
+  -- Otherwise, redirect focus back into one of the floats
+  M.redirect_to_float()
 end
 
 return M

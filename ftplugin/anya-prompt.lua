@@ -191,14 +191,71 @@ vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
   desc = "Schedule @filepath and /command reference highlighting",
 })
 
--- Track last-focused float window for navigation
-vim.api.nvim_create_autocmd({ "WinEnter", "BufWinEnter" }, {
+-- Track leaving/entering prompt for navigation
+vim.api.nvim_create_autocmd("WinLeave", {
   buffer = bufnr,
   callback = function()
-    vim.g.anya_last_float_ft = "anya-prompt"
+    vim.g.anya_left_anya_win = true
   end,
-  desc = "Track last focused Anya float (prompt)",
+  desc = "Track leaving Anya prompt window",
 })
+
+vim.api.nvim_create_autocmd("WinEnter", {
+  buffer = bufnr,
+  callback = function()
+    vim.g.anya_left_anya_win = false
+  end,
+  desc = "Track entering Anya prompt window",
+})
+
+-- Navigation from prompt float: <C-w>k goes to chat, <C-w>h goes to code
+vim.keymap.set("n", "<C-w>k", function()
+  require("anya.float_focus").focus_chat()
+end, { buffer = true, desc = "Focus chat window" })
+
+vim.keymap.set("n", "<C-w><C-k>", function()
+  require("anya.float_focus").focus_chat()
+end, { buffer = true, desc = "Focus chat window" })
+
+vim.keymap.set("n", "<C-w>h", function()
+  -- Find chat window and use it to navigate left
+  local chat_win = nil
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_is_valid(win) then
+      local buf = vim.api.nvim_win_get_buf(win)
+      local ft = vim.api.nvim_buf_get_option(buf, "filetype")
+      if ft == "anya-chat" then
+        chat_win = win
+        break
+      end
+    end
+  end
+  
+  if chat_win then
+    vim.api.nvim_set_current_win(chat_win)
+    pcall(vim.cmd, "wincmd h")
+  end
+end, { buffer = true, desc = "Navigate left to code window" })
+
+vim.keymap.set("n", "<C-w><C-h>", function()
+  -- Find chat window and use it to navigate left
+  local chat_win = nil
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_is_valid(win) then
+      local buf = vim.api.nvim_win_get_buf(win)
+      local ft = vim.api.nvim_buf_get_option(buf, "filetype")
+      if ft == "anya-chat" then
+        chat_win = win
+        break
+      end
+    end
+  end
+  
+  if chat_win then
+    vim.api.nvim_set_current_win(chat_win)
+    pcall(vim.cmd, "wincmd h")
+  end
+end, { buffer = true, desc = "Navigate left to code window" })
 
 -- Initial highlight
 highlight_refs()

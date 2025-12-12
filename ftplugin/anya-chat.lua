@@ -139,14 +139,47 @@ vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
   desc = "Highlight @filepath and /command references immediately on buffer enter",
 })
 
--- Track last-focused float window for navigation
-vim.api.nvim_create_autocmd({ "WinEnter", "BufWinEnter" }, {
+-- Track last Anya window for navigation redirection
+local last_anya_win = nil
+
+vim.api.nvim_create_autocmd("WinLeave", {
   buffer = bufnr,
   callback = function()
-    vim.g.anya_last_float_ft = "anya-chat"
+    vim.g.anya_left_anya_win = true
+    last_anya_win = vim.api.nvim_get_current_win()
   end,
-  desc = "Track last focused Anya float (chat)",
+  desc = "Track leaving Anya chat window",
 })
+
+vim.api.nvim_create_autocmd("WinEnter", {
+  buffer = bufnr,
+  callback = function()
+    last_anya_win = vim.api.nvim_get_current_win()
+    vim.g.anya_left_anya_win = false
+    
+    -- If we entered from outside Anya and user pressed <C-w>j,
+    -- redirect to prompt float
+    local prev_win = vim.fn.win_getid(vim.fn.winnr("#"))
+    if prev_win ~= 0 and vim.api.nvim_win_is_valid(prev_win) then
+      local prev_buf = vim.api.nvim_win_get_buf(prev_win)
+      local prev_ft = vim.api.nvim_buf_get_option(prev_buf, "filetype")
+      -- If previous window was not Anya, don't redirect
+      if not prev_ft:match("^anya%-") then
+        return
+      end
+    end
+  end,
+  desc = "Track entering Anya chat window",
+})
+
+-- Navigate from chat to prompt float
+vim.keymap.set("n", "<C-w>j", function()
+  require("anya.float_focus").focus_prompt()
+end, { buffer = true, desc = "Focus prompt window" })
+
+vim.keymap.set("n", "<C-w><C-j>", function()
+  require("anya.float_focus").focus_prompt()
+end, { buffer = true, desc = "Focus prompt window" })
 
 -- Expose globally so streaming can call it
 _G.anya_highlight_chat_file_refs = highlight_refs

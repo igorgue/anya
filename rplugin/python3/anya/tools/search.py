@@ -7,7 +7,9 @@ from .utils import create_error_handler
 
 @function_tool(failure_error_function=create_error_handler)
 async def search(query: str, cwd: str = None, max_results: int = 2000) -> str:
-    """Searches the project for a string using grep/ripgrep.
+    """Searches the project files for a string using grep/ripgrep.
+
+    **IMPORTANT**: This tool is for files only, it's not a generic web search tool.
 
     Args:
         query: Search query string
