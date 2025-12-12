@@ -107,6 +107,11 @@ vim.keymap.set("i", "<C-c>", function()
   vim.cmd("Anya cancel")
 end, { buffer = true, desc = "Cancel agent response" })
 
+-- Map <C-j> in insert mode to append newline to prompt input
+vim.keymap.set("i", "<C-j>", function()
+  vim.api.nvim_put({""}, 'l', false, true)
+end, { buffer = true, desc = "Append new line to prompt input" })
+
 -- Handle 1 and 2 key presses for edit responses
 -- If there's a pending edit, respond to it
 -- Otherwise, allow normal vim behavior (no-op for numbers)
