@@ -257,5 +257,30 @@ vim.keymap.set("n", "<C-w><C-h>", function()
   end
 end, { buffer = true, desc = "Navigate left to code window" })
 
+-- Also map bare <C-h>, <C-j>, <C-k>, <C-l> for users who have those mapped
+vim.keymap.set("n", "<C-h>", function()
+  -- Find chat window and use it to navigate left
+  local chat_win = nil
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_is_valid(win) then
+      local buf = vim.api.nvim_win_get_buf(win)
+      local ft = vim.api.nvim_buf_get_option(buf, "filetype")
+      if ft == "anya-chat" then
+        chat_win = win
+        break
+      end
+    end
+  end
+  
+  if chat_win then
+    vim.api.nvim_set_current_win(chat_win)
+    pcall(vim.cmd, "wincmd h")
+  end
+end, { buffer = true, desc = "Navigate left to code window" })
+
+vim.keymap.set("n", "<C-k>", function()
+  require("anya.float_focus").focus_chat()
+end, { buffer = true, desc = "Focus chat window" })
+
 -- Initial highlight
 highlight_refs()
