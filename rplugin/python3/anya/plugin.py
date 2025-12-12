@@ -145,6 +145,7 @@ class AnyaPlugin:
         self.allowed_commands = set()  # Persist allowed commands across agent runs
         self._tool_fold_open = False  # Track if a tool fold is currently open
         self._mcp_manager = MCPManager(nvim)  # MCP server manager with caching
+        self._last_layout = "replace"  # Remember the last layout used
 
         # Agent instances (initialized later when MCP servers are ready)
         self._agent = None  # Main CodeAgent instance
@@ -275,11 +276,13 @@ class AnyaPlugin:
         subcommand = args[0] if args else None
 
         if subcommand is None:
-            self.nvim.async_call(self._open_interface)
+            # Reopen with the last layout used
+            self.nvim.async_call(self._open_interface, self._last_layout)
         elif subcommand == "help":
             self.nvim.out_write(self._help_text())
         elif subcommand == "open":
-            self.nvim.async_call(self._open_interface)
+            # Reopen with the last layout used
+            self.nvim.async_call(self._open_interface, self._last_layout)
         elif subcommand == "send":
             if len(args) < 2:
                 self.nvim.err_write("'send' command requires text argument.\n")
@@ -306,6 +309,9 @@ class AnyaPlugin:
             layout: Layout hint (kept for compatibility; "pane" toggles, "tab" opens a new tab)
             direction: Layout hint (kept for compatibility)
         """
+        # Remember the layout for reopening
+        self._last_layout = layout
+        
         if layout == "tab":
             self.nvim.command("tabnew")
         self.chat_buf, self.prompt_buf = buffers.new(self.nvim, layout, direction)
