@@ -312,8 +312,6 @@ class AnyaPlugin:
         # Remember the layout for reopening
         self._last_layout = layout
 
-        if layout == "tab":
-            self.nvim.command("tabnew")
         self.chat_buf, self.prompt_buf = buffers.new(self.nvim, layout, direction)
 
         # Pre-connect MCP servers in background for faster first message
