@@ -1341,7 +1341,44 @@ class AnyaPlugin:
             )
             return
 
-        if not message_text:
+        # Read the message content slice from the buffer so tool-rendered output (e.g., edit UI)
+        # is included, without duplicating earlier messages.
+        message_text_from_buffer = None
+        if self.nvim.api.buf_is_valid(chat_bufnr):
+            lines = self.nvim.api.buf_get_lines(chat_bufnr, 0, -1, False)
+            message_markers: list[tuple[int, str]] = []
+
+            def parse_message_id(line: str) -> str | None:
+                prefix = markers.MESSAGE_PREFIX
+                suffix = markers.MESSAGE_SUFFIX
+                if not line.startswith(prefix) or not line.endswith(suffix):
+                    return None
+                return line[len(prefix) : -len(suffix)].strip()
+
+            for idx, line in enumerate(lines):
+                msg_marker_id = parse_message_id(line)
+                if msg_marker_id:
+                    message_markers.append((idx, msg_marker_id))
+
+            # Find current message bounds
+            start_idx = None
+            end_idx = len(lines)
+            for i, (idx, marker_id) in enumerate(message_markers):
+                if marker_id == msg_id:
+                    start_idx = idx + 1
+                    if i + 1 < len(message_markers):
+                        end_idx = message_markers[i + 1][0]
+                    break
+
+            if start_idx is not None and start_idx <= end_idx:
+                message_slice = lines[start_idx:end_idx]
+                while message_slice and message_slice[0] == "":
+                    message_slice.pop(0)  # drop leading blank separators
+                message_text_from_buffer = "\n".join(message_slice).rstrip("\n")
+
+        if message_text_from_buffer:
+            message_text = message_text_from_buffer
+        elif not message_text:
             self.nvim.err_write(f"Warning: Empty message content for {msg_id}\n")
             return
 

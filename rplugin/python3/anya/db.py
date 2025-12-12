@@ -382,7 +382,4 @@ def rebuild_buffer_content(
             else:
                 lines.append(msg["content"])
 
-        if idx < len(messages) - 1:
-            lines.append("")
-
     return "\n".join(lines)
