@@ -84,6 +84,16 @@ vim.api.nvim_create_autocmd("InsertEnter", {
   desc = "Stop history navigation when entering insert mode",
 })
 
+-- Dynamically adjust prompt window height based on content
+vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP" }, {
+  group = augroup,
+  buffer = 0,
+  callback = function()
+    vim.fn.AnyaRepositionFloats()
+  end,
+  desc = "Adjust prompt height based on content",
+})
+
 -- History navigation keymaps (normal mode only to avoid conflicts)
 vim.keymap.set("n", "<C-p>", history_previous, { buffer = true, desc = "Previous prompt in history" })
 vim.keymap.set("n", "<C-n>", history_next, { buffer = true, desc = "Next prompt in history" })

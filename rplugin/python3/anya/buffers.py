@@ -3,7 +3,8 @@ from pynvim import Nvim
 
 CHAT_TITLE = "Chat"
 PROMPT_TITLE = "Prompt"
-PROMPT_HEIGHT = 3
+PROMPT_HEIGHT = 1  # Start with 1 line, will grow dynamically
+PROMPT_MAX_HEIGHT = 20  # Maximum height for prompt window
 
 _anya_state = {
     "chat_win": None,
@@ -266,13 +267,18 @@ def reposition_floats(nvim: Nvim):
         chat_width = nvim.api.win_get_width(chat_win)
         chat_height = nvim.api.win_get_height(chat_win)
 
+        # Get prompt buffer content to determine height
+        prompt_buf = nvim.api.win_get_buf(prompt_win)
+        line_count = nvim.api.buf_line_count(prompt_buf)
+        prompt_height = min(max(1, line_count), PROMPT_MAX_HEIGHT)
+
         prompt_config = {
             "relative": "win",
             "win": chat_win,
-            "row": chat_height - PROMPT_HEIGHT,
+            "row": chat_height - prompt_height,
             "col": 1,
             "width": max(1, chat_width - 2),
-            "height": PROMPT_HEIGHT,
+            "height": prompt_height,
         }
 
         nvim.api.win_set_config(prompt_win, prompt_config)
