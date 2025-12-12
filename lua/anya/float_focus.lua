@@ -64,17 +64,39 @@ function M.focus_chat()
   end
 end
 
----Focus the prompt window
-function M.focus_prompt()
+---Handle entering the container window
+---Acts as a router:
+--- - From outside: Focus Prompt
+--- - From inside (Chat/Prompt): Bounce out (Left)
+function M.on_container_enter()
+  -- Identify windows
+  local chat_win = nil
+  local prompt_win = nil
   local windows = vim.api.nvim_list_wins()
+  
   for _, win_id in ipairs(windows) do
     if vim.api.nvim_win_is_valid(win_id) then
       local buf = vim.api.nvim_win_get_buf(win_id)
       local ft = vim.api.nvim_buf_get_option(buf, "filetype")
-      if ft == "anya-prompt" then
-        vim.api.nvim_set_current_win(win_id)
-        return
+      if ft == "anya-chat" then
+        chat_win = win_id
+      elseif ft == "anya-prompt" then
+        prompt_win = win_id
       end
+    end
+  end
+
+  local prev_win = vim.fn.win_getid(vim.fn.winnr('#'))
+  
+  -- Check if we came from one of our floats
+  if (prompt_win and prev_win == prompt_win) or (chat_win and prev_win == chat_win) then
+    -- Came from inside, user wants to leave. Bounce Left.
+    -- TODO: Determine direction dynamically if layout supports left-side pane
+    vim.cmd("wincmd h")
+  else
+    -- Came from outside (or unknown), focus Prompt
+    if prompt_win and vim.api.nvim_win_is_valid(prompt_win) then
+      vim.api.nvim_set_current_win(prompt_win)
     end
   end
 end

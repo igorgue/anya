@@ -278,7 +278,7 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
         {
             "group": group,
             "buffer": container_buf.number,
-            "command": "lua require('anya.float_focus').focus_prompt()",
+            "command": "lua require('anya.float_focus').on_container_enter()",
         },
     )
 
