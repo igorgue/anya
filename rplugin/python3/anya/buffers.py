@@ -64,10 +64,6 @@ def _valid_win(nvim: Nvim, winid: int | None) -> bool:
     return bool(winid) and nvim.api.win_is_valid(winid)
 
 
-
-
-
-
 def _close_anya_windows(nvim: Nvim):
     """Close Anya chat and prompt windows."""
     if _valid_win(nvim, _anya_state["prompt_win"]):
@@ -107,8 +103,6 @@ def is_in_anya_buffer(nvim: Nvim) -> bool:
     current_buf = nvim.api.get_current_buf()
     ft = nvim.api.buf_get_option(current_buf, "filetype")
     return ft in ("anya-chat", "anya-prompt")
-
-
 
 
 def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:

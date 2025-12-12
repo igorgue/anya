@@ -156,7 +156,7 @@ vim.api.nvim_create_autocmd("WinEnter", {
   callback = function()
     last_anya_win = vim.api.nvim_get_current_win()
     vim.g.anya_left_anya_win = false
-    
+
     -- If we entered from outside Anya and user pressed <C-w>j,
     -- redirect to prompt float
     local prev_win = vim.fn.win_getid(vim.fn.winnr("#"))

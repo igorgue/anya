@@ -269,6 +269,33 @@ class AnyaPlugin:
         self._tool_fold_open = bool(is_open)
         self.nvim.vars["anya_tool_fold_open"] = bool(is_open)
 
+    def _is_anya_open(self) -> bool:
+        """Check if Anya chat or prompt windows are currently open.
+
+        Returns:
+            True if any Anya window is open
+        """
+        for win in self.nvim.api.list_wins():
+            try:
+                if not self.nvim.api.win_is_valid(win):
+                    continue
+                buf = self.nvim.api.win_get_buf(win)
+                ft = self.nvim.api.buf_get_option(buf, "filetype")
+                if ft in ("anya-chat", "anya-prompt"):
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _is_anya_pane_open(self) -> bool:
+        """Check if Anya is currently open as a pane (not floating/tab).
+
+        Returns:
+            True if Anya is open as a pane
+        """
+        # If last layout was pane and Anya is open, it's a pane
+        return self._last_layout == "pane" and self._is_anya_open()
+
     @pynvim.command(
         "Anya", nargs="*", range="", sync=False, complete="customlist,AnyaComplete"
     )
@@ -292,6 +319,11 @@ class AnyaPlugin:
         elif subcommand == "tab":
             self.nvim.async_call(self._open_interface, "tab")
         elif subcommand == "pane":
+            # Check if Anya is open as a pane - if so, allow toggling via buffers.new()
+            # If Anya is open in a different layout, prevent opening as pane
+            if self._is_anya_open() and not self._is_anya_pane_open():
+                self.nvim.out_write("Anya is already open\n")
+                return
             # Check for direction argument
             direction = (
                 args[1] if len(args) > 1 and args[1] in ["right", "left"] else "right"
@@ -1580,7 +1612,7 @@ Usage:
     :Anya help               Show this help message
     :Anya open               Open the Anya interface (floating layout)
     :Anya tab                Open the Anya interface in a new tab (floating layout)
-    :Anya pane [right|left]  Toggle the floating Anya interface
+    :Anya pane [right|left]  Toggle Anya in a pane (blocked if open in different layout)
     :Anya send <prompt>      Send a prompt to the agent
     :Anya history            Open the conversation history picker
     :Anya cancel             Cancel the current agent response (Ctrl+C)

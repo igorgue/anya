@@ -240,7 +240,7 @@ vim.keymap.set("n", "<C-w>h", function()
       end
     end
   end
-  
+
   if chat_win then
     vim.api.nvim_set_current_win(chat_win)
     pcall(vim.cmd, "wincmd h")
@@ -260,7 +260,7 @@ vim.keymap.set("n", "<C-w><C-h>", function()
       end
     end
   end
-  
+
   if chat_win then
     vim.api.nvim_set_current_win(chat_win)
     pcall(vim.cmd, "wincmd h")
@@ -281,7 +281,7 @@ vim.keymap.set("n", "<C-h>", function()
       end
     end
   end
-  
+
   if chat_win then
     vim.api.nvim_set_current_win(chat_win)
     pcall(vim.cmd, "wincmd h")
