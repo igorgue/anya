@@ -186,6 +186,10 @@ vim.keymap.set("n", "<C-j>", function()
   require("anya.float_focus").focus_prompt()
 end, { buffer = true, desc = "Focus prompt window" })
 
+vim.keymap.set("n", "<localleader><localleader>", function()
+  require("anya.float_focus").focus_prompt()
+end, { buffer = true, desc = "Focus chat window (toggle)" })
+
 -- Expose globally so streaming can call it
 _G.anya_highlight_chat_file_refs = highlight_refs
 
