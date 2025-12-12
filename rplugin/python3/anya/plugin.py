@@ -300,12 +300,14 @@ class AnyaPlugin:
             self.cancel_agent()
 
     def _open_interface(self, layout="split", direction=None):
-        """Open the Anya interface with chat and prompt buffers.
+        """Open the Anya interface with floating chat and prompt windows.
 
         Args:
-            layout: The layout type - "split" (default), "tab", or "pane"
-            direction: For "pane" layout, the direction - "right" (default) or "left"
+            layout: Layout hint (kept for compatibility; "pane" toggles, "tab" opens a new tab)
+            direction: Layout hint (kept for compatibility)
         """
+        if layout == "tab":
+            self.nvim.command("tabnew")
         self.chat_buf, self.prompt_buf = buffers.new(self.nvim, layout, direction)
 
         # Pre-connect MCP servers in background for faster first message
@@ -1568,11 +1570,11 @@ For more help, see :h anya"""
         return f"""anya v{VERSION}
 
 Usage:
-    :Anya                    Open the Anya interface (split layout)
+    :Anya                    Open the Anya interface (floating layout)
     :Anya help               Show this help message
-    :Anya open               Open the Anya interface (split layout)
-    :Anya tab                Open the Anya interface in a new tab
-    :Anya pane [right|left]  Open the Anya interface in a pane (default: right)
+    :Anya open               Open the Anya interface (floating layout)
+    :Anya tab                Open the Anya interface in a new tab (floating layout)
+    :Anya pane [right|left]  Toggle the floating Anya interface
     :Anya send <prompt>      Send a prompt to the agent
     :Anya history            Open the conversation history picker
     :Anya cancel             Cancel the current agent response (Ctrl+C)
@@ -1704,6 +1706,14 @@ Usage:
         if not data:
             return None
         return db.rebuild_buffer_content(data["conversation"], data["messages"])
+
+    @pynvim.function("AnyaRepositionFloats", sync=True)
+    def reposition_floats(self, _args):
+        """Reposition floating windows when terminal is resized.
+        
+        Called by VimResized autocmd.
+        """
+        buffers.reposition_floats(self.nvim)
 
     @pynvim.function("AnyaCompleteAsync", sync=False)
     def anya_complete_async(self, args):

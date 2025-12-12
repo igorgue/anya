@@ -3,15 +3,12 @@ from pynvim import Nvim
 
 CHAT_TITLE = "Chat"
 PROMPT_TITLE = "Prompt"
-PROMPT_HEIGHT = 8
+PROMPT_HEIGHT = 3
 
-# Track pane state for toggling
-_pane_state = {
-    "is_open": False,
-    "direction": "right",
+_float_state = {
     "chat_win": None,
     "prompt_win": None,
-    "original_win": None,
+    "resize_group": None,
 }
 
 
@@ -40,9 +37,93 @@ def set_prompt_window_options(nvim: Nvim, winid: int):
     """
     nvim.api.win_set_option(winid, "wrap", True)
     nvim.api.win_set_option(winid, "linebreak", True)
+    nvim.api.win_set_option(winid, "winhighlight", "Normal:Normal")
 
     # Delay winbar setting to avoid conflicts with other configurations
     nvim.async_call(lambda: nvim.api.win_set_option(winid, "winbar", ""))
+
+
+def _valid_win(nvim: Nvim, winid: int | None) -> bool:
+    return bool(winid) and nvim.api.win_is_valid(winid)
+
+
+def _build_float_configs(nvim: Nvim):
+    columns = max(1, nvim.api.get_option("columns"))
+    usable_height = max(
+        1,
+        nvim.api.get_option("lines") - nvim.api.get_option("cmdheight") - 1,
+    )
+    # Account for border space in prompt height
+    prompt_height = min(PROMPT_HEIGHT, max(1, usable_height - 3))
+    prompt_row = max(0, usable_height - prompt_height - 1)
+    chat_height = max(1, prompt_row)
+
+    chat_config = {
+        "relative": "editor",
+        "row": 0,
+        "col": 0,
+        "width": columns,
+        "height": chat_height,
+        "focusable": True,
+        "style": "minimal",
+        "zindex": 1,
+    }
+
+    prompt_config = {
+        "relative": "editor",
+        "row": prompt_row,
+        "col": 0,
+        "width": columns,
+        "height": prompt_height,
+        "focusable": True,
+        "style": "minimal",
+        "zindex": 1,
+        "border": "rounded",
+        "title": "Prompt",
+        "title_pos": "center",
+    }
+
+    return chat_config, prompt_config
+
+
+def _close_float_windows(nvim: Nvim):
+    if _valid_win(nvim, _float_state["prompt_win"]):
+        nvim.api.win_close(_float_state["prompt_win"], True)
+    if _valid_win(nvim, _float_state["chat_win"]):
+        nvim.api.win_close(_float_state["chat_win"], True)
+    _float_state["chat_win"] = None
+    _float_state["prompt_win"] = None
+
+
+def _reposition_float_windows(nvim: Nvim):
+    if not (
+        _valid_win(nvim, _float_state["chat_win"])
+        or _valid_win(nvim, _float_state["prompt_win"])
+    ):
+        return
+
+    chat_config, prompt_config = _build_float_configs(nvim)
+
+    if _valid_win(nvim, _float_state["chat_win"]):
+        nvim.api.win_set_config(_float_state["chat_win"], chat_config)
+    if _valid_win(nvim, _float_state["prompt_win"]):
+        nvim.api.win_set_config(_float_state["prompt_win"], prompt_config)
+
+
+def _ensure_resize_autocmd(nvim: Nvim):
+    if _float_state["resize_group"] is not None:
+        return
+
+    group = nvim.api.create_augroup("AnyaFloatLayout", {"clear": True})
+    _float_state["resize_group"] = group
+
+    nvim.api.create_autocmd(
+        "VimResized",
+        {
+            "group": group,
+            "command": "call AnyaRepositionFloats()",
+        },
+    )
 
 
 def get_buffer_content(nvim: Nvim, bufnr: int) -> str:
@@ -80,20 +161,13 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
 
     Args:
         nvim: Neovim instance
-        layout: Layout type - "split" (default), "tab", or "pane"
-        direction: For pane layout - "right" (default) or "left"
+        layout: Layout type (kept for compatibility)
+        direction: Unused (kept for compatibility)
 
     Returns:
         Tuple of (chat_buf, prompt_buf) or (None, None) if operation was blocked
     """
-    global _pane_state
-
-    # For pane layout: if user is in an Anya buffer but pane is not open,
-    # they're using a different layout - show error instead of opening pane
-    if layout == "pane" and is_in_anya_buffer(nvim) and not _pane_state["is_open"]:
-        nvim.err_write("Anya: Already open\n")
-        return (None, None)
-
+    _ = direction
     chat_buf = None
     prompt_buf = None
 
@@ -118,131 +192,60 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
         nvim.api.buf_set_option(prompt_buf, "swapfile", False)
         set_prompt_buffer_options(nvim, prompt_buf)
 
-    if layout == "tab":
-        # Create a new tab
-        nvim.command("tabnew")
-        nvim.command("enew")
+    chat_config, prompt_config = _build_float_configs(nvim)
 
-        # Create prompt window first (at bottom)
-        nvim.command("botright split")
-        nvim.command(f"resize {PROMPT_HEIGHT}")
-        prompt_win = nvim.api.get_current_win()
-        nvim.api.win_set_option(prompt_win, "winfixheight", True)
-        nvim.api.win_set_buf(prompt_win, prompt_buf)
-        set_prompt_window_options(nvim, prompt_win)
+    # Toggle off when using pane layout and floats are already visible
+    if layout == "pane" and (
+        _valid_win(nvim, _float_state["chat_win"])
+        or _valid_win(nvim, _float_state["prompt_win"])
+    ):
+        _close_float_windows(nvim)
+        return (chat_buf, prompt_buf)
 
-        # Go back to top window and set up chat
-        nvim.command("wincmd k")
-        chat_win = nvim.api.get_current_win()
-        nvim.api.win_set_buf(chat_win, chat_buf)
+    chat_win = _float_state["chat_win"] if _valid_win(nvim, _float_state["chat_win"]) else None
+    prompt_win = _float_state["prompt_win"] if _valid_win(nvim, _float_state["prompt_win"]) else None
+
+    if not chat_win:
+        chat_win = nvim.api.open_win(chat_buf, False, chat_config)
         nvim.api.win_set_option(chat_win, "wrap", True)
         nvim.api.win_set_option(chat_win, "linebreak", True)
         nvim.api.win_set_option(chat_win, "showbreak", "")
-        # Delay winbar setting to avoid conflicts with other configurations
+        nvim.api.win_set_option(chat_win, "winhighlight", "Normal:Normal")
         nvim.exec_lua(
-            "local win_id = ... vim.defer_fn(function() vim.api.nvim_set_option_value('winbar', '', {win = win_id}) end, 100)",
+            "local win_id = ... vim.defer_fn(function() if vim.api.nvim_win_is_valid(win_id) then vim.api.nvim_set_option_value('winbar', '', {win = win_id}) end end, 100)",
             chat_win,
         )
-        # Mark chat window as preferred main for Snacks.picker
+        nvim.api.win_set_var(chat_win, "snacks_main", True)
+    else:
+        nvim.api.win_set_buf(chat_win, chat_buf)
+        nvim.api.win_set_config(chat_win, chat_config)
         nvim.api.win_set_var(chat_win, "snacks_main", True)
 
-        # Focus the prompt window so user can start typing
+    if not prompt_win:
+        prompt_win = nvim.api.open_win(prompt_buf, True, prompt_config)
+        set_prompt_window_options(nvim, prompt_win)
+    else:
+        nvim.api.win_set_buf(prompt_win, prompt_buf)
+        nvim.api.win_set_config(prompt_win, prompt_config)
+        set_prompt_window_options(nvim, prompt_win)
         nvim.api.set_current_win(prompt_win)
 
-    elif layout == "pane":
-        # Handle pane toggling
-        direction = direction or "right"
+    _float_state["chat_win"] = chat_win
+    _float_state["prompt_win"] = prompt_win
 
-        if _pane_state["is_open"]:
-            # Close the pane
-            close_pane(nvim)
-            _pane_state["is_open"] = False
-            # Return existing buffers (they're still valid)
-            for buf in nvim.buffers:
-                if buf.name.endswith(CHAT_TITLE):
-                    chat_buf = buf
-                elif buf.name.endswith(PROMPT_TITLE):
-                    prompt_buf = buf
-            return (chat_buf, prompt_buf)
-        else:
-            # Remember current window
-            _pane_state["original_win"] = nvim.api.get_current_win()
+    _ensure_resize_autocmd(nvim)
+    
+    # Set up WinEnter autocmd to prevent focus on non-float windows
+    group = nvim.api.create_augroup("AnyaFloatFocus", {"clear": True})
+    nvim.api.create_autocmd(
+        "WinEnter",
+        {
+            "group": group,
+            "command": "lua require('anya.float_focus').redirect_to_float()",
+        },
+    )
 
-            # Create a vertical pane for Anya (don't close existing windows)
-            if direction == "left":
-                nvim.command("topleft vsplit")
-            else:  # default to right
-                nvim.command("botright vsplit")
-
-            # This is our main Anya pane window (will become chat)
-            pane_win = nvim.api.get_current_win()
-
-            # Set pane width to 30% of screen width
-            screen_width = nvim.api.get_option("columns")
-            pane_width = max(1, int(screen_width * 0.3))
-            nvim.command(f"vertical resize {pane_width}")
-
-            # Create prompt window first (at bottom of pane)
-            nvim.command("split")
-            prompt_win = nvim.api.get_current_win()
-            nvim.command(f"resize {PROMPT_HEIGHT}")
-            nvim.api.win_set_option(prompt_win, "winfixheight", True)
-            nvim.api.win_set_buf(prompt_win, prompt_buf)
-            set_prompt_window_options(nvim, prompt_win)
-
-            # Go back to top window and set up chat
-            nvim.command("wincmd k")
-            chat_win = nvim.api.get_current_win()
-            nvim.api.win_set_buf(chat_win, chat_buf)
-            nvim.api.win_set_option(chat_win, "wrap", True)
-            nvim.api.win_set_option(chat_win, "linebreak", True)
-            nvim.api.win_set_option(chat_win, "showbreak", "")
-            # Delay winbar setting to avoid conflicts with other configurations
-            nvim.exec_lua(
-                "local win_id = ... vim.defer_fn(function() vim.api.nvim_set_option_value('winbar', '', {win = win_id}) end, 100)",
-                chat_win,
-            )
-            # Mark chat window as preferred main for Snacks.picker
-            nvim.api.win_set_var(chat_win, "snacks_main", True)
-
-            # Focus the prompt window so user can start typing
-            nvim.api.set_current_win(prompt_win)
-
-            # Store pane state for toggling
-            _pane_state["is_open"] = True
-            _pane_state["direction"] = direction
-            _pane_state["chat_win"] = chat_win
-            _pane_state["prompt_win"] = prompt_win
-    else:  # default "split" layout
-        nvim.command("enew")
-
-        if len(nvim.api.list_wins()) > 1:
-            nvim.command("only")
-
-        # Create prompt window first (at bottom)
-        nvim.command("botright split")
-        nvim.command(f"resize {PROMPT_HEIGHT}")
-        prompt_win = nvim.api.get_current_win()
-        nvim.api.win_set_option(prompt_win, "winfixheight", True)
-        nvim.api.win_set_buf(prompt_win, prompt_buf)
-        set_prompt_window_options(nvim, prompt_win)
-
-        # Go back to top window and set up chat
-        nvim.command("wincmd k")
-        chat_win = nvim.api.get_current_win()
-        nvim.api.win_set_buf(chat_win, chat_buf)
-        nvim.api.win_set_option(chat_win, "wrap", True)
-        nvim.api.win_set_option(chat_win, "linebreak", True)
-        nvim.api.win_set_option(chat_win, "showbreak", "")
-        # Delay winbar setting to avoid conflicts with other configurations
-        nvim.exec_lua(
-            "local win_id = ... vim.defer_fn(function() vim.api.nvim_set_option_value('winbar', '', {win = win_id}) end, 100)",
-            chat_win,
-        )
-        # Mark chat window as preferred main for Snacks.picker
-        nvim.api.win_set_var(chat_win, "snacks_main", True)
-
-        # Focus the prompt window so user can start typing
+    if _valid_win(nvim, prompt_win):
         nvim.api.set_current_win(prompt_win)
 
     # Set up keymaps for the prompt buffer
@@ -265,27 +268,13 @@ def new(nvim: Nvim, layout="split", direction=None) -> tuple[object]:
 
 
 def close_pane(nvim: Nvim):
-    """Close the pane layout and return to the original window."""
-    global _pane_state
+    """Close floating windows (kept for backward compatibility)."""
+    _close_float_windows(nvim)
 
-    # Close the prompt window first (it's inside the pane)
-    if _pane_state["prompt_win"] and nvim.api.win_is_valid(_pane_state["prompt_win"]):
-        nvim.api.win_close(_pane_state["prompt_win"], True)
 
-    # Close the chat window (the main pane)
-    if _pane_state["chat_win"] and nvim.api.win_is_valid(_pane_state["chat_win"]):
-        nvim.api.win_close(_pane_state["chat_win"], True)
-
-    # Return to the original window
-    if _pane_state["original_win"] and nvim.api.win_is_valid(
-        _pane_state["original_win"]
-    ):
-        nvim.api.set_current_win(_pane_state["original_win"])
-
-    # Reset pane state
-    _pane_state["chat_win"] = None
-    _pane_state["prompt_win"] = None
-    _pane_state["original_win"] = None
+def reposition_floats(nvim: Nvim):
+    """Reposition floating windows (used by autocmd callback)."""
+    _reposition_float_windows(nvim)
 
 
 def get_file_completions_async(nvim: Nvim, base: str, callback_id: str):

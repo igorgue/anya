@@ -22,7 +22,7 @@ Named after Anya Forger from Spy x Family - she can read minds, this plugin read
 - Bootstrap script that sets `g:loaded_anya`
 
 **Buffer Management** (`rplugin/python3/anya/buffers.py`)
-- Creates split layout with chat and prompt buffers
+- Creates floating chat and prompt windows (chat fills space, prompt docked to last 3 lines)
 - Chat buffer: `anya-chat` filetype for conversation display
 - Prompt buffer: `anya-prompt` filetype for user input
 - Streaming responses via Lua animation
@@ -71,7 +71,7 @@ Named after Anya Forger from Spy x Family - she can read minds, this plugin read
 
 ### Data Flow
 
-1. User opens interface with `:Anya` -> creates split layout with chat/prompt buffers
+1. User opens interface with `:Anya` -> creates floating chat/prompt windows
 2. User types in prompt buffer -> presses Enter to send
 3. Lua `conversation.send_message()` -> formats message, calls `AnyaSend`
 4. Python `AnyaSend` -> runs agent in background asyncio loop
