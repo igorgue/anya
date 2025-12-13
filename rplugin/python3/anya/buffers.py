@@ -4,12 +4,14 @@ from pynvim import Nvim
 CHAT_TITLE = "Chat"
 PROMPT_TITLE = "Prompt"
 PROMPT_HEIGHT = 1  # Start with 1 line, will grow dynamically
-PROMPT_MAX_HEIGHT = 20  # Maximum height for prompt window
+PROMPT_MAX_HEIGHT = 30  # Maximum height for prompt window
 
 _anya_state = {
     "layout_win": None,  # The container window (split)
     "chat_win": None,  # Floating window for chat
     "prompt_win": None,  # Floating window for prompt
+    # Persist the last known prompt height (content height, excluding float border)
+    "prompt_height": PROMPT_HEIGHT,
 }
 
 
@@ -67,6 +69,19 @@ def _valid_win(nvim: Nvim, winid: int | None) -> bool:
 
 def _close_anya_windows(nvim: Nvim):
     """Close Anya chat and prompt windows."""
+    # Capture the current prompt height (if open) so it can be restored on reopen.
+    if _valid_win(nvim, _anya_state.get("prompt_win")):
+        try:
+            _anya_state["prompt_height"] = max(
+                1,
+                min(
+                    nvim.api.win_get_height(_anya_state["prompt_win"]),
+                    PROMPT_MAX_HEIGHT,
+                ),
+            )
+        except Exception:
+            pass
+
     if _valid_win(nvim, _anya_state.get("prompt_win")):
         try:
             nvim.api.win_close(_anya_state["prompt_win"], True)
@@ -120,13 +135,16 @@ def is_in_anya_buffer(nvim: Nvim) -> bool:
     return ft in ("anya-chat", "anya-prompt")
 
 
-def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
+def new(
+    nvim: Nvim, layout="replace", direction=None, force_open=False
+) -> tuple[object]:
     """Create the Anya UI layout with chat and prompt buffers.
 
     Args:
         nvim: Neovim instance
         layout: Layout type ("replace", "pane", "tab", "split")
         direction: For pane layout, "left" or "right" (default)
+        force_open: If True, force opening (and re-layout) instead of toggling closed.
 
     Returns:
         Tuple of (chat_buf, prompt_buf)
@@ -179,22 +197,32 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
     layout_win = _anya_state.get("layout_win")
 
     # If windows exist and are valid...
-    # If windows exist and are valid...
     if _valid_win(nvim, chat_win) or _valid_win(nvim, prompt_win):
-        # If pane layout is requested, always toggle (close) even if not focused
-        if layout == "pane":
-            _close_anya_windows(nvim)
-            return (chat_buf, prompt_buf)
+        if not force_open:
+            # If pane layout is requested, always toggle (close) even if not focused
+            if layout == "pane":
+                _close_anya_windows(nvim)
+                return (chat_buf, prompt_buf)
 
-        # Check if we're in an Anya window
-        if current_win in (chat_win, prompt_win, layout_win):
-            _close_anya_windows(nvim)
-            return (chat_buf, prompt_buf)
+            # Check if we're in an Anya window
+            if current_win in (chat_win, prompt_win, layout_win):
+                _close_anya_windows(nvim)
+                return (chat_buf, prompt_buf)
+            else:
+                # Focus prompt if outside
+                if _valid_win(nvim, prompt_win):
+                    nvim.api.set_current_win(prompt_win)
+                return (chat_buf, prompt_buf)
         else:
-            # Focus prompt if outside
-            if _valid_win(nvim, prompt_win):
-                nvim.api.set_current_win(prompt_win)
-            return (chat_buf, prompt_buf)
+            # Force open: If windows are already valid, ensure prompt focus and return
+            # This avoids closing and reopening the pane (flicker)
+            if _valid_win(nvim, prompt_win) and _valid_win(nvim, chat_win):
+                if _valid_win(nvim, prompt_win):
+                    nvim.api.set_current_win(prompt_win)
+                return (chat_buf, prompt_buf)
+
+            # If windows are in partial state (e.g. invalid), close to rebuild
+            _close_anya_windows(nvim)
 
     # Create layout based on type
     chat_buf_id = _buf_id(chat_buf)
@@ -231,7 +259,20 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
     layout_height = nvim.api.win_get_height(layout_win)
 
     # Calculate heights
-    prompt_height = PROMPT_HEIGHT
+    # Prefer persisted height from the last open prompt window; fall back to buffer line count.
+    try:
+        buf_line_count = nvim.api.buf_line_count(prompt_buf_id)
+    except Exception:
+        buf_line_count = PROMPT_HEIGHT
+
+    prompt_height = int(_anya_state.get("prompt_height") or PROMPT_HEIGHT)
+    prompt_height = max(1, min(prompt_height, PROMPT_MAX_HEIGHT))
+
+    # If the prompt buffer already has content, ensure we don't reopen at 1 line.
+    # This also covers the common case where the prompt grew via blank lines.
+    if buf_line_count > prompt_height:
+        prompt_height = min(buf_line_count, PROMPT_MAX_HEIGHT)
+
     chat_height = max(1, layout_height - prompt_height)
 
     # Create Chat Window (Floating inside layout)
@@ -479,6 +520,9 @@ def reposition_floats(nvim: Nvim):
         prompt_buf = nvim.api.win_get_buf(prompt_win)
         line_count = nvim.api.buf_line_count(prompt_buf)
         prompt_height = min(max(1, line_count), PROMPT_MAX_HEIGHT)
+
+        # Persist for next reopen (e.g. pane toggle)
+        _anya_state["prompt_height"] = prompt_height
 
         # Calculate sizes (prompt border takes 2 lines)
         real_prompt_height = prompt_height + 2

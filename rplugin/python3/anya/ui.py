@@ -16,6 +16,16 @@ def get_chat_buffer(nvim):
     return None
 
 
+def get_prompt_buffer(nvim):
+    """Find the prompt buffer by filetype."""
+    for buf in nvim.buffers:
+        if buf.valid:
+            ft = nvim.api.buf_get_option(buf, "filetype")
+            if ft == "anya-prompt":
+                return buf
+    return None
+
+
 async def get_buffer_content_async(nvim, bufnr: int) -> str:
     """Get buffer content from async context using a future."""
     future: concurrent.futures.Future[str] = concurrent.futures.Future()
@@ -45,6 +55,52 @@ def append_to_chat_buffer(nvim, bufnr, text):
         bufnr, line_count - 1, last_col, line_count - 1, last_col, lines
     )
     autoscroll(nvim, bufnr)
+
+
+def append_to_prompt_buffer(nvim, bufnr, text):
+    """Append text to the prompt buffer and move cursor to end.
+
+    Handles empty buffer case effectively.
+    """
+    if not nvim.api.buf_is_valid(bufnr):
+        return
+    nvim.api.buf_set_option(bufnr, "modifiable", True)
+
+    lines = text.split("\n")
+    line_count = nvim.api.buf_line_count(bufnr)
+
+    # Check if buffer is effectively empty (one empty line)
+    first_line = nvim.api.buf_get_lines(bufnr, 0, 1, False)[0]
+    if line_count == 1 and first_line == "":
+        nvim.api.buf_set_lines(bufnr, 0, 1, False, lines)
+    else:
+        # Check if we need a newline content separator
+        last_line_content = nvim.api.buf_get_lines(
+            bufnr, line_count - 1, line_count, False
+        )[0]
+        if last_line_content != "":
+            # Append starting on the next line
+            # We use buf_set_lines to append
+            nvim.api.buf_set_lines(bufnr, line_count, line_count, False, [""] + lines)
+        else:
+            # Overwrite the empty last line? No, just append?
+            # If last line is empty, we can start writing there?
+            # But buf_set_lines at line_count inserts AFTER.
+            # We want to replace the last empty line or insert at it.
+            # Let's just append.
+            nvim.api.buf_set_lines(bufnr, line_count, line_count, False, lines)
+
+    # Move cursor to end of new content
+    try:
+        new_line_count = nvim.api.buf_line_count(bufnr)
+        for win in nvim.api.list_wins():
+            if nvim.api.win_get_buf(win) == bufnr:
+                nvim.api.set_current_win(win)
+                # Use a large column value to forcibly set cursor to the end of the line
+                # row is 1-indexed.
+                nvim.api.win_set_cursor(win, [new_line_count, 100000])
+    except Exception:
+        pass
 
 
 def stream_text_to_buffer(nvim, bufnr, text):

@@ -189,6 +189,102 @@ class AnyaPlugin:
         elif subcommand == "tab":
             self.nvim.async_call(self._open_interface, "tab")
         elif subcommand == "pane":
+            # Check for selected code
+            selection = None
+            is_selection = False
+
+            start_l = _range[0]
+            end_l = _range[1]
+
+            # Detect Selection vs Toggle Intent
+            current_mode = self.nvim.api.get_mode()["mode"]
+
+            if current_mode in ["v", "V", "\x16"]:
+                # 1. Active Visual Mode (<cmd> mapping)
+                is_selection = True
+                try:
+                    v_pos = self.nvim.fn.getpos("v")
+                    c_pos = self.nvim.fn.getpos(".")
+                    start_l, end_l = v_pos[1], c_pos[1]
+                    if start_l > end_l:
+                        start_l, end_l = end_l, start_l
+                except Exception:
+                    pass
+            elif end_l > start_l:
+                # 2. Explicit Multi-line Range (:'<,'>Anya or :10,20Anya)
+                is_selection = True
+            else:
+                # 3. Single-line Range fallback
+                # Only treat as selection if marks exactly match the range.
+                # This supports single-line selections via ':' command.
+                try:
+                    start_mark = self.nvim.call("getpos", "'<")[1]
+                    end_mark = self.nvim.call("getpos", "'>")[1]
+                    if start_mark == start_l and end_mark == end_l:
+                        is_selection = True
+                except Exception:
+                    pass
+
+            # Process Selection
+            if is_selection:
+                try:
+                    lines = self.nvim.api.buf_get_lines(0, start_l - 1, end_l, False)
+                    if lines:
+                        content = "\n".join(lines)
+                        buf_name = self.nvim.api.buf_get_name(0)
+                        rel_path = self.nvim.call("fnamemodify", buf_name, ":.")
+                        ft = self.nvim.api.buf_get_option(0, "filetype")
+
+                        selection = {
+                            "text": content,
+                            "path": rel_path,
+                            "line": start_l,
+                            "ft": ft,
+                        }
+
+                        # Exit Visual Mode to clean up
+                        if current_mode in ["v", "V", "\x16"]:
+                            self.nvim.command("normal! \x1b")
+                except Exception:
+                    pass
+
+            if selection:
+                # Handle Selection Flow (Ensure Open -> Append)
+                def handle_selection_flow():
+                    try:
+                        # 1. Ensure Pane is Open
+                        pane_open = ui.is_anya_pane_open(self.nvim, self._last_layout)
+                        if not pane_open:
+                            # Force open pane
+                            direction = (
+                                args[1]
+                                if len(args) > 1 and args[1] in ["right", "left"]
+                                else "right"
+                            )
+                            self._open_interface("pane", direction, True)
+
+                        # 2. Ensure Focus on Prompt
+                        p_win = buffers._anya_state.get("prompt_win")
+                        if p_win and self.nvim.api.win_is_valid(p_win):
+                            self.nvim.api.set_current_win(p_win)
+
+                        # 3. Append Snippet to Prompt
+                        p_buf = ui.get_prompt_buffer(self.nvim)
+                        if p_buf:
+                            snippet = f"From @{selection['path']} line {selection['line']}:\n\n```{selection['ft']}\n{selection['text']}\n```"
+                            ui.append_to_prompt_buffer(self.nvim, p_buf.number, snippet)
+
+                        # Ensure floats are resized immediately after programmatic changes.
+                        # (Relying solely on TextChanged autocmd can be racy during open+append flows.)
+                        buffers.reposition_floats(self.nvim)
+
+                    except Exception as e:
+                        self.nvim.err_write(f"Anya: Error processing selection: {e}\n")
+
+                self.nvim.async_call(handle_selection_flow)
+                return
+
+            # Default Toggle Behavior
             # Check if Anya is open as a pane - if so, allow toggling via buffers.new()
             # If Anya is open in a different layout, prevent opening as pane
             if ui.is_anya_open(self.nvim) and not ui.is_anya_pane_open(
@@ -206,17 +302,20 @@ class AnyaPlugin:
         elif subcommand == "cancel":
             self.cancel_agent()
 
-    def _open_interface(self, layout="split", direction=None):
+    def _open_interface(self, layout="split", direction=None, force_open=False):
         """Open the Anya interface with floating chat and prompt windows.
 
         Args:
             layout: Layout hint (kept for compatibility; "pane" toggles, "tab" opens a new tab)
             direction: Layout hint (kept for compatibility)
+            force_open: Ensure interface opens (switches layout if needed) instead of closing.
         """
         # Remember the layout for reopening
         self._last_layout = layout
 
-        self.chat_buf, self.prompt_buf = buffers.new(self.nvim, layout, direction)
+        self.chat_buf, self.prompt_buf = buffers.new(
+            self.nvim, layout, direction, force_open
+        )
 
         # Pre-connect MCP servers in background for faster first message
         if not self._mcp_manager.is_loaded():
