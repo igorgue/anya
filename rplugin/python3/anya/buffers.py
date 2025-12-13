@@ -362,6 +362,22 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
         {"noremap": True, "silent": True, "desc": "Send message"},
     )
 
+    # Keymap to insert a newline without sending (Ctrl+j)
+    nvim.api.buf_set_keymap(
+        prompt_buf,
+        "n",
+        "<C-j>",
+        "o<Esc>",
+        {"noremap": True, "silent": True, "desc": "Insert blank line"},
+    )
+    nvim.api.buf_set_keymap(
+        prompt_buf,
+        "i",
+        "<C-j>",
+        "<CR>",
+        {"noremap": True, "silent": True, "desc": "Insert blank line"},
+    )
+
     # Set up focus trap for the layout container
     # Redirect calls to the container buffer back to the prompt window
     nvim.api.buf_set_var(layout_buf, "anya_prompt_win", _win_id(prompt_win))
