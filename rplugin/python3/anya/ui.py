@@ -39,9 +39,7 @@ def append_to_chat_buffer(nvim, bufnr, text):
     nvim.api.buf_set_option(bufnr, "modifiable", True)
     lines = text.split("\n")
     line_count = nvim.api.buf_line_count(bufnr)
-    last_line = nvim.api.buf_get_lines(
-        bufnr, line_count - 1, line_count, False
-    )
+    last_line = nvim.api.buf_get_lines(bufnr, line_count - 1, line_count, False)
     last_col = len(last_line[0]) if last_line else 0
     nvim.api.buf_set_text(
         bufnr, line_count - 1, last_col, line_count - 1, last_col, lines
@@ -87,9 +85,7 @@ def ensure_blank_line_before_tool(nvim, bufnr):
     # Check if last line has content
     line_count = nvim.api.buf_line_count(bufnr)
     if line_count > 0:
-        last_line = nvim.api.buf_get_lines(
-            bufnr, line_count - 1, line_count, False
-        )
+        last_line = nvim.api.buf_get_lines(bufnr, line_count - 1, line_count, False)
         if last_line and last_line[0] != "":
             # Add blank line
             nvim.api.buf_set_lines(bufnr, line_count, line_count, False, [""])
@@ -129,11 +125,11 @@ def flush_queue(nvim):
 
 def update_pending_markers_to_success(nvim, bufnr):
     """Update all tool_pending markers to tool_success in the buffer.
-    
+
     Also flushes queue first.
     """
     flush_queue(nvim)
-    
+
     if not nvim.api.buf_is_valid(bufnr):
         return
 
@@ -151,7 +147,7 @@ def update_pending_markers_to_success(nvim, bufnr):
 
 def update_pending_markers_to_failure(nvim, bufnr):
     """Update all tool_pending markers to tool_failure in the buffer.
-    
+
     Also flushes queue first.
     """
     flush_queue(nvim)

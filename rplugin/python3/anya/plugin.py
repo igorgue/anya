@@ -63,8 +63,6 @@ class AnyaPlugin:
                 self._initialize_agents_without_mcp(), loop
             )
 
-
-
     def _ensure_loop(self):
         """Ensure the asyncio event loop is running (lazy initialization)."""
         if self._loop is None:
@@ -296,7 +294,9 @@ class AnyaPlugin:
                 if len(fixed_lines) > len(original_lines):
                     added_lines = fixed_lines[len(original_lines) :]
                     added_content = "\n".join(added_lines)
-                    ui.append_to_chat_buffer(self.nvim, chat_buf.number, added_content + "\n")
+                    ui.append_to_chat_buffer(
+                        self.nvim, chat_buf.number, added_content + "\n"
+                    )
 
             # Write cancellation message to chat buffer
             cancel_msg = "\n> cancelled 󱋟 "
@@ -317,8 +317,6 @@ class AnyaPlugin:
         self._current_task = None
         self._streaming_started = False
         self._cancel_in_progress = False
-
-
 
     @pynvim.function("AnyaSend", sync=False)
     def anya_send(self, args):
@@ -423,7 +421,9 @@ For more help, see :h anya"""
 
         # Stream message with proper marker
         ui.stream_text_to_buffer(
-            self.nvim, chat_buf.number, "\n" + markers.make_message_marker(msg_id) + "\n"
+            self.nvim,
+            chat_buf.number,
+            "\n" + markers.make_message_marker(msg_id) + "\n",
         )
         ui.stream_text_to_buffer(self.nvim, chat_buf.number, help_text)
         ui.stream_text_to_buffer(self.nvim, chat_buf.number, "\n\n")
@@ -443,7 +443,9 @@ For more help, see :h anya"""
         chat_buf = ui.get_chat_buffer(self.nvim)
         if chat_buf and self.nvim.api.buf_is_valid(chat_buf):
             ui.stream_text_to_buffer(
-                self.nvim, chat_buf.number, "Context compaction not yet implemented.\n\n"
+                self.nvim,
+                chat_buf.number,
+                "Context compaction not yet implemented.\n\n",
             )
 
     @pynvim.function("AnyaCancel", sync=False)

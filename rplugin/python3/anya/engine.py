@@ -24,7 +24,7 @@ DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-4.1")
 
 async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request_id):
     """Run the agent with streaming and write to chat buffer."""
-    
+
     # Store the request ID for use in tool execution events
     plugin._request_id = request_id
 
@@ -102,9 +102,7 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
     tool_was_called = False  # Track if any tool was called (for unclosed folds)
     in_anya_marker = False  # Track if LLM is outputting an anya marker
     needs_blank_before_text = False  # Add blank line before next text after tool
-    last_output_was_marker = (
-        True  # Track if last output was a marker (header counts)
-    )
+    last_output_was_marker = True  # Track if last output was a marker (header counts)
     last_output_was_tool = False  # Track if last output was a tool header/output
 
     try:
@@ -150,7 +148,10 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                     thinking_content.append(thinking_header)
                     if not plugin._request_cancelled:
                         plugin.nvim.async_call(
-                            ui.stream_text_to_buffer, plugin.nvim, chat_bufnr, thinking_header
+                            ui.stream_text_to_buffer,
+                            plugin.nvim,
+                            chat_bufnr,
+                            thinking_header,
                         )
                     plugin._streaming_started = True
                     last_output_was_marker = True
@@ -162,7 +163,10 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                     collected_content.append(reasoning_delta)
                     if not plugin._request_cancelled:
                         plugin.nvim.async_call(
-                            ui.stream_text_to_buffer, plugin.nvim, chat_bufnr, reasoning_delta
+                            ui.stream_text_to_buffer,
+                            plugin.nvim,
+                            chat_bufnr,
+                            reasoning_delta,
                         )
                 continue  # Skip other processing for reasoning events
 
@@ -177,7 +181,10 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                 thinking_content.append(thinking_footer)
                 if not plugin._request_cancelled:
                     plugin.nvim.async_call(
-                        ui.stream_text_to_buffer, plugin.nvim, chat_bufnr, thinking_footer
+                        ui.stream_text_to_buffer,
+                        plugin.nvim,
+                        chat_bufnr,
+                        thinking_footer,
                     )
 
                 last_output_was_marker = True
@@ -314,9 +321,7 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                         and expected_outputs > 0
                     ):
                         # Check if this is an edit tool (don't auto-update markers)
-                        is_edit_tool = any(
-                            t["name"] == "edit" for t in parallel_tools
-                        )
+                        is_edit_tool = any(t["name"] == "edit" for t in parallel_tools)
 
                         # Check if any output indicates failure
                         has_failure = any(
@@ -342,9 +347,7 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                                     chat_bufnr,
                                 )
 
-                        all_outputs = "\n".join(
-                            o for o in pending_tool_outputs if o
-                        )
+                        all_outputs = "\n".join(o for o in pending_tool_outputs if o)
 
                         # For edit tool, skip rendering - edit tool handles its own UI
                         # The tool output is the result message (EDIT_APPLIED, etc)
@@ -447,8 +450,7 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
 
         now = datetime.now(timezone.utc)
         end_timestamp = (
-            now.strftime("%Y-%m-%dT%H:%M:%S.")
-            + f"{int(now.microsecond / 1000):03d}Z"
+            now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         )
         # Close any open tool folds before message end marker
         if tool_was_called:
@@ -493,8 +495,7 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
         # Handle cancellation
         now = datetime.now(timezone.utc)
         end_timestamp = (
-            now.strftime("%Y-%m-%dT%H:%M:%S.")
-            + f"{int(now.microsecond / 1000):03d}Z"
+            now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         )
 
         # Close any open code blocks in the collected content
@@ -510,7 +511,10 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                 added_lines = fixed_lines[len(original_lines) :]
                 added_content = "\n".join(added_lines)
                 plugin.nvim.async_call(
-                    ui.append_to_chat_buffer, plugin.nvim, chat_bufnr, added_content + "\n"
+                    ui.append_to_chat_buffer,
+                    plugin.nvim,
+                    chat_bufnr,
+                    added_content + "\n",
                 )
 
         # Add message end marker
@@ -570,12 +574,12 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
     finally:
         # Always clear the current task reference when done
         plugin._current_task = None
-        
+
         # Note: We need to set this on plugin instance
         # plugin._request_cancelled is cleared in plugin.send(), but also cleared here in finally in old code
         if hasattr(plugin, "_request_cancelled"):
-             plugin._request_cancelled = False
-             
+            plugin._request_cancelled = False
+
         # Ensure tool fold state is reset
         plugin.nvim.async_call(plugin._set_tool_fold_open, False)
 
@@ -649,9 +653,7 @@ def save_agent_message_to_db(
         plugin.nvim.err_write(f"Warning: Empty message content for {msg_id}\n")
         return
 
-    cleaned_content, markers_json = history.extract_markers_from_content(
-        message_text
-    )
+    cleaned_content, markers_json = history.extract_markers_from_content(message_text)
 
     updated = db.update_message(
         msg_id,

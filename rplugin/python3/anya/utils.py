@@ -1,5 +1,6 @@
 """Utility functions for text processing."""
 
+
 def filter_anya_markers(text: str, in_marker: bool) -> tuple[str, bool]:
     """Filter out anya marker comments from streaming text.
 
@@ -123,13 +124,13 @@ def format_tool_header(tool_name: str, tool_args: str) -> str:
     first_arg = ""
     try:
         if tool_args:
-            # Check if tool_args is already a dict (sometimes happens?) 
+            # Check if tool_args is already a dict (sometimes happens?)
             # or string. Assuming string as per types.
             if isinstance(tool_args, str):
                 args_dict = json.loads(tool_args)
             else:
                 args_dict = tool_args
-                
+
             # Special handling for edit tool - extract filename from edit_blocks
             if tool_name == "edit" and "edit_blocks" in args_dict:
                 edit_blocks = args_dict["edit_blocks"]
@@ -137,11 +138,7 @@ def format_tool_header(tool_name: str, tool_args: str) -> str:
                 lines = edit_blocks.strip().split("\n")
                 for line in lines:
                     line = line.strip()
-                    if (
-                        line
-                        and not line.startswith("<")
-                        and not line.startswith("=")
-                    ):
+                    if line and not line.startswith("<") and not line.startswith("="):
                         # This looks like a filename
                         first_arg = line
                         break
@@ -181,9 +178,7 @@ def format_tool_call(tool_name: str, tool_args: str) -> str:
     return format_tool_call_with_status(tool_name, tool_args, "tool_pending")
 
 
-def format_tool_call_with_status(
-    tool_name: str, tool_args: str, status: str
-) -> str:
+def format_tool_call_with_status(tool_name: str, tool_args: str, status: str) -> str:
     """Format a tool call as a header with opening fold marker and status.
 
     Args:
@@ -195,10 +190,9 @@ def format_tool_call_with_status(
         Formatted header with opening fold marker and status
     """
     from . import markers
-    
+
     # Format header with proper truncation
     header = format_tool_header(tool_name, tool_args)
 
     # Add opening fold marker with status and newline so it's on its own line
     return header + "\n" + markers.make_marker("fold_start", status) + "\n"
-
