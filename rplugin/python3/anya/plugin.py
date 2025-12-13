@@ -818,6 +818,33 @@ Usage:
 
         return None
 
+    def _refresh_modified_buffers(self, modified_paths):
+        """Trigger checktime for any open buffers matching modified paths."""
+        if not modified_paths:
+            return
+
+        # Resolve paths to absolute for comparison
+        abs_paths = set()
+        for p in modified_paths:
+            try:
+                # Expand user and resolve absolute path
+                abs_p = os.path.abspath(os.path.expanduser(p))
+                abs_paths.add(abs_p)
+            except Exception:
+                pass
+
+        for buf in self.nvim.buffers:
+            try:
+                if not buf.valid or not buf.name:
+                    continue
+
+                buf_name = buf.name
+                if os.path.abspath(buf_name) in abs_paths:
+                    escaped_name = self.nvim.call("fnameescape", buf_name)
+                    self.nvim.command(f"checktime {escaped_name}")
+            except Exception:
+                pass
+
     @pynvim.function("AnyaApplyEditContent", sync=True)
     def apply_edit_content(self, args):
         """Apply an edit block from its raw content string.
@@ -847,6 +874,10 @@ Usage:
         # Check results and build message
         all_success = all(r.success for r in results)
         messages = [r.message for r in results]
+
+        # Refresh buffers for successfully modified files
+        modified_paths = [r.path for r in results if r.success]
+        self._refresh_modified_buffers(modified_paths)
 
         return {
             "success": all_success,
@@ -919,6 +950,10 @@ Usage:
 
         all_success = all(r.success for r in results)
         messages = [r.message for r in results]
+
+        # Refresh buffers for successfully modified files
+        modified_paths = [r.path for r in results if r.success]
+        self._refresh_modified_buffers(modified_paths)
 
         return {
             "success": all_success,

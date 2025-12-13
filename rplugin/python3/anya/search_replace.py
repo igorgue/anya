@@ -840,18 +840,35 @@ def apply_edit_blocks(edit_blocks: str, cwd: str = None) -> List[EditResult]:
                     )
                 )
             else:
-                content_cache[full_path] = new_content
-                results.append(
-                    EditResult(
-                        success=True,
-                        path=block.path,
-                        message=f"Successfully applied edits to {block.path}",
-                        original_content=original_content,
-                        new_content=new_content,
-                        match_type=match_type,
-                        similarity=similarity,
+                # Write the modified content back to the file
+                try:
+                    with open(full_path, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+
+                    content_cache[full_path] = new_content
+                    results.append(
+                        EditResult(
+                            success=True,
+                            path=block.path,
+                            message=f"Successfully applied edits to {block.path}",
+                            original_content=original_content,
+                            new_content=new_content,
+                            match_type=match_type,
+                            similarity=similarity,
+                        )
                     )
-                )
+                except Exception as e:
+                    results.append(
+                        EditResult(
+                            success=False,
+                            path=block.path,
+                            message=f"Error writing edit to {block.path}: {e}",
+                            original_content=original_content,
+                            new_content=new_content,
+                            match_type=match_type,
+                            similarity=similarity,
+                        )
+                    )
         else:
             # Apply normally
             result = apply_edit_block(block, cwd)
