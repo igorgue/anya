@@ -260,7 +260,7 @@ async def get_open_buffers_context_async(nvim) -> str:
                 local start_display = start_line + 1
                 local end_display = start_line + #lines
                 
-                table.insert(visible_lines, string.format("- @%s lines %d-%d (cursor at %d)\\n\\n```%s\\n%s\\n```", rel_path, start_display, end_display, row, ft, snippet))
+                table.insert(visible_lines, string.format("- @%s lines %d-%d of %d (cursor at %d)\\n\\n```%s\\n%s\\n```", rel_path, start_display, end_display, line_count, row, ft, snippet))
             end
         end
     end
@@ -279,7 +279,8 @@ async def get_open_buffers_context_async(nvim) -> str:
                 local row = mark[1]
                 if row < 1 then row = 1 end
                 local rel_path = vim.fn.fnamemodify(name, ":.")
-                table.insert(other_lines, string.format("- @%s line %d", rel_path, row))
+                local line_count = vim.api.nvim_buf_line_count(buf)
+                table.insert(other_lines, string.format("- @%s line %d of %d", rel_path, row, line_count))
             end
         end
     end
