@@ -362,21 +362,22 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
         {"noremap": True, "silent": True, "desc": "Send message"},
     )
 
-    # Keymap to insert a newline without sending (Ctrl+j)
-    nvim.api.buf_set_keymap(
-        prompt_buf,
-        "n",
-        "<C-j>",
-        "o<Esc>",
-        {"noremap": True, "silent": True, "desc": "Insert blank line"},
-    )
-    nvim.api.buf_set_keymap(
-        prompt_buf,
-        "i",
-        "<C-j>",
-        "<CR>",
-        {"noremap": True, "silent": True, "desc": "Insert blank line"},
-    )
+    # Force keymap precedence for Ctrl+j
+    # We use an autocmd on InsertEnter/BufEnter to ensure our mapping overrides
+    # any completion plugins (like blink.cmp) that might try to take over Ctrl+j.
+    prompt_keys_cmd = f"""
+    local group = vim.api.nvim_create_augroup("AnyaPromptKeys_{prompt_buf_id}", {{ clear = true }})
+    vim.api.nvim_create_autocmd({{"BufEnter", "InsertEnter"}}, {{
+        buffer = {prompt_buf_id},
+        group = group,
+        callback = function()
+            local opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Insert blank line" }}
+            vim.keymap.set("n", "<C-j>", "o<Esc>", opts)
+            vim.keymap.set("i", "<C-j>", "<CR>", opts)
+        end
+    }})
+    """
+    nvim.exec_lua(prompt_keys_cmd, [])
 
     # Set up focus trap for the layout container
     # Redirect calls to the container buffer back to the prompt window
