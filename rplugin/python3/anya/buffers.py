@@ -272,7 +272,7 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
         "style": "minimal",
         "zindex": 10,
         "border": "top", # Top border to separate from chat
-        "title": "Prompt",
+        "title": " Prompt ",
         "title_pos": "center",
     }
     
@@ -365,16 +365,23 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
     # Force keymap precedence for Ctrl+j
     # We use an autocmd on InsertEnter/BufEnter to ensure our mapping overrides
     # any completion plugins (like blink.cmp) that might try to take over Ctrl+j.
+    # We also apply it immediately to catch the current state (since we just entered/focused).
     prompt_keys_cmd = f"""
     local group = vim.api.nvim_create_augroup("AnyaPromptKeys_{prompt_buf_id}", {{ clear = true }})
+    
+    local function set_prompt_keys()
+        local opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Insert blank line" }}
+        vim.keymap.set("n", "<C-j>", "o<Esc>", opts)
+        vim.keymap.set("i", "<C-j>", "<CR>", opts)
+    end
+    
+    -- Apply immediately
+    set_prompt_keys()
+    
     vim.api.nvim_create_autocmd({{"BufEnter", "InsertEnter"}}, {{
         buffer = {prompt_buf_id},
         group = group,
-        callback = function()
-            local opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Insert blank line" }}
-            vim.keymap.set("n", "<C-j>", "o<Esc>", opts)
-            vim.keymap.set("i", "<C-j>", "<CR>", opts)
-        end
+        callback = set_prompt_keys
     }})
     """
     nvim.exec_lua(prompt_keys_cmd, [])
