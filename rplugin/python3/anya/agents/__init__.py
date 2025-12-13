@@ -8,6 +8,7 @@ from .dynamic_instructions import (
 )
 
 from .utils import get_instructions
+from ..system_prompt import apply_system_prompt
 from ..tools import (
     create,
     edit,
@@ -26,7 +27,7 @@ MAIN_AGENT_NAME = "Code"
 MAIN_ASSISTANT_NAME = "Anya"
 
 
-async def CodeAgent(mcp_servers=None, thinking_budget=None) -> Agent:
+async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
     """Create a code agent with dynamically generated instructions based on MCP servers.
 
     This async version handles the generation of dynamic instructions that may
@@ -52,6 +53,9 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None) -> Agent:
 
     # Combine instructions
     instructions = update_agent_instructions(base_instructions, dynamic_instructions)
+
+    # Expand placeholders and append environment context at the end.
+    instructions = apply_system_prompt(instructions, nvim=nvim)
 
     # Get thinking budget (model is handled via OPENAI_MODEL_ID env var)
     if thinking_budget is None:
@@ -91,6 +95,7 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None) -> Agent:
 
 async def MCPAgent(
     mcp_servers: list[object] | None = None,
+    nvim=None,
 ) -> Agent | None:
     """Create an MCP agent with dynamically generated instructions.
 
@@ -114,6 +119,9 @@ async def MCPAgent(
 
     # Combine instructions
     instructions = update_agent_instructions(base_instructions, dynamic_instructions)
+
+    # Expand placeholders and append environment context at the end.
+    instructions = apply_system_prompt(instructions, nvim=nvim)
 
     # We don't need custom tools anymore since the logging will be done
     # in the agent's responses directly

@@ -90,11 +90,12 @@ class AnyaPlugin:
                 self._agent = await CodeAgent(
                     mcp_servers=mcp_servers,
                     thinking_budget=DEFAULT_THINKING_BUDGET,
+                    nvim=self.nvim,
                 )
 
                 # Initialize MCP agent if servers are available
                 if mcp_servers:
-                    self._mcp_agent = await MCPAgent(mcp_servers)
+                    self._mcp_agent = await MCPAgent(mcp_servers, nvim=self.nvim)
 
                 # TODO: handle this on fidget
                 # self.nvim.async_call(
@@ -120,6 +121,7 @@ class AnyaPlugin:
                 self._agent = await CodeAgent(
                     mcp_servers=None,
                     thinking_budget=DEFAULT_THINKING_BUDGET,
+                    nvim=self.nvim,
                 )
 
                 self.nvim.async_call(
@@ -145,9 +147,12 @@ class AnyaPlugin:
                         self._agent = await CodeAgent(
                             mcp_servers=mcp_servers,
                             thinking_budget=DEFAULT_THINKING_BUDGET,
+                            nvim=self.nvim,
                         )
                         if mcp_servers:
-                            self._mcp_agent = await MCPAgent(mcp_servers)
+                            self._mcp_agent = await MCPAgent(
+                                mcp_servers, nvim=self.nvim
+                            )
                     except asyncio.TimeoutError:
                         await self._initialize_agents_without_mcp()
                 else:
