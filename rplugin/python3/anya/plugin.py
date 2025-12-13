@@ -166,6 +166,111 @@ class AnyaPlugin:
                 self._initialize_agents_without_mcp(), loop
             )
 
+    async def _get_open_buffers_context_async(self) -> str:
+        """Get context about open buffers via Lua for performance (async-safe).
+
+        Collects visible buffers and other open buffers with their current cursor
+        positions (line numbers) to provide context to the LLM.
+        """
+        import concurrent.futures
+
+        lua_code = """
+        local visible_lines = {}
+        local other_lines = {}
+        local processed_bufs = {}
+        
+        -- Visible buffers
+        local wins = vim.api.nvim_tabpage_list_wins(0)
+        for _, win in ipairs(wins) do
+            local buf = vim.api.nvim_win_get_buf(win)
+            -- Only process if not already processed (deduplicate by buffer)
+            if not processed_bufs[buf] then
+                local ft = vim.api.nvim_get_option_value("filetype", {buf=buf})
+                local buftype = vim.api.nvim_get_option_value("buftype", {buf=buf})
+                local name = vim.api.nvim_buf_get_name(buf)
+                
+                if name ~= "" and buftype == "" and ft ~= "anya-chat" and ft ~= "anya-prompt" then
+                    processed_bufs[buf] = true
+                    local cursor = vim.api.nvim_win_get_cursor(win)
+                    local row = cursor[1] -- 1-indexed cursor position
+                    local rel_path = vim.fn.fnamemodify(name, ":.")
+                    
+                    -- Get snippet (approx 20 lines surrounding cursor)
+                    local line_count = vim.api.nvim_buf_line_count(buf)
+                    -- start_line is 0-indexed for nvim_buf_get_lines
+                    local start_line = math.max(0, row - 11)
+                    local end_line_exclusive = math.min(line_count, row + 10)
+                    
+                    local lines = vim.api.nvim_buf_get_lines(buf, start_line, end_line_exclusive, false)
+                    
+                    -- Format lines with line numbers
+                    local formatted_lines = {}
+                    for i, line in ipairs(lines) do
+                        local line_num = start_line + i -- 1-indexed line number
+                        local prefix = (line_num == row) and ">" or " "
+                        table.insert(formatted_lines, string.format("%s %4d | %s", prefix, line_num, line))
+                    end
+                    
+                    local snippet = table.concat(formatted_lines, "\\n")
+                    local start_display = start_line + 1
+                    local end_display = start_line + #lines
+                    
+                    table.insert(visible_lines, string.format("- @%s lines %d-%d (cursor at %d)\\n\\n```%s\\n%s\\n```", rel_path, start_display, end_display, row, ft, snippet))
+                end
+            end
+        end
+        
+        -- Other buffers
+        local bufs = vim.api.nvim_list_bufs()
+        for _, buf in ipairs(bufs) do
+            if not processed_bufs[buf] and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_option_value("buflisted", {buf=buf}) then
+                local ft = vim.api.nvim_get_option_value("filetype", {buf=buf})
+                local buftype = vim.api.nvim_get_option_value("buftype", {buf=buf})
+                local name = vim.api.nvim_buf_get_name(buf)
+                
+                if name ~= "" and buftype == "" and ft ~= "anya-chat" and ft ~= "anya-prompt" then
+                    processed_bufs[buf] = true
+                    local mark = vim.api.nvim_buf_get_mark(buf, '"')
+                    local row = mark[1]
+                    if row < 1 then row = 1 end
+                    local rel_path = vim.fn.fnamemodify(name, ":.")
+                    table.insert(other_lines, string.format("- @%s line %d", rel_path, row))
+                end
+            end
+        end
+        
+        return {visible_lines, other_lines}
+        """
+
+        future: concurrent.futures.Future[str] = concurrent.futures.Future()
+
+        def run_on_main():
+            try:
+                visible, other = self.nvim.exec_lua(lua_code, [])
+
+                parts = []
+                if visible:
+                    parts.append("Visible buffers:\n\n" + "\n\n".join(visible))
+                if other:
+                    parts.append("Other buffers:\n\n" + "\n".join(other))
+
+                if not parts:
+                    future.set_result("")
+                    return
+
+                result = "```\n" + "\n\n".join(parts) + "\n```\n\n"
+                future.set_result(result)
+            except Exception as e:
+                # self.nvim.err_write(f"Error getting buffer context: {e}\n")
+                future.set_result("")
+
+        self.nvim.async_call(run_on_main)
+
+        while not future.done():
+            await asyncio.sleep(0.01)
+
+        return future.result()
+
     def _ensure_loop(self):
         """Ensure the asyncio event loop is running (lazy initialization)."""
         if self._loop is None:
@@ -474,6 +579,12 @@ class AnyaPlugin:
         buffer_content = await self._get_buffer_content_async(chat_bufnr)
         records = history.parse_buffer_content(buffer_content or "")
         llm_history = history.build_llm_history(records)
+
+        # Prepend open buffer context to the last user message
+        if llm_history and llm_history[-1]["role"] == "user":
+            buffer_context = await self._get_open_buffers_context_async()
+            if buffer_context:
+                llm_history[-1]["content"] = buffer_context + llm_history[-1]["content"]
 
         msg_id = ids.new(conversation=conversation_id)
         now = datetime.now(timezone.utc)

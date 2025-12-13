@@ -8,7 +8,7 @@ PROMPT_MAX_HEIGHT = 20  # Maximum height for prompt window
 
 _anya_state = {
     "layout_win": None,  # The container window (split)
-    "chat_win": None,    # Floating window for chat
+    "chat_win": None,  # Floating window for chat
     "prompt_win": None,  # Floating window for prompt
 }
 
@@ -162,7 +162,7 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
         if buf.name.endswith("Anya Container"):
             layout_buf = buf
             break
-            
+
     if not layout_buf or not layout_buf.valid:
         layout_buf = nvim.api.create_buf(False, True)  # No file, scratch
         nvim.api.buf_set_name(layout_buf, "Anya Container")
@@ -180,7 +180,7 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
 
     # If windows exist and are valid...
     # If windows exist and are valid...
-    if (_valid_win(nvim, chat_win) or _valid_win(nvim, prompt_win)):
+    if _valid_win(nvim, chat_win) or _valid_win(nvim, prompt_win):
         # If pane layout is requested, always toggle (close) even if not focused
         if layout == "pane":
             _close_anya_windows(nvim)
@@ -225,11 +225,11 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
     nvim.api.win_set_option(layout_win, "winbar", "")
     nvim.api.win_set_option(layout_win, "statusline", "")
     nvim.api.win_set_option(layout_win, "wrap", False)
-    
+
     # Get layout dimensions
     layout_width = nvim.api.win_get_width(layout_win)
     layout_height = nvim.api.win_get_height(layout_win)
-    
+
     # Calculate heights
     prompt_height = PROMPT_HEIGHT
     chat_height = max(1, layout_height - prompt_height)
@@ -244,15 +244,17 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
         "height": chat_height,
         "focusable": True,
         "style": "minimal",
-        "zindex": 1, # Lower z-index
-        "border": "none", 
+        "zindex": 1,  # Lower z-index
+        "border": "none",
     }
-    
+
     chat_win = nvim.api.open_win(chat_buf_id, True, chat_config)
-    
+
     # Configure chat window
     nvim.api.win_set_option(chat_win, "wrap", True)
-    nvim.api.win_set_option(chat_win, "winhighlight", "Normal:Normal,NormalFloat:Normal")
+    nvim.api.win_set_option(
+        chat_win, "winhighlight", "Normal:Normal,NormalFloat:Normal"
+    )
     nvim.api.win_set_option(chat_win, "linebreak", True)
     nvim.api.win_set_option(chat_win, "showbreak", "")
     nvim.api.win_set_option(chat_win, "number", False)
@@ -264,19 +266,19 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
     prompt_config = {
         "relative": "win",
         "win": layout_win,
-        "row": chat_height, 
+        "row": chat_height,
         "col": 0,
         "width": max(1, layout_width),
         "height": prompt_height,
         "focusable": True,
         "style": "minimal",
         "zindex": 10,
-        "border": "top", # Top border to separate from chat
+        "border": "top",  # Top border to separate from chat
         "title": " Prompt ",
         "title_pos": "center",
     }
-    
-    # Adjust height/row slightly for border? 
+
+    # Adjust height/row slightly for border?
     # If border is "top", it takes 1 line. So row needs to be chat_height.
     # But if we want it seamlessly, maybe calculate exactly.
     # The 'border' property adds lines to the window footprint if using 'rounded' etc.
@@ -284,49 +286,51 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
     # Let's use 'rounded' as before but maybe handle resizing carefully?
     # User said "See how Snacks does it". Snacks uses split-like layouts.
     # Let's keep "rounded" for prompt as it looks nice, but maybe "none" for Chat.
-    
+
     # UPDATE: If using border='rounded', it adds 2 to height/width.
     # We want prompt to be EXACTLY at bottom.
     # Let's use border='rounded' for prompt, but accounting for it might be tricky with simple math.
     # Let's try border='single' or 'rounded' purely on prompt, and shrink chat accordingly.
-    
+
     # Actually, let's stick to the previous style but positioned correctly.
     prompt_config["border"] = "rounded"
     # With border, the window takes up height+2 lines.
     # So if prompt_height (content) is 1. Total height is 3.
     # chat_height should be layout_height - (prompt_height + 2).
-    
+
     real_prompt_height = prompt_height + 2
     chat_height = max(1, layout_height - real_prompt_height)
-    
+
     # Update configs with refined math
     chat_config["height"] = chat_height
     prompt_config["row"] = chat_height
     prompt_config["height"] = prompt_height
-    prompt_config["width"] = max(1, layout_width) # Full width (minus border? No, prompt inside layout)
-    
+    prompt_config["width"] = max(
+        1, layout_width
+    )  # Full width (minus border? No, prompt inside layout)
+
     # Fix prompt width to account for its own border if we want it to fit perfectly?
     # Usually border is "outside" content dimensions in nvim float config?
     # Yes, width/height specify content size.
     # So if container width is 100. Prompt width 100 + border = 102 -> overflow.
     # So prompt width should be layout_width - 2.
-    
+
     prompt_config["width"] = max(1, layout_width - 2)
-    prompt_config["col"] = 0 # It will be centered? No, manual col.
+    prompt_config["col"] = 0  # It will be centered? No, manual col.
     # If width is W-2, and we put it at col 0, it takes 0..W-2.
     # Border adds 1 left, 1 right. Total coverage: -1 to W-1? (relative)
     # Relative floats with borders are tricky.
-    # Let's simplify: Use border="none" for prompt and draw a separator line in Chat? 
+    # Let's simplify: Use border="none" for prompt and draw a separator line in Chat?
     # OR rely on matching layout_width.
-    
+
     # If we use border='rounded':
     # We need width = layout_width - 2 (for left/right border).
     # col = 0.
-    # Actually, standard is to inset. 
+    # Actually, standard is to inset.
     # But let's try just setting it to layout_width - 2.
-    
+
     # What about Chat? border='none'. Width = layout_width.
-    
+
     prompt_win = nvim.api.open_win(prompt_buf_id, False, prompt_config)
     set_prompt_window_options(nvim, prompt_win)
 
@@ -401,7 +405,7 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
     # Set up focus trap for the layout container
     # Redirect calls to the container buffer back to the prompt window
     nvim.api.buf_set_var(layout_buf, "anya_prompt_win", _win_id(prompt_win))
-    
+
     trap_cmd = f"""
     local group = vim.api.nvim_create_augroup("AnyaLayoutFocusTrap_{layout_buf_id}", {{ clear = true }})
     vim.api.nvim_create_autocmd("WinEnter", {{
@@ -435,7 +439,11 @@ def reposition_floats(nvim: Nvim):
     chat_win = _anya_state.get("chat_win")
     prompt_win = _anya_state.get("prompt_win")
 
-    if not _valid_win(nvim, layout_win) or not _valid_win(nvim, chat_win) or not _valid_win(nvim, prompt_win):
+    if (
+        not _valid_win(nvim, layout_win)
+        or not _valid_win(nvim, chat_win)
+        or not _valid_win(nvim, prompt_win)
+    ):
         return
 
     try:
@@ -446,7 +454,7 @@ def reposition_floats(nvim: Nvim):
         prompt_buf = nvim.api.win_get_buf(prompt_win)
         line_count = nvim.api.buf_line_count(prompt_buf)
         prompt_height = min(max(1, line_count), PROMPT_MAX_HEIGHT)
-        
+
         # Calculate sizes (prompt border takes 2 lines)
         real_prompt_height = prompt_height + 2
         chat_height = max(1, layout_height - real_prompt_height)
