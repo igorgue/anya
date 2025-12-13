@@ -389,6 +389,31 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
         local delete_line_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Delete whole line" }}
         vim.keymap.set("n", "<C-u>", "S", delete_line_opts)
         vim.keymap.set("i", "<C-u>", "<C-o>S", delete_line_opts)
+
+        -- Resize handlers
+        local function resize_pane(delta)
+            local win = vim.api.nvim_get_current_win()
+            local config = vim.api.nvim_win_get_config(win)
+            -- Check if we are in a floating window attached to a parent
+            if config.relative == 'win' and config.win then
+                local parent_win = config.win
+                -- Verify parent window is valid
+                if vim.api.nvim_win_is_valid(parent_win) then
+                    vim.api.nvim_win_call(parent_win, function()
+                        vim.cmd('vertical resize ' .. (delta > 0 and '+' or '') .. delta)
+                    end)
+                end
+            else
+                -- Fallback for non-floating setup (though Anya prompt is usually floating)
+                vim.cmd('vertical resize ' .. (delta > 0 and '+' or '') .. delta)
+            end
+        end
+
+        local resize_left_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Resize split left" }}
+        vim.keymap.set({{"n", "i"}}, "<C-Left>", function() resize_pane(-2) end, resize_left_opts)
+
+        local resize_right_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Resize split right" }}
+        vim.keymap.set({{"n", "i"}}, "<C-Right>", function() resize_pane(2) end, resize_right_opts)
     end
     
     -- Apply immediately

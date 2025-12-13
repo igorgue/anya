@@ -9,17 +9,17 @@ async def read_file(path_with_range: str, cwd: str = None) -> str:
     """Reads file content with optional line range specifications.
 
     CRITICAL - read_file tool behavior:
-    - Files with <= 100 lines: always shown in full
-    - Files with > 100 lines: only first 100 lines shown by default with "[FILE TOO LARGE]" message
+    - Files with <= 300 lines: always shown in full
+    - Files with > 300 lines: only first 300 lines shown by default with "[FILE TOO LARGE]" message
     - When you see "[FILE TOO LARGE]", use syntax like read_file("file.py@start-end") to read the full file
     - The @start-end syntax ALWAYS works to read the entire file, regardless of size
     - Do NOT make multiple calls to read_file with the same path without changing the range - you'll get the same truncated output
 
     Syntax:
-        filename.py              - Read first 100 lines (default truncation)
+        filename.py              - Read first 300 lines (default truncation)
         filename.py @start-end   - Read entire file
         filename.py @32-234      - Read lines 32-234
-        filename.py @start-100   - Read lines 1-100
+        filename.py @start-800   - Read lines 1-800
         filename.py @3202-end    - Read from line 3202 to end
 
     Args:
@@ -51,7 +51,7 @@ async def read_file(path_with_range: str, cwd: str = None) -> str:
                 start_line = int(start_part)
             else:
                 raise Exception(
-                    f"Invalid range specification '{range_spec}'. Use 'start-end', 'start-100', '32-234', or '3202-end'"
+                    f"Invalid range specification '{range_spec}'. Use 'start-end', 'start-300', '32-234', or '3202-end'"
                 )
 
             # Parse end
@@ -62,7 +62,7 @@ async def read_file(path_with_range: str, cwd: str = None) -> str:
                 end_line = int(end_part)
             else:
                 raise Exception(
-                    f"Invalid range specification '{range_spec}'. Use 'start-end', 'start-100', '32-234', or '3202-end'"
+                    f"Invalid range specification '{range_spec}'. Use 'start-end', 'start-300', '32-234', or '3202-end'"
                 )
 
     # Expand ~ to home directory and environment variables
@@ -98,8 +98,8 @@ async def read_file(path_with_range: str, cwd: str = None) -> str:
         actual_end = end_idx
         is_truncated = False
     else:
-        # Default behavior: show first 100 lines if file is large
-        lines_to_show = 100
+        # Default behavior: show first 300 lines if file is large
+        lines_to_show = 300
         selected_lines = all_lines[:lines_to_show]
         actual_start = 1
         actual_end = min(lines_to_show, total_lines)
@@ -120,7 +120,7 @@ async def read_file(path_with_range: str, cwd: str = None) -> str:
         info_parts.append(
             f"[FILE TOO LARGE] File has {total_lines} lines total, showing lines {actual_start}-{actual_end}.\n"
             f"  READ THE FULL FILE: Call read_file('{display_path}@start-end') to get all {total_lines} lines.\n"
-            f"Or use specific ranges: @{actual_end + 1}-{min(actual_end + 100, total_lines)} (next 100) or @{max(1, total_lines - 100)}-end (last 100)\n"
+            f"Or use specific ranges: @{actual_end + 1}-{min(actual_end + 300, total_lines)} (next 300) or @{max(1, total_lines - 300)}-end (last 300)\n"
         )
 
     info_parts.append("--- FILE CONTENT ---\n")
