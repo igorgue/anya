@@ -373,6 +373,18 @@ def new(nvim: Nvim, layout="replace", direction=None) -> tuple[object]:
         local opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Insert blank line" }}
         vim.keymap.set("n", "<C-j>", "o<Esc>", opts)
         vim.keymap.set("i", "<C-j>", "<CR>", opts)
+
+        local move_start_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Start of line" }}
+        vim.keymap.set("n", "<C-a>", "0", move_start_opts)
+        vim.keymap.set("i", "<C-a>", "<C-o>0", move_start_opts)
+
+        local move_end_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "End of line" }}
+        vim.keymap.set("n", "<C-e>", "$", move_end_opts)
+        vim.keymap.set("i", "<C-e>", "<C-o>$", move_end_opts)
+
+        local delete_line_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Delete whole line" }}
+        vim.keymap.set("n", "<C-u>", "S", delete_line_opts)
+        vim.keymap.set("i", "<C-u>", "<C-o>S", delete_line_opts)
     end
     
     -- Apply immediately
