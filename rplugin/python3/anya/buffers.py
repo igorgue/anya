@@ -303,16 +303,6 @@ def new(
     nvim.api.win_set_option(chat_win, "number", False)
     nvim.api.win_set_option(chat_win, "relativenumber", False)
     nvim.api.win_set_option(chat_win, "signcolumn", "no")
-    # Set winbar for chat window - use ui_utils function to get version dynamically
-    winid = _win_id(chat_win)
-    # Construct winbar expression - need to escape braces in f-string
-    nvim.exec_lua(
-        f"""
-    local winid = {winid}
-    vim.api.nvim_win_set_option(winid, "winbar", "%{{%v:lua.require('anya.ui_utils').get_winbar()%}}")
-    """,
-        [],
-    )
     nvim.api.win_set_var(chat_win, "snacks_main", True)
 
     # Create Prompt Window (Floating inside layout, below Chat)
@@ -392,6 +382,33 @@ def new(
 
     # Focus the prompt window initially
     nvim.api.set_current_win(prompt_win)
+
+    # Set winbar after everything is done - use Lua schedule to defer
+    # This ensures all window operations are complete before setting winbar
+    chat_win_id = _win_id(chat_win)
+    nvim.exec_lua(
+        f"""
+    vim.schedule(function()
+      local winid = {chat_win_id}
+      if vim.api.nvim_win_is_valid(winid) then
+        local bufnr = vim.api.nvim_win_get_buf(winid)
+        -- Ensure syntax is loaded and highlights are set up
+        if vim.bo[bufnr].filetype == "anya-chat" then
+          -- Force syntax loading and highlight setup
+          vim.cmd("doautocmd FileType anya-chat")
+          require("anya.ui_utils").setup_highlights()
+        end
+        -- Set winbar
+        vim.api.nvim_win_set_option(winid, "winbar", "%{{%v:lua.require('anya.ui_utils').get_winbar()%}}")
+        -- Re-apply winhighlight to ensure AnyaWinBar highlight is used
+        vim.api.nvim_win_set_option(winid, "winhighlight", "Normal:Normal,NormalFloat:Normal,WinBar:AnyaWinBar,WinBarNC:AnyaWinBar")
+        -- Force a redraw to apply highlights
+        vim.cmd("redrawstatus")
+      end
+    end)
+    """,
+        [],
+    )
 
     # Set up resize autocmd to keep floats positioned
     group = nvim.api.create_augroup("AnyaFloatPrompt", {"clear": True})

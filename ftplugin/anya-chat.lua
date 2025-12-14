@@ -16,7 +16,7 @@ vim.opt_local.foldmethod = "manual"
 vim.opt_local.foldenable = true
 vim.opt_local.modifiable = true
 vim.opt_local.spell = false
--- Custom winbar is set in buffers.py when window is created
+-- Winbar is set from Python after all windows are created (see buffers.py)
 -- Custom foldtext that handles concealed markers
 vim.opt_local.foldtext = [[v:lua.require'anya.foldtext'.get_foldtext()]]
 
@@ -157,6 +157,12 @@ vim.api.nvim_create_autocmd("WinEnter", {
     last_anya_win = vim.api.nvim_get_current_win()
     vim.g.anya_left_anya_win = false
 
+    -- Refresh winbar highlight to ensure it's properly styled
+    local win = vim.api.nvim_get_current_win()
+    if win > 0 and vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_set_option(win, "winhighlight", "Normal:Normal,NormalFloat:Normal,WinBar:AnyaWinBar,WinBarNC:AnyaWinBar")
+    end
+
     -- If we entered from outside Anya and user pressed <C-w>j,
     -- redirect to prompt float
     local prev_win = vim.fn.win_getid(vim.fn.winnr("#"))
@@ -169,7 +175,7 @@ vim.api.nvim_create_autocmd("WinEnter", {
       end
     end
   end,
-  desc = "Track entering Anya chat window",
+  desc = "Track entering Anya chat window and refresh winbar highlight",
 })
 
 -- Navigate from chat to prompt float

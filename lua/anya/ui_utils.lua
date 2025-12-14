@@ -87,16 +87,58 @@ function M.setup_highlights()
 
   -- File reference highlight (@filepath)
   M.set_hl_fg_only("AnyaFileRef", "Constant", { underline = true })
+
+  -- Winbar highlight group (links to Comment)
+  vim.api.nvim_set_hl(0, "AnyaWinBar", { link = "Comment" })
+end
+
+-- Handle click on YOLO section in winbar
+function M.handle_yolo_click()
+  require("anya.conversation").toggle_yolo_mode()
+  -- Winbar expressions are re-evaluated automatically when the window is redrawn
+  -- Schedule a redraw to update the winbar display
+  vim.schedule(function()
+    vim.cmd("redrawstatus")
+  end)
 end
 
 -- Get winbar text for chat buffer
 function M.get_winbar()
+  -- Safely get version
   local ok, version = pcall(vim.fn.AnyaVersion)
+  local version_text = "Anya"
   if ok and version then
-    return "Anya v" .. version
-  else
-    return "Anya"
+    version_text = "Anya v" .. version
   end
+
+  -- Try to safely get YOLO mode status - only if we're in a safe context
+  -- Check if we're in a callback-safe context by checking mode
+  local is_yolo_on = false
+  local mode = vim.api.nvim_get_mode().mode
+  -- Only try to get YOLO mode if we're not in a restricted mode
+  if mode ~= "" then
+    local yolo_ok, yolo_mode = pcall(vim.fn.AnyaGetYoloMode)
+    if yolo_ok and type(yolo_mode) == "boolean" then
+      is_yolo_on = yolo_mode
+    end
+  end
+
+  -- Build winbar: left side (version), right side (YOLO status)
+  -- %= pushes content to the right
+  -- %@function@text%T makes text clickable
+  -- %#Group#text%* applies highlight group
+  local yolo_text
+  if is_yolo_on then
+    -- When ON: "YOLO: " (default) + "on" (OkMsg highlight)
+    yolo_text = "YOLO: %#OkMsg#on%*"
+  else
+    -- When OFF: "YOLO: " + "off" (both use AnyaWinBar/default)
+    yolo_text = "YOLO: off"
+  end
+
+  -- Make the entire YOLO section clickable
+  -- Format: left_text %= %@click_handler@clickable_text%T
+  return version_text .. "%=%@v:lua.require('anya.ui_utils').handle_yolo_click@" .. yolo_text .. "%T"
 end
 
 return M
