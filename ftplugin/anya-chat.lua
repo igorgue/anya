@@ -19,6 +19,8 @@ vim.opt_local.spell = false
 -- Clear winbar initially to prevent navic/other plugins from interfering
 -- Our winbar will be set from Python after all windows are created (see buffers.py)
 vim.opt.winbar = ""
+vim.opt.showbreak = " "
+
 -- Custom foldtext that handles concealed markers
 vim.opt_local.foldtext = [[v:lua.require'anya.foldtext'.get_foldtext()]]
 

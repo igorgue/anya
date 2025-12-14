@@ -15,16 +15,7 @@ vim.opt_local.modifiable = true
 -- Clear winbar on this window to prevent navic or other plugins from interfering
 -- Use both opt.winbar (affects current window) and window option for reliability
 vim.opt.winbar = ""
-vim.api.nvim_create_autocmd("BufWinEnter", {
-  buffer = 0,
-  once = false, -- Keep it cleared even if navic tries to set it again
-  callback = function()
-    local win = vim.fn.bufwinid(0)
-    if win > 0 and vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_set_option(win, "winbar", "")
-    end
-  end,
-})
+vim.opt.showbreak = " "
 
 -- Modules
 local history = require("anya.history")

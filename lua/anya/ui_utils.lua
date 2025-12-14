@@ -93,13 +93,19 @@ function M.setup_highlights()
 end
 
 -- Handle click on YOLO section in winbar
-function M.handle_yolo_click()
+-- @param id: Click region ID (unused)
+-- @param clicks: Number of clicks (unused)
+-- @param button: Mouse button (unused)
+-- @param mods: Modifier keys (unused)
+function M.handle_yolo_click(id, clicks, button, mods)
+  -- Toggle YOLO mode (this function handles winbar refresh internally)
   require("anya.conversation").toggle_yolo_mode()
-  -- Winbar expressions are re-evaluated automatically when the window is redrawn
-  -- Schedule a redraw to update the winbar display
-  vim.schedule(function()
-    vim.cmd("redrawstatus")
-  end)
+end
+
+-- Global wrapper for winbar click handler
+-- This must be global for v:lua to work in winbar expressions
+_G.anya_handle_yolo_click = function(id, clicks, button, mods)
+  M.handle_yolo_click(id, clicks, button, mods)
 end
 
 -- Get winbar text for chat buffer
@@ -111,21 +117,16 @@ function M.get_winbar()
     version_text = "Anya v" .. version
   end
 
-  -- Try to safely get YOLO mode status - only if we're in a safe context
-  -- Check if we're in a callback-safe context by checking mode
+  -- Try to safely get YOLO mode status
   local is_yolo_on = false
-  local mode = vim.api.nvim_get_mode().mode
-  -- Only try to get YOLO mode if we're not in a restricted mode
-  if mode ~= "" then
-    local yolo_ok, yolo_mode = pcall(vim.fn.AnyaGetYoloMode)
-    if yolo_ok and type(yolo_mode) == "boolean" then
-      is_yolo_on = yolo_mode
-    end
+  local yolo_ok, yolo_mode = pcall(vim.fn.AnyaGetYoloMode)
+  if yolo_ok and type(yolo_mode) == "boolean" then
+    is_yolo_on = yolo_mode
   end
 
   -- Build winbar: left side (version), right side (YOLO status)
   -- %= pushes content to the right
-  -- %@function@text%T makes text clickable
+  -- %{id}@function@text%T makes text clickable with click handler
   -- %#Group#text%* applies highlight group
   local yolo_text
   if is_yolo_on then
@@ -137,8 +138,9 @@ function M.get_winbar()
   end
 
   -- Make the entire YOLO section clickable
-  -- Format: left_text %= %@click_handler@clickable_text%T
-  return version_text .. "%=%@v:lua.require('anya.ui_utils').handle_yolo_click@" .. yolo_text .. "%T"
+  -- Format: %@click_handler@clickable_text%T
+  -- Use global function for v:lua to work properly in winbar expressions
+  return version_text .. "%=%@v:lua.anya_handle_yolo_click@" .. yolo_text .. "%T"
 end
 
 return M
