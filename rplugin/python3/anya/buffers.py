@@ -58,9 +58,11 @@ def set_prompt_window_options(nvim: Nvim, winid: int):
     nvim.api.win_set_option(winid, "wrap", True)
     nvim.api.win_set_option(winid, "linebreak", True)
     nvim.api.win_set_option(winid, "winhighlight", "Normal:Normal")
-
-    # Delay winbar setting to avoid conflicts with other configurations
-    # nvim.async_call(lambda: nvim.api.win_set_option(winid, "winbar", ""))
+    # Clear winbar on prompt window to ensure it doesn't interfere
+    try:
+        nvim.api.win_set_option(winid, "winbar", "")
+    except Exception:
+        pass  # Ignore if winbar option doesn't exist
 
 
 def _valid_win(nvim: Nvim, winid: int | None) -> bool:
@@ -250,7 +252,29 @@ def new(
     nvim.api.win_set_option(layout_win, "number", False)
     nvim.api.win_set_option(layout_win, "relativenumber", False)
     nvim.api.win_set_option(layout_win, "signcolumn", "no")
-    # nvim.api.win_set_option(layout_win, "winbar", "")
+    # Explicitly clear winbar on layout window to prevent navic/other plugins from affecting floating windows
+    # This is critical - if the layout window has a winbar, it affects floating window positioning
+    try:
+        nvim.api.win_set_option(layout_win, "winbar", "")
+    except Exception:
+        pass  # Ignore if winbar option doesn't exist
+    # Also set up an autocmd to keep it cleared in case navic tries to set it again
+    layout_win_id = _win_id(layout_win)
+    nvim.exec_lua(
+        f"""
+    vim.api.nvim_create_autocmd("WinEnter", {{
+      buffer = {layout_buf_id},
+      callback = function()
+        local winid = vim.api.nvim_get_current_win()
+        local layout_winid = {layout_win_id}
+        if winid == layout_winid then
+          vim.api.nvim_win_set_option(winid, "winbar", "")
+        end
+      end,
+    }})
+    """,
+        [],
+    )
     nvim.api.win_set_option(layout_win, "statusline", "")
     nvim.api.win_set_option(layout_win, "wrap", False)
 
@@ -276,6 +300,8 @@ def new(
     chat_height = max(1, layout_height - prompt_height)
 
     # Create Chat Window (Floating inside layout)
+    # Note: winbar doesn't need height adjustment - it's part of the window's content area
+    # If parent has winbar, floating windows start below it automatically
     chat_config = {
         "relative": "win",
         "win": layout_win,
@@ -303,6 +329,11 @@ def new(
     nvim.api.win_set_option(chat_win, "number", False)
     nvim.api.win_set_option(chat_win, "relativenumber", False)
     nvim.api.win_set_option(chat_win, "signcolumn", "no")
+    # Clear winbar immediately to prevent any interference
+    try:
+        nvim.api.win_set_option(chat_win, "winbar", "")
+    except Exception:
+        pass  # Ignore if winbar option doesn't exist
     nvim.api.win_set_var(chat_win, "snacks_main", True)
 
     # Create Prompt Window (Floating inside layout, below Chat)
@@ -398,7 +429,9 @@ def new(
           vim.cmd("doautocmd FileType anya-chat")
           require("anya.ui_utils").setup_highlights()
         end
-        -- Set winbar
+        -- Always clear winbar first, then set ours to replace any existing/global winbar
+        -- This ensures we don't stack winbars
+        vim.api.nvim_win_set_option(winid, "winbar", "")
         vim.api.nvim_win_set_option(winid, "winbar", "%{{%v:lua.require('anya.ui_utils').get_winbar()%}}")
         -- Re-apply winhighlight to ensure AnyaWinBar highlight is used
         vim.api.nvim_win_set_option(winid, "winhighlight", "Normal:Normal,NormalFloat:Normal,WinBar:AnyaWinBar,WinBarNC:AnyaWinBar")
@@ -442,7 +475,7 @@ def new(
     # We also apply it immediately to catch the current state (since we just entered/focused).
     prompt_keys_cmd = f"""
     local group = vim.api.nvim_create_augroup("AnyaPromptKeys_{prompt_buf_id}", {{ clear = true }})
-    
+
     local function set_prompt_keys()
         local opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Insert blank line" }}
         vim.keymap.set("n", "<C-j>", "o<Esc>", opts)
@@ -485,10 +518,10 @@ def new(
         local resize_right_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Resize split right" }}
         vim.keymap.set({{"n", "i"}}, "<C-Right>", function() resize_pane(2) end, resize_right_opts)
     end
-    
+
     -- Apply immediately
     set_prompt_keys()
-    
+
     vim.api.nvim_create_autocmd({{"BufEnter", "InsertEnter"}}, {{
         buffer = {prompt_buf_id},
         group = group,
