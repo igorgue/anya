@@ -8,17 +8,25 @@ local text = require("anya.text")
 -- Buffer-local variable names for tracking conversation state
 local CONVERSATION_ID_VAR = "anya_conversation_id"
 
--- Track whether a request is currently in progress (Python agent running)
+-- Track whether a request is currently in progress
+-- This is set IMMEDIATELY when user initiates send, before any RPC
+M._sending_in_progress = false
+
+-- Track whether Python agent is running (set via autocommand)
 M._request_in_progress = false
 
---- Check if streaming is still in progress (either agent running or queue not empty)
---- @return boolean True if streaming is in progress
-local function is_streaming_in_progress()
-  -- Check if Python agent is still running
+--- Check if we should block sending
+--- @return boolean True if sending should be blocked
+local function is_send_blocked()
+  -- Block if we're already in the process of sending
+  if M._sending_in_progress then
+    return true
+  end
+  -- Block if Python agent is still running
   if M._request_in_progress then
     return true
   end
-  -- Check if Lua streaming queue still has content
+  -- Block if Lua streaming queue still has content
   local status = text.get_queue_status()
   return status.queue_length > 0 or status.timer_running
 end
@@ -69,23 +77,6 @@ local function set_conversation_id(chat_buf, conv_id)
   vim.api.nvim_buf_set_var(chat_buf, CONVERSATION_ID_VAR, conv_id)
 end
 
---- Titlecase a string (capitalize first letter of each word)
---- @param str string The string to titlecase
---- @return string The titlecased string
-local function titlecase(str)
-  return str:gsub("(%a)([%w]*)", function(first, rest)
-    return first:upper() .. rest:lower()
-  end)
-end
-
---- Get the user's name for message attribution
---- @return string The user's name (titlecased)
-local function get_user_name()
-  -- Fall back to system username
-  local name = os.getenv("USERNAME") or os.getenv("USER") or "User"
-  return titlecase(name)
-end
-
 --- Check if the chat buffer is empty or only contains whitespace
 --- @param chat_buf number The chat buffer number
 --- @return boolean True if the buffer is empty
@@ -115,21 +106,26 @@ end
 --- Creates a new conversation if one doesn't exist
 --- @return boolean True if the message was sent successfully
 function M.send_message()
-  -- Block sending while streaming is in progress (agent running or queue not empty)
-  if is_streaming_in_progress() then
+  -- Block immediately if another send is in progress
+  if is_send_blocked() then
     vim.notify("Anya: Please wait for the current response to complete.", vim.log.levels.WARN)
     return false
   end
+
+  -- Set the lock IMMEDIATELY before any RPC calls
+  M._sending_in_progress = true
 
   local chat_buf = get_chat_buffer()
   local prompt_buf = get_prompt_buffer()
 
   if not chat_buf then
+    M._sending_in_progress = false
     vim.notify("Anya: Chat buffer not found. Run :Anya to open the interface.", vim.log.levels.ERROR)
     return false
   end
 
   if not prompt_buf then
+    M._sending_in_progress = false
     vim.notify("Anya: Prompt buffer not found. Run :Anya to open the interface.", vim.log.levels.ERROR)
     return false
   end
@@ -140,23 +136,39 @@ function M.send_message()
 
   -- Don't send empty messages
   if not prompt_text:match("%S") then
+    M._sending_in_progress = false
     return false
   end
 
-  -- Get or create conversation ID
-  local conv_id = get_conversation_id(chat_buf)
-  local is_new_conversation = conv_id == nil
+  -- Get existing conversation ID (if any)
+  local existing_conv_id = get_conversation_id(chat_buf)
 
-  if is_new_conversation then
-    -- Generate new conversation ID via Python
-    conv_id = vim.fn.AnyaNewConversationId()
-    set_conversation_id(chat_buf, conv_id)
+  -- Clear the prompt buffer immediately for responsiveness
+  vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, { "" })
+
+  -- Single RPC call: send text, get back IDs, schedules agent task
+  -- Server handles: ID generation, timestamp, database save
+  local ok, result = pcall(vim.fn.AnyaSend, prompt_text, existing_conv_id)
+  if not ok then
+    M._sending_in_progress = false
+    vim.notify("Anya: Failed to send message: " .. tostring(result), vim.log.levels.ERROR)
+    return false
   end
 
-  -- Generate message ID and timestamp
-  local msg_id = vim.fn.AnyaNewMessageId(conv_id)
-  local timestamp = vim.fn.AnyaTimestamp()
-  local user_name = get_user_name()
+  -- Slash commands return nil
+  if result == nil or result == vim.NIL then
+    M._sending_in_progress = false
+    return true
+  end
+
+  -- Extract IDs from server response
+  local conv_id = result.conv_id
+  local msg_id = result.msg_id
+
+  -- Store conversation ID if new
+  if result.is_new then
+    set_conversation_id(chat_buf, conv_id)
+  end
 
   -- Build the message content
   local output_lines = {}
@@ -211,23 +223,15 @@ function M.send_message()
 
   vim.api.nvim_set_option_value("modifiable", was_modifiable, { buf = chat_buf })
 
-  -- Clear the prompt buffer
-  vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, { "" })
-
-  -- Save to database before rendering extmarks
-  if is_new_conversation then
-    vim.fn.AnyaSaveConversation(conv_id, timestamp)
-  end
-  vim.fn.AnyaSaveMessage(msg_id, conv_id, "user", prompt_text, user_name, nil, timestamp, timestamp, nil)
-
   -- Process markers to create folds and extmarks
   text._process_markers(chat_buf)
 
   -- Scroll chat buffer to bottom
   text._autoscroll_to_bottom(chat_buf)
 
-  -- Send to agent for response (async)
-  vim.fn.AnyaSend(prompt_text, conv_id)
+  -- Handoff: clear sending lock, set request lock
+  M._sending_in_progress = false
+  M._request_in_progress = true
 
   return true
 end
@@ -295,11 +299,12 @@ end
 --- Check if streaming is currently in progress (agent running or queue not empty)
 --- @return boolean True if streaming is in progress
 function M.is_request_in_progress()
-  return is_streaming_in_progress()
+  return is_send_blocked()
 end
 
 --- Force reset request state (for cancellation)
 function M.force_reset_request_state()
+  M._sending_in_progress = false
   M._request_in_progress = false
 end
 
@@ -312,6 +317,8 @@ function M.setup_request_tracking()
     pattern = "AnyaRequestStarted",
     group = group,
     callback = function()
+      -- Handoff: clear the send lock, agent is now running
+      M._sending_in_progress = false
       M._request_in_progress = true
     end,
     desc = "Track when Anya request starts",
@@ -321,9 +328,8 @@ function M.setup_request_tracking()
     pattern = "AnyaRequestFinished",
     group = group,
     callback = function()
+      M._sending_in_progress = false
       M._request_in_progress = false
-      -- Allow user to continue even if request was cancelled
-      -- This enables sending follow-up messages
     end,
     desc = "Track when Anya request finishes",
   })

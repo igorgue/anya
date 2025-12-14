@@ -982,22 +982,57 @@ class AnyaPlugin:
     def anya_send(self, args):
         """Send a prompt to the agent with streaming response.
 
+        Returns dict with {conv_id, msg_id, timestamp} for Lua to render,
+        or None on error/slash command.
+
         Args:
             args[0]: The prompt text
-            args[1]: Optional conversation ID
+            args[1]: Optional existing conversation ID (None for new conversation)
         """
         if not args:
             self.nvim.err_write("AnyaSend requires a prompt argument.\n")
-            return
+            return None
         text = args[0]
-        conversation_id = args[1] if len(args) > 1 else None
+        existing_conv_id = args[1] if len(args) > 1 else None
 
-        # Handle slash commands
+        # Handle slash commands (no return value needed)
         if text and text.strip().startswith("/"):
-            self._handle_slash_command(text.strip(), conversation_id)
-            return
+            self._handle_slash_command(text.strip(), existing_conv_id)
+            return None
 
-        # Save to history via Lua
+        # Generate IDs and timestamp on server side
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        timestamp = (
+            now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+        )
+
+        # Use existing conversation ID or generate new one
+        is_new_conversation = existing_conv_id is None
+        conv_id = existing_conv_id if existing_conv_id else ids.new()
+        msg_id = ids.new(conv_id)
+
+        # Get user name
+        user_name = self.nvim.eval("$USER") or "User"
+
+        # Save to database
+        self._ensure_db()
+        if is_new_conversation:
+            db.save_conversation(conv_id, timestamp)
+        db.save_message_dict(
+            msg_id=msg_id,
+            conversation_id=conv_id,
+            role="user",
+            content=text,
+            author=user_name,
+            model=None,
+            created_at=timestamp,
+            ended_at=timestamp,
+            markers=None,
+        )
+
+        # Save to prompt history via Lua
         if text and text.strip():
             self.nvim.exec_lua(
                 """
@@ -1009,7 +1044,16 @@ class AnyaPlugin:
                 text,
             )
 
-        self.send(text, conversation_id)
+        # Schedule async agent task
+        self.send(text, conv_id)
+
+        # Return IDs for Lua to render the message
+        return {
+            "conv_id": conv_id,
+            "msg_id": msg_id,
+            "timestamp": timestamp,
+            "is_new": is_new_conversation,
+        }
 
     def _handle_slash_command(self, command, conversation_id=None):
         """Handle slash commands like /clear, /cancel, /help."""

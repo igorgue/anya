@@ -92,7 +92,8 @@ vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP" }, {
   group = augroup,
   buffer = 0,
   callback = function()
-    vim.fn.AnyaRepositionFloats()
+    -- Use pcall to handle cases where the RPC channel is busy
+    pcall(vim.fn.AnyaRepositionFloats)
   end,
   desc = "Adjust prompt height based on content",
 })
