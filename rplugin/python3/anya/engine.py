@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import os
 
 from agents import Runner
-from .agents import MAIN_AGENT_NAME
+from .agents import MAIN_AGENT_NAME, CodeAgent
 from .agents.context import NvimPluginContext
 from openai.types.responses import ResponseTextDeltaEvent
 from . import db
@@ -123,16 +123,40 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
 
             # Detect reasoning/thinking content from streaming events
             is_reasoning_event = False
-            reasoning_delta = None
+            reasoning_text: str | None = None
             if event.type == "raw_response_event" and hasattr(event, "data"):
                 data = event.data
                 data_type = getattr(data, "type", "")
-                if data_type in (
-                    "response.reasoning_summary_text.delta",
-                    "response.reasoning_text.delta",
+
+                # Keep the thinking fold open for *all* reasoning-related events.
+                if isinstance(data_type, str) and data_type.startswith(
+                    "response.reasoning"
                 ):
                     is_reasoning_event = True
-                    reasoning_delta = getattr(data, "delta", "")
+
+                    # Text-bearing reasoning events
+                    if data_type in (
+                        "response.reasoning_summary_text.delta",
+                        "response.reasoning_text.delta",
+                        "response.reasoning_content.delta",
+                    ):
+                        reasoning_text = getattr(data, "delta", "")
+                    elif data_type in (
+                        "response.reasoning_summary_text.done",
+                        "response.reasoning_text.done",
+                        "response.reasoning_content.done",
+                    ):
+                        reasoning_text = getattr(data, "text", "")
+
+                # Fallback: check if delta has reasoning_content (e.g. from some providers)
+                if not reasoning_text and hasattr(data, "delta"):
+                    delta = data.delta
+                    if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                        is_reasoning_event = True
+                        reasoning_text = delta.reasoning_content
+                    elif hasattr(delta, "reasoning") and delta.reasoning:
+                        is_reasoning_event = True
+                        reasoning_text = delta.reasoning
 
             # Handle reasoning/thinking events
             if is_reasoning_event:
@@ -157,17 +181,17 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                     last_output_was_marker = True
                     last_output_was_tool = False
 
-                # Stream the reasoning delta
-                if reasoning_delta:
-                    thinking_content.append(reasoning_delta)
-                    collected_content.append(reasoning_delta)
+                if reasoning_text:
+                    thinking_content.append(reasoning_text)
+                    collected_content.append(reasoning_text)
                     if not plugin._request_cancelled:
                         plugin.nvim.async_call(
                             ui.stream_text_to_buffer,
                             plugin.nvim,
                             chat_bufnr,
-                            reasoning_delta,
+                            reasoning_text,
                         )
+
                 continue  # Skip other processing for reasoning events
 
             # Handle finalization transition (first non-reasoning event after reasoning started)
@@ -175,8 +199,8 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                 # Finalize thinking section
                 thinking_finalized = True
 
-                # Close thinking fold
-                thinking_footer = "\n" + markers.make_marker("fold_end") + "\n"
+                # Close thinking fold with blank line after
+                thinking_footer = "\n" + markers.make_marker("fold_end") + "\n\n"
                 collected_content.append(thinking_footer)
                 thinking_content.append(thinking_footer)
                 if not plugin._request_cancelled:
@@ -194,6 +218,77 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
             if event.type == "run_item_stream_event":
                 item = event.item
                 item_type = getattr(item, "type", None)
+
+                # Newer Agents SDK versions surface reasoning as a RunItem.
+                # Render it as a "thinking" fold if we haven't already streamed reasoning text.
+                if item_type == "reasoning_item" and not thinking_started:
+                    raw_item = getattr(item, "raw_item", None)
+
+                    summary_parts = (
+                        getattr(raw_item, "summary", None) if raw_item else None
+                    )
+                    content_parts = (
+                        getattr(raw_item, "content", None) if raw_item else None
+                    )
+
+                    summary_text = "\n".join(
+                        getattr(p, "text", "")
+                        for p in (summary_parts or [])
+                        if getattr(p, "text", "")
+                    )
+                    content_text = "\n".join(
+                        getattr(p, "text", "")
+                        for p in (content_parts or [])
+                        if getattr(p, "text", "")
+                    )
+
+                    display_text = summary_text or content_text
+
+                    if display_text:
+                        thinking_started = True
+                        thinking_finalized = True
+
+                        thinking_header = "**thinking**\n"
+                        thinking_header += markers.make_marker("fold_start", "thinking")
+                        thinking_header += "\n"
+
+                        collected_content.append(thinking_header)
+                        thinking_content.append(thinking_header)
+                        if not plugin._request_cancelled:
+                            plugin.nvim.async_call(
+                                ui.stream_text_to_buffer,
+                                plugin.nvim,
+                                chat_bufnr,
+                                thinking_header,
+                            )
+
+                        thinking_content.append(display_text)
+                        collected_content.append(display_text)
+                        if not plugin._request_cancelled:
+                            plugin.nvim.async_call(
+                                ui.stream_text_to_buffer,
+                                plugin.nvim,
+                                chat_bufnr,
+                                display_text,
+                            )
+
+                        thinking_footer = "\n" + markers.make_marker("fold_end") + "\n\n"
+                        collected_content.append(thinking_footer)
+                        thinking_content.append(thinking_footer)
+                        if not plugin._request_cancelled:
+                            plugin.nvim.async_call(
+                                ui.stream_text_to_buffer,
+                                plugin.nvim,
+                                chat_bufnr,
+                                thinking_footer,
+                            )
+
+                        plugin._streaming_started = True
+                        last_output_was_marker = True
+                        last_output_was_tool = False
+                        needs_blank_before_text = False
+
+                    continue
 
                 if item_type == "tool_call_item":
                     raw_item = getattr(item, "raw_item", None)
@@ -443,6 +538,19 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                         plugin.nvim.async_call(
                             ui.stream_text_to_buffer, plugin.nvim, chat_bufnr, delta
                         )
+
+        # Ensure thinking block is closed if stream ends
+        if thinking_started and not thinking_finalized:
+            thinking_finalized = True
+            thinking_footer = "\n" + markers.make_marker("fold_end") + "\n"
+            collected_content.append(thinking_footer)
+            if not plugin._request_cancelled:
+                plugin.nvim.async_call(
+                    ui.stream_text_to_buffer,
+                    plugin.nvim,
+                    chat_bufnr,
+                    thinking_footer,
+                )
 
         # Flush any remaining parallel tools before message end
         # (Headers already displayed with pending status, just clear the list)

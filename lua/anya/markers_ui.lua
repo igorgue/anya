@@ -587,11 +587,11 @@ function M._process_markers(bufnr)
             -- Highlight the header line (line above marker) with pending icon
             M._apply_header_highlight(bufnr, i - 1, "AnyaToolPending", ui_utils.icons.pending)
           elseif marker_name == markers.thinking then
-            -- Thinking block: treat like a fold, no icon on header
+            -- Thinking block: treat like a fold with brain icon
             fold_start_line = i - 1
             fold_is_edit = false
-            -- Highlight header with thinking text color (subtle)
-            M._apply_header_highlight(bufnr, i - 1, "AnyaThinking", nil)
+            -- Highlight header with thinking text color and brain icon
+            M._apply_header_highlight(bufnr, i - 1, "AnyaThinking", ui_utils.icons.thinking)
           elseif
             marker_name == markers.edit_pending
             or marker_name == markers.edit_applied

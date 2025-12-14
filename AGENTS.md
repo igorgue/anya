@@ -419,3 +419,7 @@ Examples:
 - ❌ Incorrect: `:AnyaHistory`, `:AnyaSend`, `:AnyaHelp`
 
 The main `:Anya` command in `plugin.py` uses `nargs="*"` to accept subcommands and their arguments. This keeps the command namespace clean and ensures all functionality is discoverable under `:Anya`.
+
+## Documentation
+
+Documentation for the OpenAI Agents SDK can be found at: `docs/openai-agents/` please look there for more information on how to work with agents and tools.

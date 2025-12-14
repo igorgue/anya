@@ -1,5 +1,8 @@
 import os
+
 from agents import Agent
+from agents.models.default_models import get_default_model_settings
+from openai.types.shared import Reasoning
 
 from .dynamic_instructions import (
     generate_dynamic_code_instructions,
@@ -23,6 +26,18 @@ from ..tools import (
     buffer_name,
 )
 
+
+def _parse_reasoning_effort(value: str | None) -> str | None:
+    if value is None:
+        return None
+    v = str(value).strip().lower()
+    if not v:
+        return None
+
+    allowed = {"none", "minimal", "low", "medium", "high", "xhigh"}
+    return v if v in allowed else None
+
+
 MAIN_AGENT_NAME = "Code"
 MAIN_ASSISTANT_NAME = "Anya"
 
@@ -35,8 +50,11 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
 
     Args:
         mcp_servers: List of connected MCP server instances
-        thinking_budget: Optional thinking budget for reasoning models (e.g., o3)
-                        If not provided, reads from ANYA_THINKING_BUDGET env var
+        thinking_budget: Optional thinking budget for reasoning models.
+
+            This should be a reasoning "effort" string supported by OpenAI (e.g.
+            "minimal", "low", "medium", "high", "xhigh"). If not provided, reads
+            from ANYA_THINKING_BUDGET.
 
     Returns:
         Configured Agent instance with dynamic instructions
@@ -57,13 +75,32 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
     # Expand placeholders and append environment context at the end.
     instructions = apply_system_prompt(instructions, nvim=nvim)
 
-    # Get thinking budget (model is handled via OPENAI_MODEL_ID env var)
+    # Resolve model + settings.
+    model_name = (os.environ.get("ANYA_MODEL") or "gpt-5.2").strip()
+    model_settings = get_default_model_settings(model_name.lower())
+
+    # Get thinking budget (if not explicitly passed).
     if thinking_budget is None:
         thinking_budget = os.environ.get("ANYA_THINKING_BUDGET")
+
+    # Always configure reasoning with summary="auto" so the UI can render thinking
+    # blocks when models emit them. Models that don't support reasoning will ignore this.
+    effort = _parse_reasoning_effort(thinking_budget)
+    base_effort = (
+        model_settings.reasoning.effort
+        if model_settings.reasoning is not None
+        else "medium"
+    )
+    model_settings.reasoning = Reasoning(
+        effort=effort or base_effort,
+        summary="auto",
+    )
 
     config = {
         "name": MAIN_AGENT_NAME,
         "instructions": instructions,
+        "model": model_name,
+        "model_settings": model_settings,
         "tools": [
             create,
             edit,
