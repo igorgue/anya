@@ -294,11 +294,10 @@ class AnyaPlugin:
 
     def send(self, text, conversation_id=None):
         """Send a prompt to the code agent and stream the response to the chat buffer."""
-        self.nvim.out_write(f"Anya: send() called, text={text[:30] if text else None}\n")
         # Prevent concurrent requests - check if a task is still running
         if self._current_task is not None and not self._current_task.done():
-            self.nvim.out_write(
-                f"Anya: Task still running (done={self._current_task.done()}). Please wait.\n"
+            self.nvim.err_write(
+                "Anya: Please wait for the current response to complete.\n"
             )
             return
 
@@ -323,11 +322,6 @@ class AnyaPlugin:
         self, text, conversation_id, chat_bufnr, request_id
     ):
         """Run the agent via the daemon and handle streaming responses."""
-        self.nvim.async_call(
-            self.nvim.out_write,
-            f"Anya: _run_agent_via_daemon started for {request_id}\n",
-        )
-
         # Ensure daemon is running (run blocking check in thread pool)
         loop = asyncio.get_event_loop()
         is_running = await loop.run_in_executor(None, daemon_mgmt.is_daemon_running)
@@ -441,20 +435,12 @@ class AnyaPlugin:
         )
 
         # Subscribe to streaming events
-        self.nvim.async_call(
-            self.nvim.out_write,
-            f"Anya: Subscribing to stream for {request_id}...\n",
-        )
         subscriber = StreamSubscriber(self.session_id, request_id)
         await subscriber.connect()
 
         # Small delay to ensure SUB socket is fully connected before sending request
         # ZeroMQ PUB/SUB has a "slow joiner" problem where early messages can be lost
         await asyncio.sleep(0.1)
-        self.nvim.async_call(
-            self.nvim.out_write,
-            "Anya: Stream subscribed, sending request...\n",
-        )
 
         # Collected content for saving
         collected_content: list[str] = []
@@ -478,7 +464,6 @@ class AnyaPlugin:
             )
 
             # Process streaming events
-            chunk_count = 0
             while True:
                 if self._request_cancelled:
                     raise asyncio.CancelledError()
@@ -487,19 +472,9 @@ class AnyaPlugin:
                 if chunk is None:
                     # Check if send task completed
                     if send_task.done():
-                        self.nvim.async_call(
-                            self.nvim.out_write,
-                            f"Anya: Stream loop done, received {chunk_count} chunks\n",
-                        )
                         break
                     continue
 
-                chunk_count += 1
-                if chunk_count <= 3:
-                    self.nvim.async_call(
-                        self.nvim.out_write,
-                        f"Anya: Received chunk {chunk_count}: {chunk.event_type.value}\n",
-                    )
                 self._streaming_started = True
 
                 # Handle different event types
@@ -796,10 +771,6 @@ class AnyaPlugin:
             )
 
         finally:
-            self.nvim.async_call(
-                self.nvim.out_write,
-                f"Anya: Request {request_id} finished, cleaning up\n",
-            )
             await subscriber.disconnect()
             self._current_task = None
             self._current_request_id = None

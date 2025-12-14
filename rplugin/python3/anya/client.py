@@ -155,21 +155,10 @@ class AnyaClient:
         Returns:
             Response from daemon or None if failed
         """
-        def log(msg):
-            with open("/tmp/anya-client-debug.log", "a") as f:
-                import time
-                f.write(f"{time.time()}: {msg}\n")
-                f.flush()
-
-        log(f"send_request called: {request_type}, connected={self._connected}")
         with self._lock:
-            log(f"lock acquired")
             if not self._connected or not self._req_socket:
-                log(f"need to connect")
                 if not self.connect(timeout=timeout):
-                    log(f"connect failed")
                     return None
-                log(f"connected")
 
             try:
                 # Set timeout for this request
@@ -182,22 +171,17 @@ class AnyaClient:
                     request_id=request_id,
                     payload=payload,
                 )
-                log(f"sending request...")
                 self._req_socket.send(request.serialize())
-                log(f"sent, waiting for response...")
 
                 # Wait for response
                 response_data = self._req_socket.recv()
-                log(f"got response")
                 return Response.deserialize(response_data)
 
             except zmq.Again:
-                log(f"timeout!")
                 # Timeout - reset socket
                 self._reset_socket()
                 return None
-            except Exception as e:
-                log(f"exception: {e}")
+            except Exception:
                 self._reset_socket()
                 return None
 

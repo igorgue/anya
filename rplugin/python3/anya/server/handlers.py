@@ -397,9 +397,6 @@ class RequestHandler:
                 # Handle tool outputs
                 elif item_type == "tool_call_output_item":
                     tool_output = getattr(item, "output", "")
-                    self.logger.info(
-                        f"Tool output received, pending={len(pending_tool_outputs)+1}, expected={expected_outputs}"
-                    )
                     pending_tool_outputs.append(tool_output)
 
                     if (
@@ -416,9 +413,6 @@ class RequestHandler:
                         all_outputs = "\n".join(o for o in pending_tool_outputs if o)
 
                         # Send tool call end event
-                        self.logger.info(
-                            f"Sending TOOL_CALL_END for {len(parallel_tools)} tools, has_failure={has_failure}"
-                        )
                         await self._send_stream_chunk(
                             session_id,
                             request_id,

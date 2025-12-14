@@ -115,22 +115,11 @@ end
 --- Creates a new conversation if one doesn't exist
 --- @return boolean True if the message was sent successfully
 function M.send_message()
-  print(">>> Lua send_message called")
   -- Block sending while streaming is in progress (agent running or queue not empty)
   if is_streaming_in_progress() then
-    local status = text.get_queue_status()
-    vim.notify(
-      string.format(
-        "Anya: Blocked - request_in_progress=%s, queue_length=%d, timer_running=%s",
-        tostring(M._request_in_progress),
-        status.queue_length,
-        tostring(status.timer_running)
-      ),
-      vim.log.levels.WARN
-    )
+    vim.notify("Anya: Please wait for the current response to complete.", vim.log.levels.WARN)
     return false
   end
-  print(">>> Lua send_message: not blocked, continuing")
 
   local chat_buf = get_chat_buffer()
   local prompt_buf = get_prompt_buffer()
@@ -238,9 +227,7 @@ function M.send_message()
   text._autoscroll_to_bottom(chat_buf)
 
   -- Send to agent for response (async)
-  print(">>> Lua: calling vim.fn.AnyaSend")
   vim.fn.AnyaSend(prompt_text, conv_id)
-  print(">>> Lua: AnyaSend returned")
 
   return true
 end
