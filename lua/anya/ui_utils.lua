@@ -89,4 +89,14 @@ function M.setup_highlights()
   M.set_hl_fg_only("AnyaFileRef", "Constant", { underline = true })
 end
 
+-- Get winbar text for chat buffer
+function M.get_winbar()
+  local ok, version = pcall(vim.fn.AnyaVersion)
+  if ok and version then
+    return "Anya v" .. version
+  else
+    return "Anya"
+  end
+end
+
 return M

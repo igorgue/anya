@@ -105,10 +105,16 @@ async def exec(
     # Extract just the command name
     cmd_name = _extract_command_name(command)
 
+    # Check YOLO mode from context
+    yolo_mode = plugin_context.yolo_mode
+
     # Check if this command is already allowed in this session
     if cmd_name in plugin_context.allowed_commands:
         # Execute without asking
         pass
+    elif yolo_mode:
+        # YOLO mode: auto-allow and execute without asking
+        plugin_context.allowed_commands.add(cmd_name)
     else:
         # Ask user for confirmation using vim.ui.select
         choice = await _nvim_ui_select(

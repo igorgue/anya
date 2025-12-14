@@ -16,7 +16,7 @@ vim.opt_local.foldmethod = "manual"
 vim.opt_local.foldenable = true
 vim.opt_local.modifiable = true
 vim.opt_local.spell = false
-vim.opt_local.winbar = ""
+-- Custom winbar is set in buffers.py when window is created
 -- Custom foldtext that handles concealed markers
 vim.opt_local.foldtext = [[v:lua.require'anya.foldtext'.get_foldtext()]]
 
@@ -189,6 +189,11 @@ end, { buffer = true, desc = "Focus prompt window" })
 vim.keymap.set("n", "<localleader><localleader>", function()
   require("anya.float_focus").focus_prompt()
 end, { buffer = true, desc = "Focus chat window (toggle)" })
+
+-- Toggle YOLO mode
+vim.keymap.set("n", "<localleader>y", function()
+  require("anya.conversation").toggle_yolo_mode()
+end, { buffer = true, desc = "Toggle YOLO mode" })
 
 -- Expose globally so streaming can call it
 _G.anya_highlight_chat_file_refs = highlight_refs

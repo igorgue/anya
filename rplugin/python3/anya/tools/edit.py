@@ -188,7 +188,41 @@ async def edit(
 
     nvim.async_call(render_and_setup)
 
-    # Wait for user decision
+    # Check YOLO mode from context
+    yolo_mode = ctx.context.yolo_mode
+
+    # If YOLO mode is enabled, auto-apply the edit
+    if yolo_mode:
+        # Wait a bit for the edit to render
+        await asyncio.sleep(0.2)
+
+        # Auto-apply the edit using the edit_view handler which properly updates UI
+        def auto_apply():
+            try:
+                # Use handle_keypress_any_edit to apply the most recent pending edit
+                # This properly updates the UI markers and database, and triggers decision_callback
+                # which will set the result for the polling mechanism (callback was set in render_and_setup)
+                nvim.exec_lua(
+                    """
+                    local edit_view = require('anya.edit_view')
+                    edit_view.handle_keypress_any_edit('1')
+                    """
+                )
+            except Exception as e:
+                nvim.exec_lua(
+                    f"""
+                    vim.g.anya_edit_result_{edit_id} = {{
+                        action = "failed",
+                        success = false,
+                        message = "Error: {str(e)}"
+                    }}
+                    """
+                )
+
+        nvim.async_call(auto_apply)
+        await asyncio.sleep(0.1)  # Give it time to apply
+
+    # Wait for user decision (or auto-apply result in YOLO mode)
     result = await _wait_for_edit_decision(nvim, edit_id)
 
     action = result.get("action", "timeout")

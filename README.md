@@ -1,13 +1,6 @@
 # Anya
 An AI-powered Neovim plugin built on the OpenAI Agents SDK.
 
-> Named after Anya Forger from Spy x Family - she can read minds, this plugin reads your code.
-
-## Features
----
-
-> Named after Anya Forger from Spy x Family - she can read minds, this plugin reads your code.
-
 ## Features
 
 - **Chat Interface**: Split-window layout with streaming responses
@@ -185,35 +178,6 @@ npm install -g @anthropics/mcp-server-fetch
 
 ## Development
 
-### File Structure
-
-```
-anya/
-├── rplugin/python3/anya/     # Python remote plugin
-│   ├── plugin.py             # Main plugin class
-│   ├── buffers.py            # Buffer management
-│   ├── db.py                 # SQLite database
-│   ├── history.py            # Conversation parsing
-│   ├── markers.py            # Message markers
-│   ├── ids.py                # ID generation
-│   ├── agents/               # Agent definitions
-│   └── tools/                # Tool implementations
-├── lua/anya/                 # Lua modules
-│   ├── init.lua              # Module entry point
-│   ├── conversation.lua      # Conversation management
-│   ├── text.lua              # Streaming animation
-│   ├── markers.lua           # Marker utilities
-│   ├── picker.lua            # History picker
-│   └── foldtext.lua          # Custom fold text
-├── ftplugin/                 # Filetype configuration
-│   ├── anya-chat.lua         # Chat buffer settings
-│   └── anya-prompt.lua       # Prompt buffer settings
-├── plugin/anya.vim           # Bootstrap commands
-├── syntax/anya-chat.vim      # Syntax highlighting
-├── prompts/                  # Agent system prompts
-└── doc/anya.txt              # Vim help
-```
-
 ### Updating Remote Plugins
 
 After modifying Python code:
@@ -227,3 +191,11 @@ Then restart Neovim.
 ## License
 
 MIT
+
+---
+
+## Programming Joke
+
+Why do programmers prefer dark mode?
+
+Because the light attracts bugs!

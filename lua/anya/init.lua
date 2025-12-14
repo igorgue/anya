@@ -10,4 +10,5 @@ return {
   conversation = conversation,
   picker = picker,
   history = history,
+  toggle_yolo_mode = conversation.toggle_yolo_mode,
 }

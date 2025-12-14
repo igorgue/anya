@@ -7,3 +7,4 @@ class NvimPluginContext:
     nvim: Nvim
     session_id: str
     allowed_commands: set[str] = field(default_factory=set)
+    yolo_mode: bool = False

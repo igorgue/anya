@@ -43,6 +43,8 @@ class AnyaPlugin:
         self._tool_fold_open = False  # Track if a tool fold is currently open
         self._mcp_manager = MCPManager(nvim)  # MCP server manager with caching
         self._last_layout = "replace"  # Remember the last layout used
+        # Initialize YOLO mode from environment variable
+        self._yolo_mode = os.environ.get("ANYA_YOLO", "").lower() == "true"
 
         # Agent instances (initialized later when MCP servers are ready)
         self._agent = None  # Main CodeAgent instance
@@ -577,6 +579,11 @@ For more help, see :h anya"""
             now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         )
 
+    @pynvim.function("AnyaVersion", sync=True)
+    def version(self, args):
+        """Get the plugin version."""
+        return VERSION
+
     def _help_text(self):
         return f"""anya v{VERSION}
 
@@ -1074,7 +1081,29 @@ Usage:
         }
 
     @pynvim.function("AnyaUpdateEditMarker", sync=True)
-    def update_edit_marker(self, args):
+    def anya_update_edit_marker(self, args):
+        """Update edit marker in database for a message."""
+        message_id = args[0]
+        old_marker = args[1]
+        new_marker = args[2]
+
+        try:
+            db_instance = db.get_db()
+            db_instance.update_message_marker(message_id, old_marker, new_marker)
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    @pynvim.function("AnyaGetYoloMode", sync=True)
+    def anya_get_yolo_mode(self, args):
+        """Get current YOLO mode state."""
+        return self._yolo_mode
+
+    @pynvim.function("AnyaToggleYoloMode", sync=True)
+    def anya_toggle_yolo_mode(self, args):
+        """Toggle YOLO mode on/off."""
+        self._yolo_mode = not self._yolo_mode
+        return self._yolo_mode
         """Update an edit marker in the database for a message.
 
         This is called when a user toggles an edit decision, so the

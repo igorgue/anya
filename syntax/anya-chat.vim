@@ -13,4 +13,7 @@ highlight link AnyaFileRef Constant
 syntax match AnyaSlashCommand "\%(\%^\|\s\)\@<=/[a-zA-Z]\+\%($\|\s\)\@="
 highlight link AnyaSlashCommand Special
 
+" Winbar highlight group
+highlight link AnyaWinBar Comment
+
 let b:current_syntax = "anya-chat"

@@ -60,7 +60,7 @@ def set_prompt_window_options(nvim: Nvim, winid: int):
     nvim.api.win_set_option(winid, "winhighlight", "Normal:Normal")
 
     # Delay winbar setting to avoid conflicts with other configurations
-    nvim.async_call(lambda: nvim.api.win_set_option(winid, "winbar", ""))
+    # nvim.async_call(lambda: nvim.api.win_set_option(winid, "winbar", ""))
 
 
 def _valid_win(nvim: Nvim, winid: int | None) -> bool:
@@ -250,7 +250,7 @@ def new(
     nvim.api.win_set_option(layout_win, "number", False)
     nvim.api.win_set_option(layout_win, "relativenumber", False)
     nvim.api.win_set_option(layout_win, "signcolumn", "no")
-    nvim.api.win_set_option(layout_win, "winbar", "")
+    # nvim.api.win_set_option(layout_win, "winbar", "")
     nvim.api.win_set_option(layout_win, "statusline", "")
     nvim.api.win_set_option(layout_win, "wrap", False)
 
@@ -294,13 +294,25 @@ def new(
     # Configure chat window
     nvim.api.win_set_option(chat_win, "wrap", True)
     nvim.api.win_set_option(
-        chat_win, "winhighlight", "Normal:Normal,NormalFloat:Normal"
+        chat_win,
+        "winhighlight",
+        "Normal:Normal,NormalFloat:Normal,WinBar:AnyaWinBar,WinBarNC:AnyaWinBar",
     )
     nvim.api.win_set_option(chat_win, "linebreak", True)
     nvim.api.win_set_option(chat_win, "showbreak", "")
     nvim.api.win_set_option(chat_win, "number", False)
     nvim.api.win_set_option(chat_win, "relativenumber", False)
     nvim.api.win_set_option(chat_win, "signcolumn", "no")
+    # Set winbar for chat window - use ui_utils function to get version dynamically
+    winid = _win_id(chat_win)
+    # Construct winbar expression - need to escape braces in f-string
+    nvim.exec_lua(
+        f"""
+    local winid = {winid}
+    vim.api.nvim_win_set_option(winid, "winbar", "%{{%v:lua.require('anya.ui_utils').get_winbar()%}}")
+    """,
+        [],
+    )
     nvim.api.win_set_var(chat_win, "snacks_main", True)
 
     # Create Prompt Window (Floating inside layout, below Chat)

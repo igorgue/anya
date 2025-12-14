@@ -11,7 +11,7 @@ vim.opt_local.number = false
 vim.opt_local.relativenumber = false
 vim.opt_local.signcolumn = "no"
 vim.opt_local.spell = false
-vim.opt_local.winbar = ""
+-- vim.opt_local.winbar = ""
 vim.opt_local.modifiable = true
 
 -- Modules
@@ -300,6 +300,11 @@ end, { buffer = true, desc = "Focus chat window" })
 vim.keymap.set("n", "<C-w>k", function()
   require("anya.float_focus").focus_chat()
 end, { buffer = true, desc = "Focus chat window" })
+
+-- Toggle YOLO mode
+vim.keymap.set("n", "<localleader>y", function()
+  require("anya.conversation").toggle_yolo_mode()
+end, { buffer = true, desc = "Toggle YOLO mode" })
 
 vim.keymap.set("n", "<localleader><localleader>", function()
   require("anya.float_focus").focus_chat()

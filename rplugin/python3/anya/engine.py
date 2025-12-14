@@ -1,12 +1,11 @@
 """Core agent execution engine."""
 
 import asyncio
-import json
 from datetime import datetime, timezone
 import os
 
 from agents import Runner
-from .agents import MAIN_AGENT_NAME, CodeAgent
+from .agents import MAIN_AGENT_NAME
 from .agents.context import NvimPluginContext
 from openai.types.responses import ResponseTextDeltaEvent
 from . import db
@@ -32,6 +31,7 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
         nvim=plugin.nvim,
         session_id=plugin.session_id,
         allowed_commands=plugin.allowed_commands,
+        yolo_mode=plugin._yolo_mode,
     )
 
     # Emit fidget start event

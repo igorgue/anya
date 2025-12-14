@@ -332,4 +332,14 @@ end
 -- Initialize request tracking when module loads
 M.setup_request_tracking()
 
+--- Toggle YOLO mode on/off and show notification
+--- @return boolean The new YOLO mode state
+function M.toggle_yolo_mode()
+  local new_state = vim.fn.AnyaToggleYoloMode()
+  local status_text = new_state and "ON" or "OFF"
+  local level = new_state and vim.log.levels.WARN or vim.log.levels.INFO
+  vim.notify("Anya YOLO mode: " .. status_text, level)
+  return new_state
+end
+
 return M

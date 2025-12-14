@@ -26,6 +26,9 @@ from ..tools import (
     buffer_name,
 )
 
+MAIN_AGENT_NAME = "Code"
+MAIN_ASSISTANT_NAME = "Anya"
+
 
 def _parse_reasoning_effort(value: str | None) -> str | None:
     if value is None:
@@ -36,10 +39,6 @@ def _parse_reasoning_effort(value: str | None) -> str | None:
 
     allowed = {"none", "minimal", "low", "medium", "high", "xhigh"}
     return v if v in allowed else None
-
-
-MAIN_AGENT_NAME = "Code"
-MAIN_ASSISTANT_NAME = "Anya"
 
 
 async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
@@ -76,25 +75,22 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
     instructions = apply_system_prompt(instructions, nvim=nvim)
 
     # Resolve model + settings.
-    model_name = (os.environ.get("ANYA_MODEL") or "gpt-5.2").strip()
+    model_name = (os.environ.get("ANYA_MODEL") or "gpt-4.1").strip()
     model_settings = get_default_model_settings(model_name.lower())
 
     # Get thinking budget (if not explicitly passed).
     if thinking_budget is None:
         thinking_budget = os.environ.get("ANYA_THINKING_BUDGET")
 
-    # Always configure reasoning with summary="auto" so the UI can render thinking
-    # blocks when models emit them. Models that don't support reasoning will ignore this.
-    effort = _parse_reasoning_effort(thinking_budget)
-    base_effort = (
-        model_settings.reasoning.effort
-        if model_settings.reasoning is not None
-        else "medium"
-    )
-    model_settings.reasoning = Reasoning(
-        effort=effort or base_effort,
-        summary="auto",
-    )
+    # Only configure reasoning if the model supports it. Models that don't support
+    # reasoning will have model_settings.reasoning as None, and we should leave it that way.
+    if model_settings.reasoning is not None:
+        effort = _parse_reasoning_effort(thinking_budget)
+        base_effort = model_settings.reasoning.effort or "medium"
+        model_settings.reasoning = Reasoning(
+            effort=effort or base_effort,
+            summary="auto",
+        )
 
     config = {
         "name": MAIN_AGENT_NAME,
