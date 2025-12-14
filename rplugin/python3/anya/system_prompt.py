@@ -12,8 +12,9 @@ Supported placeholders:
 - {CWD}
 - {CURRENT_DATE}
 
-In addition to substituting placeholders when present, we also append a small
-"System context" block to the end of every agent's instructions.
+In addition to substituting placeholders when present, we also append:
+1. A small "System context" block to the end of every agent's instructions
+2. The contents of AGENTS.md from the current working directory (if it exists)
 """
 
 from __future__ import annotations
@@ -193,6 +194,40 @@ def get_current_date_utc() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
+def read_agent_md_from_cwd(nvim: Any | None = None) -> str | None:
+    """Read AGENTS.md from the current working directory if it exists.
+    
+    Returns the file contents as a string, or None if the file doesn't exist.
+    Uses Neovim's working directory (vim.cwd) if nvim is provided, otherwise falls back to os.getcwd().
+    """
+    # Try to get CWD from Neovim first, fallback to os.getcwd()
+    cwd = None
+    if nvim is not None:
+        try:
+            cwd = str(_nvim_call_sync_safe(nvim, lambda: nvim.call("getcwd")))
+        except Exception:
+            pass
+    
+    # Fallback to OS CWD if Neovim call failed or nvim not provided
+    if not cwd:
+        try:
+            cwd = os.getcwd()
+        except Exception:
+            return None
+    
+    agent_md_path = os.path.join(cwd, "AGENTS.md")
+    
+    if not os.path.isfile(agent_md_path):
+        return None
+    
+    try:
+        with open(agent_md_path, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            return content if content else None
+    except Exception:
+        return None
+
+
 def build_system_prompt_context(nvim: Any | None = None) -> SystemPromptContext:
     return SystemPromptContext(
         os=get_os_info(),
@@ -241,7 +276,7 @@ def system_context_block(nvim: Any | None = None) -> str:
 
 
 def apply_system_prompt(template: str, nvim: Any | None = None) -> str:
-    """Expand known placeholders, then append the system context block."""
+    """Expand known placeholders, then append the system context block and AGENTS.md if present."""
     expanded = expand_placeholders(template, nvim)
 
     # Ensure we append at the end of the instructions.
@@ -249,4 +284,13 @@ def apply_system_prompt(template: str, nvim: Any | None = None) -> str:
     if not expanded.endswith("\n"):
         expanded += "\n"
 
-    return expanded.rstrip() + system_context_block(nvim) + "\n"
+    result = expanded.rstrip() + system_context_block(nvim) + "\n"
+    
+    # Append AGENTS.md from current working directory if it exists
+    agent_md_content = read_agent_md_from_cwd(nvim)
+    if agent_md_content:
+        result += "\n---\n"
+        result += agent_md_content
+        result += "\n"
+    
+    return result
