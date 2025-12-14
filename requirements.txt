@@ -2,3 +2,5 @@ pynvim
 openai
 openai-agents
 hashids
+pyzmq
+cbor2

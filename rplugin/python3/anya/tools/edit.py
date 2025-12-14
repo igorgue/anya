@@ -128,6 +128,13 @@ async def edit(
     Returns:
         Result of the edit operation (applied, rejected, or failed)
     """
+    # Edit tool requires direct nvim access for UI interaction
+    if not ctx.context.has_nvim:
+        raise Exception(
+            "edit tool requires direct Neovim access for UI interaction. "
+            "This tool is not available in daemon mode."
+        )
+
     nvim = ctx.context.nvim
 
     # Clean up - remove outer markdown code fences if present

@@ -13,11 +13,14 @@ from . import ids
 from . import markers
 from . import history
 from . import fidget
-from .mcp_loader import MCPManager
-from .agents import CodeAgent, MCPAgent, MAIN_AGENT_NAME, MAIN_ASSISTANT_NAME
 from . import ui
-from . import engine
 from . import utils
+from . import daemon as daemon_mgmt
+from .client import AnyaClient, StreamSubscriber
+from .protocol import (
+    NvimContext,
+    StreamEventType,
+)
 
 VERSION = "0.0.1"
 
@@ -35,35 +38,27 @@ class AnyaPlugin:
         self._loop_thread = None
         self._db_initialized = False
         self._current_task = None  # Track current agent task for cancellation
+        self._current_request_id = None  # Track current request ID
         self._cancel_in_progress = False  # Prevent cancel spam
         self._streaming_started = False  # Track if we've received any content
         self._request_cancelled = False  # Flag for async handler to check
         self.session_id = str(uuid.uuid4())  # Session ID for this Neovim instance
         self.allowed_commands = set()  # Persist allowed commands across agent runs
         self._tool_fold_open = False  # Track if a tool fold is currently open
-        self._mcp_manager = MCPManager(nvim)  # MCP server manager with caching
         self._last_layout = "replace"  # Remember the last layout used
         # Initialize YOLO mode from environment variable
         self._yolo_mode = os.environ.get("ANYA_YOLO", "").lower() == "true"
 
-        # Agent instances (initialized later when MCP servers are ready)
-        self._agent = None  # Main CodeAgent instance
-        self._mcp_agent = None  # MCPAgent instance (if MCP servers are available)
-        self._agent_initialization_lock = (
-            asyncio.Lock()
-        )  # Prevent concurrent agent initialization
+        # Daemon client
+        self._client = AnyaClient()
+        self._daemon_check_done = False
 
-        # Start MCP server connection in background on plugin load
-        mcp_enabled = os.environ.get("ANYA_DISABLE_MCP", "0") != "1"
-        if mcp_enabled and self._mcp_manager.load_configs():
+        # Start daemon check in background on plugin load
+        try:
             loop = self._ensure_loop()
-            asyncio.run_coroutine_threadsafe(self._initialize_agents_with_mcp(), loop)
-        else:
-            # Initialize without MCP servers
-            loop = self._ensure_loop()
-            asyncio.run_coroutine_threadsafe(
-                self._initialize_agents_without_mcp(), loop
-            )
+            asyncio.run_coroutine_threadsafe(self._ensure_daemon_running(), loop)
+        except Exception as e:
+            self.nvim.err_write(f"Anya: Error starting daemon check: {e}\n")
 
     def _ensure_loop(self):
         """Ensure the asyncio event loop is running (lazy initialization)."""
@@ -78,89 +73,38 @@ class AnyaPlugin:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
-    async def _initialize_agents_with_mcp(self):
-        """Initialize agents with MCP servers support."""
-        async with self._agent_initialization_lock:
-            if self._agent is not None:
-                return  # Already initialized
+    async def _ensure_daemon_running(self):
+        """Ensure the daemon is running, starting it if necessary."""
+        if self._daemon_check_done:
+            return
 
-            try:
-                # Get MCP servers
-                mcp_servers = await self._mcp_manager.get_connected_servers()
+        try:
+            # Run blocking daemon check in thread pool to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            is_running = await loop.run_in_executor(None, daemon_mgmt.is_daemon_running)
 
-                # Initialize the main CodeAgent with MCP servers
-                self._agent = await CodeAgent(
-                    mcp_servers=mcp_servers,
-                    thinking_budget=DEFAULT_THINKING_BUDGET,
-                    nvim=self.nvim,
-                )
-
-                # Initialize MCP agent if servers are available
-                if mcp_servers:
-                    self._mcp_agent = await MCPAgent(mcp_servers, nvim=self.nvim)
-
-                # TODO: handle this on fidget
-                # self.nvim.async_call(
-                #     self.nvim.out_write,
-                #     f"Anya: Initialized agents with {len(mcp_servers or [])} MCP servers.\n",
-                # )
-            except Exception as e:
-                self.nvim.async_call(
-                    self.nvim.err_write,
-                    f"Anya: Failed to initialize agents with MCP: {e}\n",
-                )
-                # Fallback to initialization without MCP
-                await self._initialize_agents_without_mcp()
-
-    async def _initialize_agents_without_mcp(self):
-        """Initialize agents without MCP servers."""
-        async with self._agent_initialization_lock:
-            if self._agent is not None:
-                return  # Already initialized
-
-            try:
-                # Initialize the main CodeAgent without MCP servers
-                self._agent = await CodeAgent(
-                    mcp_servers=None,
-                    thinking_budget=DEFAULT_THINKING_BUDGET,
-                    nvim=self.nvim,
-                )
-
+            if not is_running:
                 self.nvim.async_call(
                     self.nvim.out_write,
-                    "Anya: Initialized agents without MCP servers.\n",
+                    "Anya: Starting daemon...\n",
                 )
-            except Exception as e:
-                self.nvim.async_call(
-                    self.nvim.err_write, f"Anya: Failed to initialize agents: {e}\n"
-                )
-
-    async def _get_or_initialize_agent(self):
-        """Get the initialized agent, initializing if necessary."""
-        async with self._agent_initialization_lock:
-            if self._agent is None:
-                # Not initialized yet, do it now
-                mcp_enabled = os.environ.get("ANYA_DISABLE_MCP", "0") != "1"
-                if mcp_enabled and self._mcp_manager.load_configs():
-                    try:
-                        mcp_servers = await asyncio.wait_for(
-                            self._mcp_manager.get_connected_servers(), timeout=5.0
-                        )
-                        self._agent = await CodeAgent(
-                            mcp_servers=mcp_servers,
-                            thinking_budget=DEFAULT_THINKING_BUDGET,
-                            nvim=self.nvim,
-                        )
-                        if mcp_servers:
-                            self._mcp_agent = await MCPAgent(
-                                mcp_servers, nvim=self.nvim
-                            )
-                    except asyncio.TimeoutError:
-                        await self._initialize_agents_without_mcp()
+                started = await loop.run_in_executor(None, daemon_mgmt.start_daemon)
+                if started:
+                    self.nvim.async_call(
+                        self.nvim.out_write,
+                        "Anya: Daemon started.\n",
+                    )
                 else:
-                    await self._initialize_agents_without_mcp()
-
-            return self._agent
+                    self.nvim.async_call(
+                        self.nvim.err_write,
+                        "Anya: Failed to start daemon. Run manually with: python -m anya.server.main -f\n",
+                    )
+            self._daemon_check_done = True
+        except Exception as e:
+            self.nvim.async_call(
+                self.nvim.err_write,
+                f"Anya: Error checking daemon: {e}\n",
+            )
 
     def _ensure_db(self):
         """Ensure the database is initialized (lazy initialization)."""
@@ -308,6 +252,30 @@ class AnyaPlugin:
             self.nvim.exec_lua("require('anya.picker').open()")
         elif subcommand == "cancel":
             self.cancel_agent()
+        elif subcommand == "daemon":
+            # Daemon management subcommands
+            if len(args) < 2:
+                self.nvim.out_write("Usage: :Anya daemon [status|start|stop|restart]\n")
+                return
+            daemon_cmd = args[1]
+            if daemon_cmd == "status":
+                status = daemon_mgmt.get_daemon_status()
+                self.nvim.out_write(f"Anya daemon status: {status}\n")
+            elif daemon_cmd == "start":
+                if daemon_mgmt.start_daemon():
+                    self.nvim.out_write("Anya: Daemon started.\n")
+                else:
+                    self.nvim.err_write("Anya: Failed to start daemon.\n")
+            elif daemon_cmd == "stop":
+                if daemon_mgmt.stop_daemon():
+                    self.nvim.out_write("Anya: Daemon stopped.\n")
+                else:
+                    self.nvim.err_write("Anya: Failed to stop daemon.\n")
+            elif daemon_cmd == "restart":
+                if daemon_mgmt.restart_daemon():
+                    self.nvim.out_write("Anya: Daemon restarted.\n")
+                else:
+                    self.nvim.err_write("Anya: Failed to restart daemon.\n")
 
     def _open_interface(self, layout="split", direction=None, force_open=False):
         """Open the Anya interface with floating chat and prompt windows.
@@ -324,21 +292,13 @@ class AnyaPlugin:
             self.nvim, layout, direction, force_open
         )
 
-        # Pre-connect MCP servers in background for faster first message
-        if not self._mcp_manager.is_loaded():
-            mcp_enabled = os.environ.get("ANYA_DISABLE_MCP", "0") != "1"
-            if mcp_enabled:
-                loop = self._ensure_loop()
-                asyncio.run_coroutine_threadsafe(
-                    self._mcp_manager.get_connected_servers(), loop
-                )
-
     def send(self, text, conversation_id=None):
         """Send a prompt to the code agent and stream the response to the chat buffer."""
+        self.nvim.out_write(f"Anya: send() called, text={text[:30] if text else None}\n")
         # Prevent concurrent requests - check if a task is still running
         if self._current_task is not None and not self._current_task.done():
-            self.nvim.err_write(
-                "Anya: Please wait for the current response to complete.\n"
+            self.nvim.out_write(
+                f"Anya: Task still running (done={self._current_task.done()}). Please wait.\n"
             )
             return
 
@@ -346,16 +306,635 @@ class AnyaPlugin:
         if not chat_buf:
             self.nvim.err_write("Anya: Chat buffer not found.\n")
             return
+
         loop = self._ensure_loop()
         request_id = ids.new()
+        self._current_request_id = request_id
         self._streaming_started = False  # Reset streaming flag for new request
         self._request_cancelled = False  # Reset cancellation flag for new request
         self._current_task = asyncio.run_coroutine_threadsafe(
-            engine.run_agent_streaming(
-                self, text, conversation_id, chat_buf.number, request_id
+            self._run_agent_via_daemon(
+                text, conversation_id, chat_buf.number, request_id
             ),
             loop,
         )
+
+    async def _run_agent_via_daemon(
+        self, text, conversation_id, chat_bufnr, request_id
+    ):
+        """Run the agent via the daemon and handle streaming responses."""
+        self.nvim.async_call(
+            self.nvim.out_write,
+            f"Anya: _run_agent_via_daemon started for {request_id}\n",
+        )
+
+        # Ensure daemon is running (run blocking check in thread pool)
+        loop = asyncio.get_event_loop()
+        is_running = await loop.run_in_executor(None, daemon_mgmt.is_daemon_running)
+
+        if not is_running:
+            self.nvim.async_call(
+                self.nvim.out_write,
+                "Anya: Starting daemon...\n",
+            )
+            started = await loop.run_in_executor(None, daemon_mgmt.start_daemon)
+            if not started:
+                self.nvim.async_call(
+                    self.nvim.err_write,
+                    "Anya: Failed to start daemon. Run: python -m anya.server.main -f\n",
+                )
+                return
+            self.nvim.async_call(
+                self.nvim.out_write,
+                "Anya: Daemon started.\n",
+            )
+
+        # Emit fidget start event
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaRequestStarted",
+            {
+                "id": request_id,
+                "model": DEFAULT_MODEL,
+            },
+        )
+
+        # Get buffer content and build history
+        buffer_content = await ui.get_buffer_content_async(self.nvim, chat_bufnr)
+        records = history.parse_buffer_content(buffer_content or "")
+        llm_history = history.build_llm_history(records)
+
+        # Prepend open buffer context to the last user message
+        if llm_history and llm_history[-1]["role"] == "user":
+            buffer_context = await ui.get_open_buffers_context_async(self.nvim)
+            if buffer_context:
+                llm_history[-1]["content"] = buffer_context + llm_history[-1]["content"]
+
+        # Generate message ID and timestamp
+        msg_id = ids.new(conversation=conversation_id)
+        now = datetime.now(timezone.utc)
+        timestamp = (
+            now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+        )
+
+        # Output message header
+        header = markers.make_message_marker(msg_id) + "\n"
+        self.nvim.async_call(ui.append_to_chat_buffer, self.nvim, chat_bufnr, header)
+
+        # Ensure DB has a placeholder message row
+        if conversation_id:
+            try:
+                self._ensure_db()
+                inserted = db.save_message_dict(
+                    msg_id=msg_id,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content="",
+                    author="Code",
+                    model=DEFAULT_MODEL,
+                    created_at=timestamp,
+                    ended_at=None,
+                    markers=None,
+                )
+                if not inserted:
+                    db.update_message(msg_id, content="", ended_at=None, markers=None)
+            except Exception:
+                pass
+
+        # Initialize tool fold state at start of request
+        self.nvim.async_call(self._set_tool_fold_open, False)
+
+        # Build nvim context for daemon
+        cwd = ""
+        current_buffer = ""
+        current_buffer_content = ""
+        open_buffers = []
+
+        def get_nvim_context():
+            nonlocal cwd, current_buffer, current_buffer_content, open_buffers
+            try:
+                cwd = self.nvim.call("getcwd")
+                current_buffer = self.nvim.api.buf_get_name(0)
+                # Get open buffers info
+                for buf in self.nvim.buffers:
+                    if buf.valid and buf.name:
+                        open_buffers.append(
+                            {
+                                "name": buf.name,
+                                "bufnr": buf.number,
+                            }
+                        )
+            except Exception:
+                pass
+
+        self.nvim.async_call(get_nvim_context)
+        await asyncio.sleep(0.05)  # Allow async_call to complete
+
+        nvim_context = NvimContext(
+            session_id=self.session_id,
+            cwd=cwd,
+            current_buffer=current_buffer,
+            current_buffer_content=current_buffer_content,
+            open_buffers=open_buffers,
+            yolo_mode=self._yolo_mode,
+            allowed_commands=list(self.allowed_commands),
+        )
+
+        # Subscribe to streaming events
+        self.nvim.async_call(
+            self.nvim.out_write,
+            f"Anya: Subscribing to stream for {request_id}...\n",
+        )
+        subscriber = StreamSubscriber(self.session_id, request_id)
+        await subscriber.connect()
+
+        # Small delay to ensure SUB socket is fully connected before sending request
+        # ZeroMQ PUB/SUB has a "slow joiner" problem where early messages can be lost
+        await asyncio.sleep(0.1)
+        self.nvim.async_call(
+            self.nvim.out_write,
+            "Anya: Stream subscribed, sending request...\n",
+        )
+
+        # Collected content for saving
+        collected_content: list[str] = []
+        thinking_started = False
+        thinking_finalized = False
+        tool_was_called = False
+        needs_blank_before_text = False
+
+        try:
+            # Send request to daemon (non-blocking, response comes via stream)
+            # We need to send the request in a separate task since the daemon
+            # will block until the agent completes
+            send_task = asyncio.create_task(
+                self._send_to_daemon(
+                    request_id,
+                    text,
+                    conversation_id,
+                    llm_history,
+                    nvim_context,
+                )
+            )
+
+            # Process streaming events
+            chunk_count = 0
+            while True:
+                if self._request_cancelled:
+                    raise asyncio.CancelledError()
+
+                chunk = await subscriber.receive(timeout=1.0)
+                if chunk is None:
+                    # Check if send task completed
+                    if send_task.done():
+                        self.nvim.async_call(
+                            self.nvim.out_write,
+                            f"Anya: Stream loop done, received {chunk_count} chunks\n",
+                        )
+                        break
+                    continue
+
+                chunk_count += 1
+                if chunk_count <= 3:
+                    self.nvim.async_call(
+                        self.nvim.out_write,
+                        f"Anya: Received chunk {chunk_count}: {chunk.event_type.value}\n",
+                    )
+                self._streaming_started = True
+
+                # Handle different event types
+                if chunk.event_type == StreamEventType.TEXT_DELTA:
+                    delta = chunk.data.get("text", "")
+                    if chunk.data.get("needs_blank_before") and needs_blank_before_text:
+                        collected_content.append("\n")
+                        self.nvim.async_call(
+                            ui.stream_text_to_buffer, self.nvim, chat_bufnr, "\n"
+                        )
+                        needs_blank_before_text = False
+
+                    collected_content.append(delta)
+                    if not self._request_cancelled:
+                        self.nvim.async_call(
+                            ui.stream_text_to_buffer, self.nvim, chat_bufnr, delta
+                        )
+
+                elif chunk.event_type == StreamEventType.THINKING_START:
+                    thinking_started = True
+                    thinking_header = "**thinking**\n"
+                    thinking_header += markers.make_marker("fold_start", "thinking")
+                    thinking_header += "\n"
+                    collected_content.append(thinking_header)
+                    if not self._request_cancelled:
+                        self.nvim.async_call(
+                            ui.stream_text_to_buffer,
+                            self.nvim,
+                            chat_bufnr,
+                            thinking_header,
+                        )
+
+                elif chunk.event_type == StreamEventType.THINKING_DELTA:
+                    delta = chunk.data.get("text", "")
+                    collected_content.append(delta)
+                    if not self._request_cancelled:
+                        self.nvim.async_call(
+                            ui.stream_text_to_buffer, self.nvim, chat_bufnr, delta
+                        )
+
+                elif chunk.event_type == StreamEventType.THINKING_END:
+                    thinking_finalized = True
+                    thinking_footer = "\n" + markers.make_marker("fold_end") + "\n\n"
+                    collected_content.append(thinking_footer)
+                    if not self._request_cancelled:
+                        self.nvim.async_call(
+                            ui.stream_text_to_buffer,
+                            self.nvim,
+                            chat_bufnr,
+                            thinking_footer,
+                        )
+
+                elif chunk.event_type == StreamEventType.TOOL_CALL_START:
+                    tool_name = chunk.data.get("tool_name", "")
+                    tool_args = chunk.data.get("tool_args", "")
+                    status = chunk.data.get("status", "tool_pending")
+                    parallel_tools = chunk.data.get("parallel_tools", [])
+                    is_first = chunk.data.get("is_first", True)
+                    skip_header = chunk.data.get("skip_header", False)
+
+                    tool_was_called = True
+
+                    # Emit tool execution event for fidget
+                    fidget.emit_user_event(
+                        self.nvim,
+                        "AnyaToolExecution",
+                        {
+                            "request_id": request_id,
+                            "tool_name": tool_name,
+                        },
+                    )
+
+                    if not skip_header:
+                        tool_headers = [
+                            utils.format_tool_header(t["name"], t["args"])
+                            for t in parallel_tools
+                        ]
+                        combined_header = " | ".join(tool_headers)
+
+                        if is_first:
+                            pending_header = (
+                                "\n"
+                                + combined_header
+                                + "\n"
+                                + markers.make_marker("fold_start", status)
+                                + "\n"
+                            )
+                            collected_content.append(pending_header)
+                            if not self._request_cancelled:
+                                self.nvim.async_call(
+                                    ui.stream_text_to_buffer,
+                                    self.nvim,
+                                    chat_bufnr,
+                                    pending_header,
+                                )
+                                self.nvim.async_call(self._set_tool_fold_open, True)
+                        else:
+                            if not self._request_cancelled:
+                                self.nvim.async_call(
+                                    ui.update_tool_header_line,
+                                    self.nvim,
+                                    chat_bufnr,
+                                    combined_header,
+                                )
+
+                elif chunk.event_type == StreamEventType.TOOL_CALL_END:
+                    tools = chunk.data.get("tools", [])
+                    output = chunk.data.get("output", "")
+                    has_failure = chunk.data.get("has_failure", False)
+                    is_edit_tool = chunk.data.get("is_edit_tool", False)
+                    skip_output = chunk.data.get("skip_output", False)
+                    unclosed = chunk.data.get("unclosed", False)
+
+                    # Update markers
+                    if (
+                        not self._request_cancelled
+                        and not is_edit_tool
+                        and not skip_output
+                    ):
+                        if has_failure:
+                            self.nvim.async_call(
+                                ui.update_pending_markers_to_failure,
+                                self.nvim,
+                                chat_bufnr,
+                            )
+                        else:
+                            self.nvim.async_call(
+                                ui.update_pending_markers_to_success,
+                                self.nvim,
+                                chat_bufnr,
+                            )
+
+                    # Output tool result
+                    if not is_edit_tool and not skip_output and output:
+                        wrapped_output = f"``````\n{output}\n``````"
+                        collected_content.append(wrapped_output)
+                        if not self._request_cancelled:
+                            self.nvim.async_call(
+                                ui.stream_text_to_buffer_sync,
+                                self.nvim,
+                                chat_bufnr,
+                                wrapped_output,
+                            )
+
+                    # Close fold
+                    if not is_edit_tool and not skip_output:
+                        fold_end_marker = "\n" + markers.make_marker("fold_end") + "\n"
+                        collected_content.append(fold_end_marker)
+                        if not self._request_cancelled:
+                            self.nvim.async_call(
+                                ui.stream_text_to_buffer,
+                                self.nvim,
+                                chat_bufnr,
+                                fold_end_marker,
+                            )
+                            self.nvim.async_call(self._set_tool_fold_open, False)
+
+                    # Emit completion events
+                    for tool in tools:
+                        fidget.emit_user_event(
+                            self.nvim,
+                            "AnyaToolExecutionComplete",
+                            {
+                                "request_id": request_id,
+                                "tool_name": tool.get("name", ""),
+                            },
+                        )
+
+                    if not unclosed:
+                        tool_was_called = False
+                    needs_blank_before_text = True
+
+                elif chunk.event_type == StreamEventType.MESSAGE_END:
+                    status = chunk.data.get("status", "success")
+                    break
+
+                elif chunk.event_type == StreamEventType.ERROR:
+                    error = chunk.data.get("error", "Unknown error")
+                    self.nvim.async_call(
+                        ui.append_to_chat_buffer,
+                        self.nvim,
+                        chat_bufnr,
+                        f"\n\n**Error:** {error}\n",
+                    )
+                    break
+
+            # Wait for send task to complete
+            await send_task
+
+            # Ensure thinking is closed
+            if thinking_started and not thinking_finalized:
+                thinking_footer = "\n" + markers.make_marker("fold_end") + "\n"
+                collected_content.append(thinking_footer)
+                self.nvim.async_call(
+                    ui.stream_text_to_buffer,
+                    self.nvim,
+                    chat_bufnr,
+                    thinking_footer,
+                )
+
+            # Close any open tool folds
+            if tool_was_called:
+                fold_end_marker = "\n" + markers.make_marker("fold_end")
+                collected_content.append(fold_end_marker)
+                self.nvim.async_call(
+                    ui.stream_text_to_buffer, self.nvim, chat_bufnr, fold_end_marker
+                )
+                self.nvim.async_call(self._set_tool_fold_open, False)
+
+            # Save message to database
+            now = datetime.now(timezone.utc)
+            end_timestamp = (
+                now.strftime("%Y-%m-%dT%H:%M:%S.")
+                + f"{int(now.microsecond / 1000):03d}Z"
+            )
+            message_text = "".join(collected_content)
+
+            def save_after_streaming():
+                self._save_agent_message_to_db(
+                    chat_bufnr,
+                    msg_id,
+                    "Code",
+                    conversation_id,
+                    timestamp,
+                    end_timestamp,
+                    message_text,
+                )
+
+            self.nvim.async_call(save_after_streaming)
+
+            # Emit finish event
+            fidget.emit_user_event(
+                self.nvim,
+                "AnyaRequestFinished",
+                {
+                    "id": request_id,
+                    "status": "success",
+                },
+            )
+
+        except asyncio.CancelledError:
+            # Handle cancellation
+            now = datetime.now(timezone.utc)
+            end_timestamp = (
+                now.strftime("%Y-%m-%dT%H:%M:%S.")
+                + f"{int(now.microsecond / 1000):03d}Z"
+            )
+
+            if tool_was_called:
+                fold_end_marker = "\n" + markers.make_marker("fold_end")
+                collected_content.append(fold_end_marker)
+                self.nvim.async_call(
+                    ui.append_to_chat_buffer, self.nvim, chat_bufnr, fold_end_marker
+                )
+                self.nvim.async_call(self._set_tool_fold_open, False)
+
+            message_text = "".join(collected_content)
+
+            def save_after_cancel():
+                self._save_agent_message_to_db(
+                    chat_bufnr,
+                    msg_id,
+                    "Code",
+                    conversation_id,
+                    timestamp,
+                    end_timestamp,
+                    message_text,
+                )
+
+            self.nvim.async_call(save_after_cancel)
+
+            fidget.emit_user_event(
+                self.nvim,
+                "AnyaRequestFinished",
+                {
+                    "id": request_id,
+                    "status": "cancelled",
+                },
+            )
+
+        except Exception as e:
+            self.nvim.async_call(
+                ui.append_to_chat_buffer, self.nvim, chat_bufnr, f"\n\n**Error:** {e}\n"
+            )
+            self.nvim.async_call(self.nvim.err_write, f"Agent error: {e}\n")
+
+            fidget.emit_user_event(
+                self.nvim,
+                "AnyaRequestFinished",
+                {
+                    "id": request_id,
+                    "status": "error",
+                },
+            )
+
+        finally:
+            self.nvim.async_call(
+                self.nvim.out_write,
+                f"Anya: Request {request_id} finished, cleaning up\n",
+            )
+            await subscriber.disconnect()
+            self._current_task = None
+            self._current_request_id = None
+            self._request_cancelled = False
+            self.nvim.async_call(self._set_tool_fold_open, False)
+
+    async def _send_to_daemon(
+        self,
+        request_id: str,
+        text: str,
+        conversation_id: str | None,
+        llm_history: list[dict],
+        nvim_context: NvimContext,
+    ):
+        """Send a message request to the daemon."""
+        try:
+            # Run the synchronous client call in a thread pool to avoid
+            # blocking the asyncio event loop (which would prevent receiving streams)
+            loop = asyncio.get_event_loop()
+
+            def do_send():
+                return self._client.send_message(
+                    session_id=self.session_id,
+                    request_id=request_id,
+                    text=text,
+                    conversation_id=conversation_id,
+                    history=llm_history,
+                    nvim_context=nvim_context,
+                    timeout=300.0,
+                )
+
+            response = await loop.run_in_executor(None, do_send)
+            if response is None:
+                self.nvim.async_call(
+                    self.nvim.err_write,
+                    "Anya: No response from daemon (timeout or connection failed)\n",
+                )
+            return response
+        except Exception as e:
+            self.nvim.async_call(
+                self.nvim.err_write,
+                f"Anya: Failed to send to daemon: {e}\n",
+            )
+            return None
+
+    def _save_agent_message_to_db(
+        self,
+        chat_bufnr,
+        msg_id,
+        agent_name,
+        conversation_id,
+        timestamp,
+        end_timestamp,
+        message_text,
+    ):
+        """Save agent message to database."""
+        # Flush the streaming queue
+        self.nvim.exec_lua("require('anya.text').flush_queue()")
+
+        self._ensure_db()
+
+        if not conversation_id:
+            self.nvim.err_write(
+                f"Warning: Missing conversation_id for message {msg_id}\n"
+            )
+            return
+
+        # Read message content from buffer
+        message_text_from_buffer = None
+        if self.nvim.api.buf_is_valid(chat_bufnr):
+            lines = self.nvim.api.buf_get_lines(chat_bufnr, 0, -1, False)
+            message_markers_list: list[tuple[int, str]] = []
+
+            def parse_message_id(line: str) -> str | None:
+                prefix = markers.MESSAGE_PREFIX
+                suffix = markers.MESSAGE_SUFFIX
+                if not line.startswith(prefix) or not line.endswith(suffix):
+                    return None
+                return line[len(prefix) : -len(suffix)].strip()
+
+            for idx, line in enumerate(lines):
+                msg_marker_id = parse_message_id(line)
+                if msg_marker_id:
+                    message_markers_list.append((idx, msg_marker_id))
+
+            # Find current message bounds
+            start_idx = None
+            end_idx = len(lines)
+            for i, (idx, marker_id) in enumerate(message_markers_list):
+                if marker_id == msg_id:
+                    start_idx = idx + 1
+                    if i + 1 < len(message_markers_list):
+                        end_idx = message_markers_list[i + 1][0]
+                    break
+
+            if start_idx is not None and start_idx <= end_idx:
+                message_slice = lines[start_idx:end_idx]
+                while message_slice and message_slice[0] == "":
+                    message_slice.pop(0)
+                message_text_from_buffer = "\n".join(message_slice).rstrip("\n")
+
+        if message_text_from_buffer:
+            message_text = message_text_from_buffer
+        elif not message_text:
+            self.nvim.err_write(f"Warning: Empty message content for {msg_id}\n")
+            return
+
+        cleaned_content, markers_json = history.extract_markers_from_content(
+            message_text
+        )
+
+        updated = db.update_message(
+            msg_id,
+            content=cleaned_content,
+            ended_at=end_timestamp,
+            markers=markers_json,
+        )
+
+        if not updated:
+            db.save_message_dict(
+                msg_id=msg_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=cleaned_content,
+                author=agent_name,
+                model=DEFAULT_MODEL,
+                created_at=timestamp,
+                ended_at=end_timestamp,
+                markers=markers_json,
+            )
+
+        if conversation_id:
+            db.update_conversation_timestamp(conversation_id, end_timestamp)
+
+        ui.process_markers(self.nvim, chat_bufnr)
 
     def cancel_agent(self):
         """Cancel the current agent response and flush the queue."""
@@ -381,6 +960,10 @@ class AnyaPlugin:
         except Exception as e:
             self.nvim.err_write(f"Anya: Failed to cancel task: {e}\n")
 
+        # Send cancel request to daemon
+        if self._current_request_id:
+            self._client.cancel_request(self.session_id, self._current_request_id)
+
         # Flush the streaming queue to finish outputting pending text
         ui.flush_queue(self.nvim)
 
@@ -405,11 +988,10 @@ class AnyaPlugin:
                     )
 
             # Write cancellation message to chat buffer
-            cancel_msg = "\n> cancelled 󱋟 "
+            cancel_msg = "\n> cancelled  "
             ui.append_to_chat_buffer(self.nvim, chat_buf.number, cancel_msg)
 
         # Always emit finish event to notify Lua that request is done
-        # This ensures the UI is unlocked even if cancel happened before streaming started
         fidget.emit_user_event(
             self.nvim,
             "AnyaRequestFinished",
@@ -421,10 +1003,11 @@ class AnyaPlugin:
 
         # Clear the task reference and cancel flag
         self._current_task = None
+        self._current_request_id = None
         self._streaming_started = False
         self._cancel_in_progress = False
 
-    @pynvim.function("AnyaSend", sync=False)
+    @pynvim.function("AnyaSend", sync=True)
     def anya_send(self, args):
         """Send a prompt to the agent with streaming response.
 
@@ -432,11 +1015,13 @@ class AnyaPlugin:
             args[0]: The prompt text
             args[1]: Optional conversation ID
         """
+        self.nvim.out_write(">>> AnyaSend called\n")
         if not args:
             self.nvim.err_write("AnyaSend requires a prompt argument.\n")
             return
         text = args[0]
         conversation_id = args[1] if len(args) > 1 else None
+        self.nvim.out_write(f">>> AnyaSend: text={text[:20] if text else None}\n")
 
         # Handle slash commands
         if text and text.strip().startswith("/"):
@@ -474,7 +1059,6 @@ class AnyaPlugin:
             self.nvim.async_call(self._compact_command)
         else:
             # Unknown command - treat as regular prompt
-            # Don't save to history again since it was already saved before slash command handling
             self.send(command, conversation_id)
 
     def _clear_command(self):
@@ -483,9 +1067,6 @@ class AnyaPlugin:
 
     def _help_command(self):
         """Handle /help command by showing help in the chat buffer."""
-        from . import markers
-        from . import ids
-
         help_text = f"""Anya v{VERSION}
 
 Available slash commands:
@@ -506,26 +1087,22 @@ Examples:
 
 For more help, see :h anya"""
 
-        # Get the chat buffer number and conversation ID
         chat_buf = ui.get_chat_buffer(self.nvim)
         if not chat_buf or not self.nvim.api.buf_is_valid(chat_buf):
             return
 
-        # Get conversation ID from buffer
         conv_id = None
         try:
             conv_id = self.nvim.api.buf_get_var(chat_buf, "anya_conversation_id")
         except Exception:
             pass
 
-        # Generate message ID and timestamp
         msg_id = ids.new(conversation=conv_id)
         now = datetime.now(timezone.utc)
         timestamp = (
             now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         )
 
-        # Stream message with proper marker
         ui.stream_text_to_buffer(
             self.nvim,
             chat_buf.number,
@@ -536,7 +1113,6 @@ For more help, see :h anya"""
 
     def _file_command(self):
         """Handle /file command."""
-        # TODO: Implement file picker integration
         chat_buf = ui.get_chat_buffer(self.nvim)
         if chat_buf and self.nvim.api.buf_is_valid(chat_buf):
             ui.stream_text_to_buffer(
@@ -545,7 +1121,6 @@ For more help, see :h anya"""
 
     def _compact_command(self):
         """Handle /compact command."""
-        # TODO: Implement context compaction
         chat_buf = ui.get_chat_buffer(self.nvim)
         if chat_buf and self.nvim.api.buf_is_valid(chat_buf):
             ui.stream_text_to_buffer(
@@ -574,7 +1149,6 @@ For more help, see :h anya"""
     def timestamp(self, args):
         """Get current UTC timestamp in ISO 8601 format with milliseconds."""
         now = datetime.now(timezone.utc)
-        # Produce e.g. 2024-06-06T03:21:19.348Z
         return (
             now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         )
@@ -596,16 +1170,12 @@ Usage:
     :Anya send <prompt>      Send a prompt to the agent
     :Anya history            Open the conversation history picker
     :Anya cancel             Cancel the current agent response (Ctrl+C)
+    :Anya daemon [status|start|stop|restart]  Manage the daemon process
 """
 
     @pynvim.function("AnyaSaveConversation", sync=True)
     def save_conversation(self, args):
-        """Save a new conversation to the database.
-
-        Args:
-            args[0]: Conversation ID
-            args[1]: Timestamp (ISO 8601)
-        """
+        """Save a new conversation to the database."""
         if len(args) < 2:
             self.nvim.err_write("AnyaSaveConversation requires (id, timestamp).\n")
             return False
@@ -614,19 +1184,7 @@ Usage:
 
     @pynvim.function("AnyaSaveMessage", sync=True)
     def save_message(self, args):
-        """Save a message to the database.
-
-        Args:
-            args[0]: Message ID
-            args[1]: Conversation ID
-            args[2]: Role ('user' or 'assistant')
-            args[3]: Content
-            args[4]: Author (optional)
-            args[5]: Model (optional)
-            args[6]: Created at timestamp (optional)
-            args[7]: Ended at timestamp (optional)
-            args[8]: Markers JSON (optional)
-        """
+        """Save a message to the database."""
         if len(args) < 4:
             self.nvim.err_write(
                 "AnyaSaveMessage requires (msg_id, conv_id, role, content).\n"
@@ -647,15 +1205,7 @@ Usage:
 
     @pynvim.function("AnyaListConversations", sync=True)
     def list_conversations(self, args):
-        """List recent conversations.
-
-        Args:
-            args[0]: Limit (optional, default 50)
-            args[1]: Offset (optional, default 0)
-
-        Returns:
-            List of {id, title, created_at, updated_at}
-        """
+        """List recent conversations."""
         self._ensure_db()
         limit = args[0] if args else 50
         offset = args[1] if len(args) > 1 else 0
@@ -663,14 +1213,7 @@ Usage:
 
     @pynvim.function("AnyaLoadConversation", sync=True)
     def load_conversation(self, args):
-        """Load a full conversation with messages.
-
-        Args:
-            args[0]: Conversation ID
-
-        Returns:
-            {conversation: {...}, messages: [...]} or None
-        """
+        """Load a full conversation with messages."""
         if not args:
             self.nvim.err_write("AnyaLoadConversation requires a conversation ID.\n")
             return None
@@ -679,12 +1222,7 @@ Usage:
 
     @pynvim.function("AnyaUpdateConversationTitle", sync=True)
     def update_conversation_title(self, args):
-        """Update a conversation's title.
-
-        Args:
-            args[0]: Conversation ID
-            args[1]: Title
-        """
+        """Update a conversation's title."""
         if len(args) < 2:
             self.nvim.err_write("AnyaUpdateConversationTitle requires (id, title).\n")
             return False
@@ -693,11 +1231,7 @@ Usage:
 
     @pynvim.function("AnyaDeleteConversation", sync=True)
     def delete_conversation(self, args):
-        """Delete a conversation and its messages.
-
-        Args:
-            args[0]: Conversation ID
-        """
+        """Delete a conversation and its messages."""
         if not args:
             self.nvim.err_write("AnyaDeleteConversation requires a conversation ID.\n")
             return False
@@ -706,14 +1240,7 @@ Usage:
 
     @pynvim.function("AnyaRebuildBufferContent", sync=True)
     def rebuild_buffer_content(self, args):
-        """Rebuild buffer content from a conversation ID.
-
-        Args:
-            args[0]: Conversation ID
-
-        Returns:
-            Buffer content string or None
-        """
+        """Rebuild buffer content from a conversation ID."""
         if not args:
             self.nvim.err_write(
                 "AnyaRebuildBufferContent requires a conversation ID.\n"
@@ -727,20 +1254,12 @@ Usage:
 
     @pynvim.function("AnyaRepositionFloats", sync=True)
     def reposition_floats(self, _args):
-        """Reposition floating windows when terminal is resized.
-
-        Called by VimResized autocmd.
-        """
+        """Reposition floating windows when terminal is resized."""
         buffers.reposition_floats(self.nvim)
 
     @pynvim.function("AnyaCompleteAsync", sync=False)
     def anya_complete_async(self, args):
-        """Provide async file path completions for @mentions.
-
-        Args:
-            args[0]: Base path to complete
-            args[1]: Callback ID
-        """
+        """Provide async file path completions for @mentions."""
         if len(args) < 2:
             self.nvim.err_write("AnyaCompleteAsync requires base and callback_id.\n")
             return
@@ -749,25 +1268,13 @@ Usage:
 
     @pynvim.function("AnyaApplyEdit", sync=True)
     def apply_edit(self, args):
-        """Apply a pending edit block from the chat buffer.
-
-        Finds the edit block content at the given line, applies the patch,
-        and updates the marker to edit_applied or edit_failed.
-
-        Args:
-            args[0]: Buffer number
-            args[1]: Line number of the edit header (1-indexed)
-
-        Returns:
-            dict with {success: bool, message: str}
-        """
+        """Apply a pending edit block from the chat buffer."""
         if len(args) < 2:
             return {"success": False, "message": "Requires bufnr and line_num"}
 
         bufnr = args[0]
-        header_line = args[1]  # 1-indexed from Lua
+        header_line = args[1]
 
-        # Get the buffer content
         if not self.nvim.api.buf_is_valid(bufnr):
             return {"success": False, "message": "Invalid buffer"}
 
@@ -776,14 +1283,10 @@ Usage:
 
         lines = self.nvim.api.buf_get_lines(bufnr, 0, -1, False)
 
-        # Find the fold_start marker after the header line
-        # header_line is 1-indexed, convert to 0-indexed for array access
         fold_start_idx = None
         fold_end_idx = None
 
-        for i in range(
-            header_line - 1, len(lines)
-        ):  # header_line - 1 to convert to 0-indexed
+        for i in range(header_line - 1, len(lines)):
             line = lines[i]
             if "<!-- at:" in line and "fold_start" in line:
                 fold_start_idx = i
@@ -794,10 +1297,8 @@ Usage:
         if fold_start_idx is None or fold_end_idx is None:
             return {"success": False, "message": "Could not find edit block boundaries"}
 
-        # Extract the content between fold markers
         edit_content = "\n".join(lines[fold_start_idx + 1 : fold_end_idx])
 
-        # Apply the edit using search_replace
         from . import search_replace
 
         cwd = self.nvim.call("getcwd")
@@ -806,11 +1307,9 @@ Usage:
         if not results:
             return {"success": False, "message": "No edit blocks found"}
 
-        # Check results and build message
         all_success = all(r.success for r in results)
         messages = [r.message for r in results]
 
-        # Update the marker in the buffer
         if all_success:
             new_marker = markers.make_marker("fold_start", "edit_applied")
         else:
@@ -820,7 +1319,6 @@ Usage:
             bufnr, fold_start_idx, fold_start_idx + 1, False, [new_marker]
         )
 
-        # Reprocess markers to update extmarks
         ui.process_markers(self.nvim, bufnr)
 
         return {
@@ -839,24 +1337,13 @@ Usage:
 
     @pynvim.function("AnyaRejectEdit", sync=True)
     def reject_edit(self, args):
-        """Reject a pending edit block.
-
-        Updates the marker to edit_rejected without applying changes.
-
-        Args:
-            args[0]: Buffer number
-            args[1]: Line number of the edit header (1-indexed)
-
-        Returns:
-            dict with {success: bool, message: str}
-        """
+        """Reject a pending edit block."""
         if len(args) < 2:
             return {"success": False, "message": "Requires bufnr and line_num"}
 
         bufnr = args[0]
-        header_line = args[1]  # 1-indexed from Lua
+        header_line = args[1]
 
-        # Get the buffer content
         if not self.nvim.api.buf_is_valid(bufnr):
             return {"success": False, "message": "Invalid buffer"}
 
@@ -865,13 +1352,9 @@ Usage:
 
         lines = self.nvim.api.buf_get_lines(bufnr, 0, -1, False)
 
-        # Find the fold_start marker after the header line
-        # header_line is 1-indexed, convert to 0-indexed for array access
         fold_start_idx = None
 
-        for i in range(
-            header_line - 1, len(lines)
-        ):  # header_line - 1 to convert to 0-indexed
+        for i in range(header_line - 1, len(lines)):
             line = lines[i]
             if "<!-- at:" in line and "fold_start" in line:
                 fold_start_idx = i
@@ -880,30 +1363,18 @@ Usage:
         if fold_start_idx is None:
             return {"success": False, "message": "Could not find edit marker"}
 
-        # Update the marker to rejected
         new_marker = markers.make_marker("fold_start", "edit_rejected")
         self.nvim.api.buf_set_lines(
             bufnr, fold_start_idx, fold_start_idx + 1, False, [new_marker]
         )
 
-        # Reprocess markers to update extmarks
         ui.process_markers(self.nvim, bufnr)
 
         return {"success": True, "message": "Edit rejected"}
 
     @pynvim.function("AnyaFindEditAtLine", sync=True)
     def find_edit_at_line(self, args):
-        """Find the edit header line for a given cursor position.
-
-        Searches upward from the cursor to find the edit header line.
-
-        Args:
-            args[0]: Buffer number
-            args[1]: Current line number (1-indexed)
-
-        Returns:
-            Line number of edit header (1-indexed) or None if not in an edit block
-        """
+        """Find the edit header line for a given cursor position."""
         if len(args) < 2:
             return None
 
@@ -915,17 +1386,12 @@ Usage:
 
         lines = self.nvim.api.buf_get_lines(bufnr, 0, -1, False)
 
-        # Search upward for fold_start with edit_pending
         for i in range(current_line - 1, -1, -1):
             line = lines[i]
             if "<!-- at:" in line and "fold_end" in line:
-                # We hit a fold_end, so we're not in an edit block
                 return None
             if "<!-- at:" in line and "edit_pending" in line:
-                # Found the edit marker (0-indexed at i)
-                # The header line is the line above it (0-indexed: i-1, 1-indexed: i)
-                # Return 1-indexed header line number
-                return i  # This is correct: marker at 0-idx i means header at 0-idx i-1 = 1-idx i
+                return i
 
         return None
 
@@ -934,11 +1400,9 @@ Usage:
         if not modified_paths:
             return
 
-        # Resolve paths to absolute for comparison
         abs_paths = set()
         for p in modified_paths:
             try:
-                # Expand user and resolve absolute path
                 abs_p = os.path.abspath(os.path.expanduser(p))
                 abs_paths.add(abs_p)
             except Exception:
@@ -958,22 +1422,12 @@ Usage:
 
     @pynvim.function("AnyaApplyEditContent", sync=True)
     def apply_edit_content(self, args):
-        """Apply an edit block from its raw content string.
-
-        This is called by the Lua edit_view when user presses 1 to apply.
-
-        Args:
-            args[0]: Raw edit block content (the SEARCH/REPLACE text)
-
-        Returns:
-            dict with {success: bool, message: str}
-        """
+        """Apply an edit block from its raw content string."""
         if not args or not args[0]:
             return {"success": False, "message": "No edit content provided"}
 
         raw_block = args[0]
 
-        # Apply the edit using search_replace
         from . import search_replace
 
         cwd = self.nvim.call("getcwd")
@@ -982,11 +1436,9 @@ Usage:
         if not results:
             return {"success": False, "message": "No edit blocks found in content"}
 
-        # Check results and build message
         all_success = all(r.success for r in results)
         messages = [r.message for r in results]
 
-        # Refresh buffers for successfully modified files
         modified_paths = [r.path for r in results if r.success]
         self._refresh_modified_buffers(modified_paths)
 
@@ -1006,15 +1458,7 @@ Usage:
 
     @pynvim.function("AnyaRenderEditBlocks", sync=True)
     def render_edit_blocks(self, args):
-        """Render SEARCH/REPLACE edit blocks using Lua edit_view.
-
-        Args:
-            args[0]: Buffer number
-            args[1]: Edit blocks string content
-
-        Returns:
-            True if successful
-        """
+        """Render SEARCH/REPLACE edit blocks using Lua edit_view."""
         if len(args) < 2:
             return False
 
@@ -1025,16 +1469,7 @@ Usage:
 
     @pynvim.function("AnyaUnapplyEdit", sync=True)
     def unapply_edit(self, args):
-        """Unapply a previously applied edit by swapping SEARCH/REPLACE and reapplying.
-
-        This reverses an edit that was already applied to the file.
-
-        Args:
-            args[0]: Raw edit block content (the original SEARCH/REPLACE text)
-
-        Returns:
-            dict with {success: bool, message: str}
-        """
+        """Unapply a previously applied edit by swapping SEARCH/REPLACE and reapplying."""
         if not args or not args[0]:
             return {"success": False, "message": "No edit content provided"}
 
@@ -1062,7 +1497,6 @@ Usage:
         all_success = all(r.success for r in results)
         messages = [r.message for r in results]
 
-        # Refresh buffers for successfully modified files
         modified_paths = [r.path for r in results if r.success]
         self._refresh_modified_buffers(modified_paths)
 
@@ -1104,64 +1538,23 @@ Usage:
         """Toggle YOLO mode on/off."""
         self._yolo_mode = not self._yolo_mode
         return self._yolo_mode
-        """Update an edit marker in the database for a message.
 
-        This is called when a user toggles an edit decision, so the
-        database reflects the current state.
+    @pynvim.function("AnyaDaemonStatus", sync=True)
+    def anya_daemon_status(self, args):
+        """Get daemon status."""
+        return daemon_mgmt.get_daemon_status()
 
-        Args:
-            args[0]: Message ID (find from conversation context)
-            args[1]: Old marker name (e.g., "edit_applied")
-            args[2]: New marker name (e.g., "edit_rejected")
+    @pynvim.function("AnyaDaemonStart", sync=True)
+    def anya_daemon_start(self, args):
+        """Start the daemon."""
+        return daemon_mgmt.start_daemon()
 
-        Returns:
-            dict with {success: bool, message: str}
-        """
-        if len(args) < 3:
-            return {
-                "success": False,
-                "message": "Requires message_id, old_marker, new_marker",
-            }
+    @pynvim.function("AnyaDaemonStop", sync=True)
+    def anya_daemon_stop(self, args):
+        """Stop the daemon."""
+        return daemon_mgmt.stop_daemon()
 
-        import json
-
-        message_id = args[0]
-        old_marker = args[1]
-        new_marker = args[2]
-
-        self._ensure_db()
-        message = db.get_message(message_id)
-        if not message:
-            return {"success": False, "message": f"Message not found: {message_id}"}
-
-        markers_json = message.get("markers")
-        if not markers_json:
-            return {"success": False, "message": "Message has no markers"}
-
-        try:
-            marker_list = json.loads(markers_json)
-        except json.JSONDecodeError:
-            return {"success": False, "message": "Failed to parse markers JSON"}
-
-        updated = False
-        for marker in marker_list:
-            names = marker.get("names", [])
-            if old_marker in names:
-                idx = names.index(old_marker)
-                names[idx] = new_marker
-                marker["names"] = names
-                updated = True
-
-        if not updated:
-            return {
-                "success": False,
-                "message": f"Marker '{old_marker}' not found in message",
-            }
-
-        new_markers_json = json.dumps(marker_list)
-        success = db.update_message_markers(message_id, new_markers_json)
-
-        if success:
-            return {"success": True, "message": "Marker updated in database"}
-        else:
-            return {"success": False, "message": "Failed to update marker in database"}
+    @pynvim.function("AnyaEndSession", sync=False)
+    def anya_end_session(self, args):
+        """End the current session with the daemon."""
+        self._client.end_session(self.session_id)

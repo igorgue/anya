@@ -97,6 +97,13 @@ vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP" }, {
   desc = "Adjust prompt height based on content",
 })
 
+-- Send message on Enter
+vim.keymap.set("n", "<CR>", send_message, { buffer = true, desc = "Send message" })
+vim.keymap.set("i", "<CR>", function()
+  vim.cmd("stopinsert")
+  send_message()
+end, { buffer = true, desc = "Send message" })
+
 -- History navigation keymaps (normal mode only to avoid conflicts)
 vim.keymap.set("n", "<C-p>", history_previous, { buffer = true, desc = "Previous prompt in history" })
 vim.keymap.set("n", "<C-n>", history_next, { buffer = true, desc = "Next prompt in history" })

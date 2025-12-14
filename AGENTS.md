@@ -10,12 +10,84 @@ Named after Anya Forger from Spy x Family - she can read minds, this plugin read
 
 ## Architecture
 
+### Daemon Architecture
+
+Anya uses a standalone daemon process for agent execution, communicating with Neovim via ZeroMQ IPC and CBOR2 serialization.
+
+```
+Neovim Plugin <--ZeroMQ IPC--> Daemon Server <--> Agent Execution
+     |                              |
+     |                              +-- MCP Agent (singleton, always running)
+     +-- Streaming via PUB/SUB      +-- Code Agent (per session)
+```
+
+**Benefits:**
+- Daemon persists across Neovim restarts
+- Single daemon serves multiple Neovim instances
+- MCP connections remain active for faster first message
+- Agent state maintained between requests
+
+### Daemon Components
+
+**Daemon Server** (`rplugin/python3/anya/server/`)
+- `main.py`: Main daemon process with ZeroMQ sockets
+- `agents.py`: Agent lifecycle management (MCP singleton, Code per-session)
+- `handlers.py`: Request handlers for agent operations
+
+**Client Library** (`rplugin/python3/anya/client.py`)
+- ZeroMQ client for plugin-to-daemon communication
+- Request/response and streaming subscription
+
+**Protocol** (`rplugin/python3/anya/protocol.py`)
+- CBOR2-serialized message types: Request, Response, StreamChunk
+- Request types: SEND_MESSAGE, CANCEL_REQUEST, GET_STATUS, END_SESSION, SHUTDOWN
+
+**Daemon Management** (`rplugin/python3/anya/daemon.py`)
+- Start/stop daemon process
+- PID file and socket path management
+
+### Daemon Files
+
+| File | Location |
+|------|----------|
+| PID file | `~/.local/share/anya/daemon.pid` |
+| REQ/REP socket | `~/.local/share/anya/daemon.sock` |
+| PUB/SUB socket | `~/.local/share/anya/daemon_stream.sock` |
+| Log file | `~/.local/share/anya/daemon.log` |
+
+### Running the Daemon
+
+```bash
+# Start in background (default)
+python -m anya.server
+
+# Start in foreground (for debugging)
+python -m anya.server --foreground
+
+# With debug logging
+python -m anya.server --foreground --debug
+
+# Or use the installed script
+anya-daemon --foreground
+```
+
+### Daemon Commands in Neovim
+
+```vim
+:Anya daemon status    " Check daemon status
+:Anya daemon start     " Start daemon
+:Anya daemon stop      " Stop daemon
+:Anya daemon restart   " Restart daemon
+```
+
+The daemon is automatically started by the plugin if not running.
+
 ### Key Components
 
 **Python Remote Plugin** (`rplugin/python3/anya/plugin.py`)
 - Main plugin logic using `@pynvim.plugin` decorator
 - `AnyaPlugin` class handles all commands and functions
-- Async agent execution via background asyncio event loop
+- Communicates with daemon via ZeroMQ client
 - Streaming responses with Lua animation integration
 
 **Vim Layer** (`plugin/anya.vim`)
@@ -74,9 +146,10 @@ Named after Anya Forger from Spy x Family - she can read minds, this plugin read
 1. User opens interface with `:Anya` -> creates floating chat/prompt windows
 2. User types in prompt buffer -> presses Enter to send
 3. Lua `conversation.send_message()` -> formats message, calls `AnyaSend`
-4. Python `AnyaSend` -> runs agent in background asyncio loop
-5. Agent streams response -> Lua animation displays text character-by-character
-6. Messages saved to SQLite database with markers
+4. Python plugin sends request to daemon via ZeroMQ
+5. Daemon executes agent, streams responses via PUB socket
+6. Plugin subscribes to stream, displays text via Lua animation
+7. Messages saved to SQLite database with markers
 
 ### Marker Format
 
@@ -158,6 +231,8 @@ python -m py_compile rplugin/python3/anya/*.py rplugin/python3/anya/**/*.py
 - `openai` - OpenAI Python SDK
 - `openai-agents` - OpenAI Agents SDK
 - `hashids` - ID generation
+- `pyzmq` - ZeroMQ for daemon IPC
+- `cbor2` - CBOR serialization for messages
 
 Optional:
 - `snacks.nvim` - For conversation history picker
@@ -176,6 +251,10 @@ Optional:
 | Conversations database | `~/.local/share/anya/conversations.db` |
 | ID generation salt | `~/.local/share/anya/salt.txt` |
 | ID state | `~/.local/share/anya/ids.json` |
+| Daemon PID file | `~/.local/share/anya/daemon.pid` |
+| Daemon log file | `~/.local/share/anya/daemon.log` |
+| Daemon REQ/REP socket | `~/.local/share/anya/daemon.sock` |
+| Daemon PUB/SUB socket | `~/.local/share/anya/daemon_stream.sock` |
 
 ## Special Considerations
 
@@ -207,11 +286,19 @@ Optional:
 rplugin/python3/anya/
   __init__.py          # Exports AnyaPlugin, VERSION
   plugin.py            # Main plugin class with commands/functions
+  client.py            # ZeroMQ client for daemon communication
+  protocol.py          # CBOR message protocol definitions
+  daemon.py            # Daemon lifecycle management
   buffers.py           # Buffer creation and content retrieval
   db.py                # SQLite database operations
   history.py           # Buffer content parsing for LLM
   markers.py           # Marker generation utilities
   ids.py               # Hashid generation
+  server/
+    __init__.py        # Daemon package
+    main.py            # Daemon main loop with ZeroMQ sockets
+    agents.py          # Agent lifecycle (MCP singleton, Code per-session)
+    handlers.py        # Request handlers for agent operations
   agents/
     __init__.py        # Agent definition (code agent)
     context.py         # NvimPluginContext dataclass

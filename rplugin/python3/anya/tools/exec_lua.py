@@ -12,12 +12,21 @@ from .utils import create_error_handler
 async def exec_lua(ctx: RunContextWrapper[NvimPluginContext], code: str) -> str:
     """Execute Lua code inside Neovim.
 
+    Note: This tool requires direct Neovim access and will not work in daemon mode.
+
     Args:
         code: Lua code to execute
 
     Returns:
         Result of Lua execution or error message
     """
+    # exec_lua requires direct nvim access
+    if not ctx.context.has_nvim:
+        raise Exception(
+            "exec_lua requires direct Neovim access. "
+            "This tool is not available in daemon mode."
+        )
+
     nvim = ctx.context.nvim
     code = code.strip()
 

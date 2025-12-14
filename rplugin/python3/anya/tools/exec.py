@@ -99,7 +99,6 @@ async def exec(
     Returns:
         Combined output with stdout and stderr, or error message
     """
-    nvim = ctx.context.nvim
     plugin_context = ctx.context
 
     # Extract just the command name
@@ -115,8 +114,16 @@ async def exec(
     elif yolo_mode:
         # YOLO mode: auto-allow and execute without asking
         plugin_context.allowed_commands.add(cmd_name)
+    elif not plugin_context.has_nvim:
+        # In daemon mode without YOLO, we cannot prompt the user
+        # Only allow if command is already in allowed list
+        raise Exception(
+            f"Command '{cmd_name}' requires user confirmation. "
+            "Enable YOLO mode or run with direct Neovim access to approve commands."
+        )
     else:
         # Ask user for confirmation using vim.ui.select
+        nvim = plugin_context.nvim
         choice = await _nvim_ui_select(
             nvim,
             ["Execute", "Allow for this session", "Cancel"],

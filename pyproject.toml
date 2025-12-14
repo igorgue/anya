@@ -8,7 +8,12 @@ dependencies = [
     "openai",
     "openai-agents",
     "hashids",
+    "pyzmq",
+    "cbor2",
 ]
+
+[project.scripts]
+anya-daemon = "anya.server.main:main"
 
 [dependency-groups]
 dev = [
