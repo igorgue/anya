@@ -164,7 +164,11 @@ vim.api.nvim_create_autocmd("WinEnter", {
     -- Refresh winbar highlight to ensure it's properly styled
     local win = vim.api.nvim_get_current_win()
     if win > 0 and vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_set_option(win, "winhighlight", "Normal:Normal,NormalFloat:Normal,WinBar:AnyaWinBar,WinBarNC:AnyaWinBar")
+      vim.api.nvim_win_set_option(
+        win,
+        "winhighlight",
+        "Normal:Normal,NormalFloat:Normal,WinBar:AnyaWinBar,WinBarNC:AnyaWinBar"
+      )
     end
 
     -- If we entered from outside Anya and user pressed <C-w>j,

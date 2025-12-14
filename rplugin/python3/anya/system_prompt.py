@@ -196,7 +196,7 @@ def get_current_date_utc() -> str:
 
 def read_agent_md_from_cwd(nvim: Any | None = None) -> str | None:
     """Read AGENTS.md from the current working directory if it exists.
-    
+
     Returns the file contents as a string, or None if the file doesn't exist.
     Uses Neovim's working directory (vim.cwd) if nvim is provided, otherwise falls back to os.getcwd().
     """
@@ -207,19 +207,19 @@ def read_agent_md_from_cwd(nvim: Any | None = None) -> str | None:
             cwd = str(_nvim_call_sync_safe(nvim, lambda: nvim.call("getcwd")))
         except Exception:
             pass
-    
+
     # Fallback to OS CWD if Neovim call failed or nvim not provided
     if not cwd:
         try:
             cwd = os.getcwd()
         except Exception:
             return None
-    
+
     agent_md_path = os.path.join(cwd, "AGENTS.md")
-    
+
     if not os.path.isfile(agent_md_path):
         return None
-    
+
     try:
         with open(agent_md_path, "r", encoding="utf-8") as f:
             content = f.read().strip()
@@ -285,12 +285,12 @@ def apply_system_prompt(template: str, nvim: Any | None = None) -> str:
         expanded += "\n"
 
     result = expanded.rstrip() + system_context_block(nvim) + "\n"
-    
+
     # Append AGENTS.md from current working directory if it exists
     agent_md_content = read_agent_md_from_cwd(nvim)
     if agent_md_content:
         result += "\n---\n"
         result += agent_md_content
         result += "\n"
-    
+
     return result
