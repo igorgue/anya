@@ -1015,13 +1015,11 @@ class AnyaPlugin:
             args[0]: The prompt text
             args[1]: Optional conversation ID
         """
-        self.nvim.out_write(">>> AnyaSend called\n")
         if not args:
             self.nvim.err_write("AnyaSend requires a prompt argument.\n")
             return
         text = args[0]
         conversation_id = args[1] if len(args) > 1 else None
-        self.nvim.out_write(f">>> AnyaSend: text={text[:20] if text else None}\n")
 
         # Handle slash commands
         if text and text.strip().startswith("/"):
