@@ -550,6 +550,8 @@ function M._process_markers(bufnr)
     return message_lookup[id]
   end
 
+  local thinking_content_start ---@type integer|nil -- 1-indexed
+
   for i, line in ipairs(lines) do
     if markers.is_message_marker(line) then
       local msg_info = markers.parse_message_marker(line)
@@ -568,15 +570,26 @@ function M._process_markers(bufnr)
             -- fold_start affects line above (i-1 in 1-indexed)
             fold_start_line = i - 1
             fold_is_edit = false -- Reset, will be set if edit marker found
-          elseif marker_name == markers.fold_end and fold_start_line then
+          elseif marker_name == markers.fold_end then
             -- fold_end line is included in the fold
             local fold_end_line = i
-            if fold_end_line > fold_start_line then
+            if fold_start_line and fold_end_line > fold_start_line then
               -- Open edit folds so user can see content and decide
               M._create_fold_range(bufnr, fold_start_line, fold_end_line, fold_is_edit)
             end
+
+            -- If this fold was a thinking block, highlight its content as Comment.
+            if thinking_content_start and fold_end_line > thinking_content_start then
+              for lnum = thinking_content_start, fold_end_line - 1 do
+                vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, lnum - 1, 0, {
+                  line_hl_group = "Comment",
+                })
+              end
+            end
+
             fold_start_line = nil
             fold_is_edit = false
+            thinking_content_start = nil
           elseif marker_name == markers.tool_success then
             -- Highlight the header line (line above marker) with checkmark icon
             M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", ui_utils.icons.success)
@@ -590,6 +603,7 @@ function M._process_markers(bufnr)
             -- Thinking block: treat like a fold with brain icon
             fold_start_line = i - 1
             fold_is_edit = false
+            thinking_content_start = i + 1
             -- Highlight header with thinking text color and brain icon
             M._apply_header_highlight(bufnr, i - 1, "AnyaThinking", ui_utils.icons.thinking)
           elseif

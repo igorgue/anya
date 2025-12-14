@@ -91,6 +91,9 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
     # Thinking/reasoning state tracking
     thinking_started = False  # Track if we've started outputting thinking content
     thinking_finalized = False  # Track if we've finalized thinking section
+    thinking_source: str | None = (
+        None  # Track which source we're using (summary or content)
+    )
 
     # Collect streamed content for saving
     collected_content: list[str] = []
@@ -134,28 +137,43 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                 ):
                     is_reasoning_event = True
 
-                    # Text-bearing reasoning events
-                    if data_type in (
-                        "response.reasoning_summary_text.delta",
+                    # Text-bearing reasoning events - only handle delta events.
+                    # Skip .done events as they contain the full text which we've
+                    # already streamed incrementally via .delta events.
+                    # Prefer summary over raw content to avoid duplication.
+                    if data_type == "response.reasoning_summary_text.delta":
+                        # Summary is preferred - set source and get text
+                        if thinking_source is None or thinking_source == "summary":
+                            thinking_source = "summary"
+                            reasoning_text = getattr(data, "delta", "")
+                    elif data_type in (
                         "response.reasoning_text.delta",
                         "response.reasoning_content.delta",
                     ):
-                        reasoning_text = getattr(data, "delta", "")
-                    elif data_type in (
-                        "response.reasoning_summary_text.done",
-                        "response.reasoning_text.done",
-                        "response.reasoning_content.done",
-                    ):
-                        reasoning_text = getattr(data, "text", "")
+                        # Only use raw content if we haven't started with summary
+                        if thinking_source is None:
+                            thinking_source = "content"
+                            reasoning_text = getattr(data, "delta", "")
+                        elif thinking_source == "content":
+                            reasoning_text = getattr(data, "delta", "")
 
                 # Fallback: check if delta has reasoning_content (e.g. from some providers)
-                if not reasoning_text and hasattr(data, "delta"):
+                # Only use if we haven't started with a specific source
+                if (
+                    not reasoning_text
+                    and hasattr(data, "delta")
+                    and thinking_source != "summary"
+                ):
                     delta = data.delta
                     if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                         is_reasoning_event = True
+                        if thinking_source is None:
+                            thinking_source = "content"
                         reasoning_text = delta.reasoning_content
                     elif hasattr(delta, "reasoning") and delta.reasoning:
                         is_reasoning_event = True
+                        if thinking_source is None:
+                            thinking_source = "content"
                         reasoning_text = delta.reasoning
 
             # Handle reasoning/thinking events
@@ -272,7 +290,9 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                                 display_text,
                             )
 
-                        thinking_footer = "\n" + markers.make_marker("fold_end") + "\n\n"
+                        thinking_footer = (
+                            "\n" + markers.make_marker("fold_end") + "\n\n"
+                        )
                         collected_content.append(thinking_footer)
                         thinking_content.append(thinking_footer)
                         if not plugin._request_cancelled:
@@ -377,8 +397,11 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                                             )
                                         collected_content.append("\n")
                                     # Use the status from the tool (edit_pending or tool_pending)
+                                    # Always prepend newline to ensure header starts on a new line
+                                    # (streaming queue may have content on the current line)
                                     pending_header = (
-                                        combined_header
+                                        "\n"
+                                        + combined_header
                                         + "\n"
                                         + markers.make_marker("fold_start", status)
                                         + "\n"
@@ -419,8 +442,10 @@ async def run_agent_streaming(plugin, text, conversation_id, chat_bufnr, request
                         is_edit_tool = any(t["name"] == "edit" for t in parallel_tools)
 
                         # Check if any output indicates failure
+                        # Only treat as failure if output starts with "Error:" prefix
+                        # (matching the format from tools/utils.py error handler)
                         has_failure = any(
-                            "error" in o.lower()
+                            o.strip().startswith("Error:")
                             for o in pending_tool_outputs
                             if isinstance(o, str)
                         )
