@@ -284,12 +284,65 @@ class RequestHandler:
                 self.logger.error(f"Error waiting for confirmation: {e}")
                 return "Cancel"
 
+        async def edit_confirmation_callback(edit_blocks: str, yolo_mode: bool) -> dict:
+            """Request edit confirmation via the plugin.
+
+            Sends edit blocks to the plugin which renders them in the UI,
+            waits for user to press 1 (apply) or 2 (reject), applies the
+            edit if approved, and returns the result.
+            """
+            confirmation_id = str(uuid.uuid4())
+
+            # Send edit confirmation request to plugin
+            await self._send_stream_chunk(
+                session_id,
+                request_id,
+                StreamEventType.EDIT_CONFIRMATION_REQUEST,
+                {
+                    "confirmation_id": confirmation_id,
+                    "edit_blocks": edit_blocks,
+                    "yolo_mode": yolo_mode,
+                },
+            )
+
+            # Wait for user response
+            try:
+                result = await self.wait_for_confirmation(
+                    confirmation_id, timeout=300.0
+                )
+                # Result should be a JSON string with action/success/message
+                # The plugin will have already applied/rejected the edit
+                if isinstance(result, dict):
+                    return result
+                elif isinstance(result, str):
+                    # Parse JSON if it's a string
+                    import json
+
+                    try:
+                        return json.loads(result)
+                    except json.JSONDecodeError:
+                        # Treat as action name
+                        return {
+                            "action": result,
+                            "success": result == "apply",
+                            "message": "",
+                        }
+                return {
+                    "action": "timeout",
+                    "success": False,
+                    "message": "Invalid response",
+                }
+            except Exception as e:
+                self.logger.error(f"Error waiting for edit confirmation: {e}")
+                return {"action": "failed", "success": False, "message": str(e)}
+
         context = NvimPluginContext(
             nvim=None,  # No nvim in daemon
             session_id=session_id,
             allowed_commands=set(nvim_context.allowed_commands),
             yolo_mode=nvim_context.yolo_mode,
             confirmation_callback=confirmation_callback,
+            edit_confirmation_callback=edit_confirmation_callback,
             cwd=nvim_context.cwd,
             current_buffer=nvim_context.current_buffer,
             open_buffers=nvim_context.open_buffers,

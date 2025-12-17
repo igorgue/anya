@@ -46,6 +46,7 @@ class StreamEventType(Enum):
     MESSAGE_END = "message_end"
     ERROR = "error"
     TOOL_CONFIRMATION_REQUEST = "tool_confirmation_request"
+    EDIT_CONFIRMATION_REQUEST = "edit_confirmation_request"
 
 
 @dataclass

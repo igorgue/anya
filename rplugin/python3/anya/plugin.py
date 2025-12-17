@@ -790,6 +790,153 @@ vim.ui.select({lua_options},
                     # Handle confirmation in background task
                     asyncio.create_task(handle_confirmation())
 
+                elif chunk.event_type == StreamEventType.EDIT_CONFIRMATION_REQUEST:
+                    confirmation_id = chunk.data.get("confirmation_id")
+                    edit_blocks = chunk.data.get("edit_blocks", "")
+                    edit_yolo_mode = chunk.data.get("yolo_mode", False)
+
+                    # Handle edit confirmation in background task
+                    async def handle_edit_confirmation():
+                        import functools
+                        import json
+
+                        edit_id = confirmation_id[:8]  # Use confirmation_id as edit_id
+
+                        # Render edit blocks and setup callback
+                        def render_and_setup():
+                            try:
+                                # Render edit blocks
+                                self.nvim.call(
+                                    "AnyaRenderEditBlocks", chat_bufnr, edit_blocks
+                                )
+
+                                # Setup callback for when user makes decision
+                                self.nvim.exec_lua(
+                                    f"""
+                                    local edit_view = require('anya.edit_view')
+                                    edit_view.set_decision_callback(function(action, success, message)
+                                        vim.g.anya_edit_result_{edit_id} = {{
+                                            action = action,
+                                            success = success,
+                                            message = message
+                                        }}
+                                    end)
+                                    """
+                                )
+                            except Exception as e:
+                                self.nvim.err_write(
+                                    f"Anya: Error rendering edit blocks: {e}\n"
+                                )
+
+                        self.nvim.async_call(render_and_setup)
+                        await asyncio.sleep(0.2)  # Give time to render
+
+                        # If YOLO mode, auto-apply
+                        if edit_yolo_mode:
+
+                            def auto_apply():
+                                try:
+                                    self.nvim.exec_lua(
+                                        """
+                                        local edit_view = require('anya.edit_view')
+                                        edit_view.handle_keypress_any_edit('1')
+                                        """
+                                    )
+                                except Exception as e:
+                                    self.nvim.exec_lua(
+                                        f"""
+                                        vim.g.anya_edit_result_{edit_id} = {{
+                                            action = "failed",
+                                            success = false,
+                                            message = "Error: {str(e)}"
+                                        }}
+                                        """
+                                    )
+
+                            self.nvim.async_call(auto_apply)
+                            await asyncio.sleep(0.1)
+
+                        # Poll for result
+                        var_name = f"anya_edit_result_{edit_id}"
+                        start_time = asyncio.get_event_loop().time()
+                        while asyncio.get_event_loop().time() - start_time < 300.0:
+                            result = [None]
+
+                            def get_result():
+                                try:
+                                    val = self.nvim.eval(
+                                        f"get(g:, '{var_name}', v:null)"
+                                    )
+                                    if val is not None and val != "v:null":
+                                        result[0] = val
+                                except Exception:
+                                    pass
+
+                            self.nvim.async_call(get_result)
+                            await asyncio.sleep(0.1)
+
+                            if result[0] is not None:
+                                # Clean up
+                                def cleanup():
+                                    try:
+                                        self.nvim.command(f"unlet g:{var_name}")
+                                    except Exception:
+                                        pass
+
+                                self.nvim.async_call(cleanup)
+
+                                # Send result back to daemon
+                                try:
+                                    loop = asyncio.get_event_loop()
+                                    await loop.run_in_executor(
+                                        None,
+                                        functools.partial(
+                                            self._confirmation_client.send_request,
+                                            RequestType.TOOL_CONFIRMATION_RESPONSE,
+                                            self.session_id,
+                                            confirmation_id,
+                                            {
+                                                "confirmation_id": confirmation_id,
+                                                "choice": json.dumps(result[0]),
+                                            },
+                                            5.0,
+                                        ),
+                                    )
+                                except Exception as e:
+                                    self.nvim.async_call(
+                                        self.nvim.err_write,
+                                        f"Anya: Error sending edit response: {e}\n",
+                                    )
+                                return
+
+                        # Timeout
+                        try:
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(
+                                None,
+                                functools.partial(
+                                    self._confirmation_client.send_request,
+                                    RequestType.TOOL_CONFIRMATION_RESPONSE,
+                                    self.session_id,
+                                    confirmation_id,
+                                    {
+                                        "confirmation_id": confirmation_id,
+                                        "choice": json.dumps(
+                                            {
+                                                "action": "timeout",
+                                                "success": False,
+                                                "message": "Edit timed out",
+                                            }
+                                        ),
+                                    },
+                                    5.0,
+                                ),
+                            )
+                        except Exception:
+                            pass
+
+                    asyncio.create_task(handle_edit_confirmation())
+
                 elif chunk.event_type == StreamEventType.ERROR:
                     error = chunk.data.get("error", "Unknown error")
                     self.nvim.async_call(

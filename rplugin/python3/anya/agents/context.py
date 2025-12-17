@@ -19,8 +19,13 @@ class NvimPluginContext:
     cwd: str = ""
     current_buffer: str = ""
     open_buffers: list[dict] = field(default_factory=list)
-    # Confirmation callback for requesting user confirmation in daemon mode
+    # Confirmation callback for requesting user confirmation in daemon mode (exec tool)
     confirmation_callback: Callable[[str, list[str]], Awaitable[str]] | None = None
+    # Edit confirmation callback for edit tool in daemon mode
+    # Takes (edit_blocks: str, yolo_mode: bool) and returns dict with action/success/message
+    edit_confirmation_callback: (
+        Callable[[str, bool], Awaitable[dict[str, Any]]] | None
+    ) = None
 
     @property
     def has_nvim(self) -> bool:

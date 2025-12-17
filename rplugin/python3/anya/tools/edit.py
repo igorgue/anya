@@ -128,14 +128,7 @@ async def edit(
     Returns:
         Result of the edit operation (applied, rejected, or failed)
     """
-    # Edit tool requires direct nvim access for UI interaction
-    if not ctx.context.has_nvim:
-        raise Exception(
-            "edit tool requires direct Neovim access for UI interaction. "
-            "This tool is not available in daemon mode."
-        )
-
-    nvim = ctx.context.nvim
+    plugin_context = ctx.context
 
     # Clean up - remove outer markdown code fences if present
     edit_blocks = edit_blocks.strip()
@@ -151,13 +144,57 @@ async def edit(
     if not edit_blocks.endswith("\n"):
         edit_blocks += "\n"
 
-    # Generate unique ID for this edit
+    # Check YOLO mode from context
+    yolo_mode = plugin_context.yolo_mode
+
+    # Daemon mode - use edit_confirmation_callback
+    if plugin_context.edit_confirmation_callback:
+        result = await plugin_context.edit_confirmation_callback(
+            edit_blocks,
+            yolo_mode,
+        )
+        return _format_edit_result(result)
+
+    # Direct Neovim mode - use UI directly
+    if plugin_context.has_nvim:
+        nvim = plugin_context.nvim
+        result = await _handle_edit_with_nvim(nvim, edit_blocks, yolo_mode)
+        return _format_edit_result(result)
+
+    # No way to handle edits
+    raise Exception(
+        "edit tool requires either direct Neovim access or daemon mode with "
+        "edit_confirmation_callback. Neither is available."
+    )
+
+
+def _format_edit_result(result: dict) -> str:
+    """Format edit result dict into tool response string."""
+    action = result.get("action", "timeout")
+    success = result.get("success", False)
+    message = result.get("message", "")
+
+    if action == "apply" and success:
+        return "EDIT_APPLIED: The SEARCH/REPLACE edits were successfully applied."
+    elif action == "apply" and not success:
+        return f"EDIT_FAILED: The edits could not be applied. {message}. Please read the target file again and regenerate the edit with correct content."
+    elif action == "failed":
+        return f"EDIT_FAILED: The edits could not be applied. {message}. Please read the target file again and regenerate the edit with correct content."
+    elif action == "reject":
+        return "EDIT_REJECTED: The user rejected the edits. Ask if they want changes or a different approach."
+    elif action == "timeout":
+        return "EDIT_TIMEOUT: The edit timed out waiting for user response."
+    else:
+        return f"EDIT_ERROR: Unexpected action '{action}'"
+
+
+async def _handle_edit_with_nvim(nvim, edit_blocks: str, yolo_mode: bool) -> dict:
+    """Handle edit using direct Neovim access."""
     import uuid
 
     edit_id = uuid.uuid4().hex[:8]
 
     # Wait for any other tool folds to close before rendering
-    # This ensures edit blocks don't appear inside other tool outputs
     await _wait_for_tool_folds_to_close(nvim)
 
     # Render edit blocks in UI and wait for user decision
@@ -195,20 +232,12 @@ async def edit(
 
     nvim.async_call(render_and_setup)
 
-    # Check YOLO mode from context
-    yolo_mode = ctx.context.yolo_mode
-
     # If YOLO mode is enabled, auto-apply the edit
     if yolo_mode:
-        # Wait a bit for the edit to render
         await asyncio.sleep(0.2)
 
-        # Auto-apply the edit using the edit_view handler which properly updates UI
         def auto_apply():
             try:
-                # Use handle_keypress_any_edit to apply the most recent pending edit
-                # This properly updates the UI markers and database, and triggers decision_callback
-                # which will set the result for the polling mechanism (callback was set in render_and_setup)
                 nvim.exec_lua(
                     """
                     local edit_view = require('anya.edit_view')
@@ -227,22 +256,7 @@ async def edit(
                 )
 
         nvim.async_call(auto_apply)
-        await asyncio.sleep(0.1)  # Give it time to apply
+        await asyncio.sleep(0.1)
 
-    # Wait for user decision (or auto-apply result in YOLO mode)
-    result = await _wait_for_edit_decision(nvim, edit_id)
-
-    action = result.get("action", "timeout")
-    success = result.get("success", False)
-    message = result.get("message", "")
-
-    if action == "apply" and success:
-        return "EDIT_APPLIED: The SEARCH/REPLACE edits were successfully applied."
-    elif action == "apply" and not success:
-        return f"EDIT_FAILED: The edits could not be applied. {message}. Please read the target file again and regenerate the edit with correct content."
-    elif action == "reject":
-        return "EDIT_REJECTED: The user rejected the edits. Ask if they want changes or a different approach."
-    elif action == "timeout":
-        return "EDIT_TIMEOUT: The edit timed out waiting for user response."
-    else:
-        return f"EDIT_ERROR: Unexpected action '{action}'"
+    # Wait for user decision
+    return await _wait_for_edit_decision(nvim, edit_id)
