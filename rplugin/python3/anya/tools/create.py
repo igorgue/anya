@@ -1,12 +1,17 @@
 import os
 
-from agents import function_tool
+from agents import function_tool, RunContextWrapper
 
+from ..agents.context import NvimPluginContext
 from .utils import create_error_handler
 
 
 @function_tool(failure_error_function=create_error_handler)
-async def create(path: str, content: str = "", cwd: str = None) -> str:
+async def create(
+    ctx: RunContextWrapper[NvimPluginContext],
+    path: str,
+    content: str = "",
+) -> str:
     """Creates a new file at the specified path with optional content.
 
     This tool creates a new file with the given content. If the file already exists,
@@ -15,7 +20,6 @@ async def create(path: str, content: str = "", cwd: str = None) -> str:
     Args:
         path: File path where the new file should be created (supports ~ expansion, and environment variables)
         content: Optional content to write to the file (default: empty file)
-        cwd: Current working directory for relative path resolution
 
     Returns:
         Success message with absolute path, or error message
@@ -25,15 +29,14 @@ async def create(path: str, content: str = "", cwd: str = None) -> str:
         create("$PROJECT_DIR/main.py", "# Main application file\\n")
         create("src/new_module.py", "# New module\\n")
         create("config/settings.json", "{}")
-        create("logs/app.log", "", "/var/www/myapp")
     """
     # Expand ~ to home directory and environment variables
     path = os.path.expandvars(os.path.expanduser(path))
 
-    # Resolve relative paths
+    # Resolve relative paths using context.cwd (from user's Neovim)
     if not os.path.isabs(path):
-        if cwd is None:
-            cwd = os.getcwd()
+        plugin_context = ctx.context
+        cwd = plugin_context.cwd if plugin_context.cwd else os.getcwd()
         path = os.path.join(cwd, path)
 
     # Check if file already exists

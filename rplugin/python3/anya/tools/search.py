@@ -1,27 +1,31 @@
 import os
 import subprocess
-from agents import function_tool
+from agents import function_tool, RunContextWrapper
 
+from ..agents.context import NvimPluginContext
 from .utils import create_error_handler
 
 
 @function_tool(failure_error_function=create_error_handler)
-async def search(query: str, cwd: str = None, max_results: int = 2000) -> str:
+async def search(
+    ctx: RunContextWrapper[NvimPluginContext],
+    query: str,
+    max_results: int = 2000,
+) -> str:
     """Searches the project files for a string using grep/ripgrep.
 
     **IMPORTANT**: This tool is for files only, it's not a generic web search tool.
 
     Args:
         query: Search query string
-        cwd: Current working directory to search in
         max_results: Maximum number of results to return
 
     Returns:
         Search results with line numbers, or error message
     """
-    if cwd is None:
-        # Use os.getcwd() which will be the daemon's CWD (updated per-request from client)
-        cwd = os.getcwd()
+    # Get cwd from context (from user's Neovim)
+    plugin_context = ctx.context
+    cwd = plugin_context.cwd if plugin_context.cwd else os.getcwd()
 
     # Expand ~ to home directory and environment variables
     cwd = os.path.expandvars(os.path.expanduser(cwd))

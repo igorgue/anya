@@ -2,6 +2,7 @@
 
 import pynvim
 import asyncio
+import concurrent.futures
 import threading
 import os
 import uuid
@@ -472,17 +473,14 @@ class AnyaPlugin:
         # Initialize tool fold state at start of request
         self.nvim.async_call(self._set_tool_fold_open, False)
 
-        # Build nvim context for daemon
-        cwd = ""
-        current_buffer = ""
-        current_buffer_content = ""
-        open_buffers = []
+        # Build nvim context for daemon using Future for proper synchronization
+        context_future: concurrent.futures.Future = concurrent.futures.Future()
 
         def get_nvim_context():
-            nonlocal cwd, current_buffer, current_buffer_content, open_buffers
             try:
                 cwd = self.nvim.call("getcwd")
                 current_buffer = self.nvim.api.buf_get_name(0)
+                open_buffers = []
                 # Get open buffers info
                 for buf in self.nvim.buffers:
                     if buf.valid and buf.name:
@@ -492,18 +490,42 @@ class AnyaPlugin:
                                 "bufnr": buf.number,
                             }
                         )
+                context_future.set_result(
+                    {
+                        "cwd": cwd,
+                        "current_buffer": current_buffer,
+                        "open_buffers": open_buffers,
+                    }
+                )
             except Exception:
-                pass
+                context_future.set_result(
+                    {
+                        "cwd": "",
+                        "current_buffer": "",
+                        "open_buffers": [],
+                    }
+                )
 
         self.nvim.async_call(get_nvim_context)
-        await asyncio.sleep(0.05)  # Allow async_call to complete
+
+        # Wait for the context to be populated (with timeout)
+        timeout_count = 0
+        while not context_future.done() and timeout_count < 100:
+            await asyncio.sleep(0.01)
+            timeout_count += 1
+
+        # Get result or use defaults if timed out
+        if context_future.done():
+            ctx_data = context_future.result()
+        else:
+            ctx_data = {"cwd": "", "current_buffer": "", "open_buffers": []}
 
         nvim_context = NvimContext(
             session_id=self.session_id,
-            cwd=cwd,
-            current_buffer=current_buffer,
-            current_buffer_content=current_buffer_content,
-            open_buffers=open_buffers,
+            cwd=ctx_data["cwd"],
+            current_buffer=ctx_data["current_buffer"],
+            current_buffer_content="",
+            open_buffers=ctx_data["open_buffers"],
             yolo_mode=self._yolo_mode,
             allowed_commands=list(self.allowed_commands),
         )

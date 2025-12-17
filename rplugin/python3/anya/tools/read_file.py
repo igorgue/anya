@@ -1,6 +1,7 @@
 import os
-from agents import function_tool
+from agents import function_tool, RunContextWrapper
 
+from ..agents.context import NvimPluginContext
 from .utils import create_error_handler
 
 
@@ -109,7 +110,10 @@ def read_file_impl(path_with_range: str, cwd: str = None) -> str:
 
 
 @function_tool(failure_error_function=create_error_handler)
-async def read_file(path_with_range: str, cwd: str = None) -> str:
+async def read_file(
+    ctx: RunContextWrapper[NvimPluginContext],
+    path_with_range: str,
+) -> str:
     """Reads file content with optional line range specifications.
 
     CRITICAL - read_file tool behavior:
@@ -128,9 +132,11 @@ async def read_file(path_with_range: str, cwd: str = None) -> str:
 
     Args:
         path_with_range: File path with optional @start-end range specification
-        cwd: Current working directory for relative path resolution
 
     Returns:
         File content as string with metadata about size and range, or error message
     """
+    # Get cwd from context (from user's Neovim)
+    plugin_context = ctx.context
+    cwd = plugin_context.cwd if plugin_context.cwd else os.getcwd()
     return read_file_impl(path_with_range, cwd)

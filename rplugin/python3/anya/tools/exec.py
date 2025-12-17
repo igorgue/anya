@@ -83,7 +83,6 @@ vim.ui.select({lua_options},
 async def exec(
     ctx: RunContextWrapper[NvimPluginContext],
     command: str,
-    cwd: str = None,
     timeout: int = 30,
 ) -> str:
     """Execute a shell command and return stdout and stderr.
@@ -93,7 +92,6 @@ async def exec(
 
     Args:
         command: Shell command to execute
-        cwd: Current working directory for the command (defaults to current directory)
         timeout: Timeout in seconds (default 30)
 
     Returns:
@@ -148,11 +146,8 @@ async def exec(
         elif not choice:
             raise Exception("No response received from user confirmation")
 
-    if cwd is None:
-        # Prefer context.cwd if available (from client), otherwise use os.getcwd()
-        cwd = plugin_context.cwd if plugin_context.cwd else os.getcwd()
-    else:
-        cwd = os.path.expandvars(os.path.expanduser(cwd))
+    # Get cwd from context (from user's Neovim)
+    cwd = plugin_context.cwd if plugin_context.cwd else os.getcwd()
 
     # Daemon mode with exec callback - delegate to plugin for execution on user's machine
     if plugin_context.exec_callback:

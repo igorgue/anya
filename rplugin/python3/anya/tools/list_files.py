@@ -1,30 +1,33 @@
 import os
 import shutil
 import subprocess
-from agents import function_tool
+from agents import function_tool, RunContextWrapper
 
+from ..agents.context import NvimPluginContext
 from .utils import create_error_handler
 
 
 @function_tool(failure_error_function=create_error_handler)
-async def list_files(path: str = ".", cwd: str = None, max_results: int = 100) -> str:
+async def list_files(
+    ctx: RunContextWrapper[NvimPluginContext],
+    path: str = ".",
+    max_results: int = 100,
+) -> str:
     """Lists files in a directory (recursive, respects gitignore if possible).
 
     Args:
         path: Directory path to list (default current directory)
-        cwd: Current working directory for relative path resolution
         max_results: Maximum number of files to return (default 100)
 
     Returns:
         Newline-separated list of file paths, or error message
     """
+    # Get cwd from context (from user's Neovim)
+    plugin_context = ctx.context
+    cwd = plugin_context.cwd if plugin_context.cwd else os.getcwd()
+
     # Expand ~ to home directory and environment variables
     path = os.path.expandvars(os.path.expanduser(path))
-    if cwd is None:
-        # Use os.getcwd() which will be the daemon's CWD (updated per-request from client)
-        cwd = os.getcwd()
-    else:
-        cwd = os.path.expandvars(os.path.expanduser(cwd))
 
     if not os.path.isabs(path):
         target_dir = os.path.join(cwd, path)

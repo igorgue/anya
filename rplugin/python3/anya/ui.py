@@ -195,41 +195,58 @@ def update_last_tool_pending_marker(nvim, bufnr: int, new_status: str) -> bool:
 
     This only edits buffer text (no marker processing - caller should do it).
     Returns True if a marker was updated, False otherwise.
+
+    Uses vim.schedule() to defer buffer modifications to avoid E565 errors
+    when called from async contexts.
     """
     if not nvim.api.buf_is_valid(bufnr):
         return False
 
-    lines = nvim.api.buf_get_lines(bufnr, 0, -1, False)
+    # Use Lua with vim.schedule to safely modify buffer from async context
+    # Marker format: <!-- at: fold_start, tool_pending -->
+    lua_code = """
+    local bufnr, new_status, pending_marker, success_marker, failure_marker, fold_start_marker = ...
+    vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(bufnr) then return end
 
-    for i in range(len(lines) - 1, -1, -1):
-        line = lines[i]
-        if not markers.has_marker(line, markers.TOOL_PENDING):
-            continue
-
-        parsed = markers.parse_marker(line)
-        if not parsed:
-            continue
-
-        # Only update tool fold-start markers (avoid touching unrelated markers).
-        if markers.FOLD_START not in parsed:
-            continue
-
-        # Remove pending + any existing status, then add new status.
-        new_markers = [
-            m
-            for m in parsed
-            if m
-            not in (markers.TOOL_PENDING, markers.TOOL_SUCCESS, markers.TOOL_FAILURE)
-        ]
-        new_markers.append(new_status)
-
-        nvim.api.buf_set_lines(
-            bufnr, i, i + 1, False, [markers.make_marker(*new_markers)]
-        )
-        # NOTE: Don't call process_markers here - caller will do it once at the end
-        return True
-
-    return False
+        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        for i = #lines, 1, -1 do
+            local line = lines[i]
+            -- Check if line has tool_pending marker
+            if line:find(pending_marker, 1, true) then
+                -- Check if it also has fold_start marker
+                if line:find(fold_start_marker, 1, true) then
+                    -- Remove pending/success/failure markers with proper comma handling
+                    local new_line = line
+                    -- Remove ", tool_pending" or "tool_pending, " or just "tool_pending"
+                    new_line = new_line:gsub(", " .. pending_marker, "")
+                    new_line = new_line:gsub(pending_marker .. ", ", "")
+                    new_line = new_line:gsub(pending_marker, "")
+                    new_line = new_line:gsub(", " .. success_marker, "")
+                    new_line = new_line:gsub(success_marker .. ", ", "")
+                    new_line = new_line:gsub(success_marker, "")
+                    new_line = new_line:gsub(", " .. failure_marker, "")
+                    new_line = new_line:gsub(failure_marker .. ", ", "")
+                    new_line = new_line:gsub(failure_marker, "")
+                    -- Add new status before the closing -->
+                    new_line = new_line:gsub(" %-%->", ", " .. new_status .. " -->")
+                    vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, {new_line})
+                    return
+                end
+            end
+        end
+    end)
+    """
+    nvim.exec_lua(
+        lua_code,
+        bufnr,
+        new_status,
+        markers.TOOL_PENDING,
+        markers.TOOL_SUCCESS,
+        markers.TOOL_FAILURE,
+        markers.FOLD_START,
+    )
+    return True
 
 
 def update_pending_markers_to_success(nvim, bufnr):

@@ -1,11 +1,16 @@
-from agents import function_tool
+import os
+from agents import function_tool, RunContextWrapper
 
+from ..agents.context import NvimPluginContext
 from .utils import create_error_handler
 from .read_file import read_file_impl
 
 
 @function_tool(failure_error_function=create_error_handler)
-async def read_many_files(files: list[str], cwd: str = None) -> str:
+async def read_many_files(
+    ctx: RunContextWrapper[NvimPluginContext],
+    files: list[str],
+) -> str:
     """Reads multiple files in a single call, supporting line ranges.
 
     Each file in the list can include optional @range specification:
@@ -16,7 +21,6 @@ async def read_many_files(files: list[str], cwd: str = None) -> str:
 
     Args:
         files: List of file paths with optional @range specifications
-        cwd: Current working directory for relative path resolution
 
     Returns:
         Combined content from all files with metadata, or error messages
@@ -26,6 +30,10 @@ async def read_many_files(files: list[str], cwd: str = None) -> str:
 
     if not isinstance(files, list):
         raise Exception(f"Expected list of files, got {type(files).__name__}")
+
+    # Get cwd from context (from user's Neovim)
+    plugin_context = ctx.context
+    cwd = plugin_context.cwd if plugin_context.cwd else os.getcwd()
 
     results = []
     file_count = 0

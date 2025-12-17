@@ -22,12 +22,7 @@ async def exec_lua(ctx: RunContextWrapper[NvimPluginContext], code: str) -> str:
     """
     # exec_lua requires direct nvim access
     if not ctx.context.has_nvim:
-        raise Exception(
-            "exec_lua requires direct Neovim access. "
-            "This tool is not available in daemon mode. "
-            "Consider using exec() for shell commands instead, which can work in daemon mode "
-            "with YOLO mode enabled (set g:anya_yolo_mode=1)."
-        )
+        raise Exception("exec_lua requires direct Neovim access.")
 
     nvim = ctx.context.nvim
     code = code.strip()
