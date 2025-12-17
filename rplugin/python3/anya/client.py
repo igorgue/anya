@@ -374,6 +374,71 @@ class StreamSubscriber:
                     break
 
 
+class SystemSubscriber:
+    """Subscribes to daemon-wide system events (MCP status, etc.).
+
+    Uses the "system" topic to receive events not tied to a specific request.
+    """
+
+    def __init__(self):
+        self.logger = logging.getLogger("anya.client.system")
+        self._context: zmq.asyncio.Context | None = None
+        self._sub_socket: zmq.asyncio.Socket | None = None
+        self._running = False
+
+    async def connect(self):
+        """Connect to the streaming socket and subscribe to system events."""
+        self._context = zmq.asyncio.Context()
+        self._sub_socket = self._context.socket(zmq.SUB)
+
+        # Subscribe to "system" topic for daemon-wide events
+        topic = b"system:system"
+        self._sub_socket.setsockopt(zmq.SUBSCRIBE, topic)
+
+        stream_path = get_stream_socket_path()
+        self._sub_socket.connect(stream_path)
+        self._running = True
+        self.logger.debug(f"Subscribed to system events at {stream_path}")
+
+    async def disconnect(self):
+        """Disconnect from the streaming socket."""
+        self._running = False
+        if self._sub_socket:
+            self._sub_socket.close()
+            self._sub_socket = None
+        if self._context:
+            self._context.term()
+            self._context = None
+
+    async def receive(self, timeout: float = 1.0) -> StreamChunk | None:
+        """Receive a system event.
+
+        Args:
+            timeout: Timeout in seconds
+
+        Returns:
+            StreamChunk or None if timeout
+        """
+        if not self._sub_socket:
+            return None
+
+        try:
+            data = await asyncio.wait_for(
+                self._sub_socket.recv(),
+                timeout=timeout,
+            )
+            return StreamChunk.deserialize(data)
+        except asyncio.TimeoutError:
+            return None
+        except Exception as e:
+            self.logger.error(f"Error receiving system event: {e}")
+            return None
+
+    def is_running(self) -> bool:
+        """Check if the subscriber is running."""
+        return self._running
+
+
 class AsyncAnyaClient:
     """Async client for communicating with the Anya daemon."""
 

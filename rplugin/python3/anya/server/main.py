@@ -99,9 +99,9 @@ class AnyaDaemon:
         self.pub_socket.bind(stream_path)
         self.logger.info(f"PUB socket bound to: {stream_path}")
 
-        # Initialize agent manager
+        # Initialize agent manager with PUB socket for status events
         self.agent_manager = AgentManager()
-        await self.agent_manager.initialize()
+        await self.agent_manager.initialize(pub_socket=self.pub_socket)
 
         # Initialize request handler
         self.handler = RequestHandler(

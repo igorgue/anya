@@ -16,7 +16,7 @@ from . import fidget
 from . import ui
 from . import utils
 from . import daemon as daemon_mgmt
-from .client import AnyaClient, StreamSubscriber
+from .client import AnyaClient, StreamSubscriber, SystemSubscriber
 from .protocol import (
     NvimContext,
     RequestType,
@@ -55,6 +55,11 @@ class AnyaPlugin:
         # Separate client for confirmations (to avoid blocking on main request socket)
         self._confirmation_client = AnyaClient()
         self._daemon_check_done = False
+
+        # System event subscriber for MCP status updates
+        self._system_subscriber: SystemSubscriber | None = None
+        self._system_listener_task = None
+        self._system_listener_running = False
 
         # Start daemon check in background on plugin load
         try:
@@ -102,12 +107,78 @@ class AnyaPlugin:
                         self.nvim.err_write,
                         "Anya: Failed to start daemon. Run manually with: python -m anya.server.main -f\n",
                     )
+                    self._daemon_check_done = True
+                    return
+
             self._daemon_check_done = True
+
+            # Start system event listener for MCP status updates
+            await self._start_system_event_listener()
         except Exception as e:
             self.nvim.async_call(
                 self.nvim.err_write,
                 f"Anya: Error checking daemon: {e}\n",
             )
+
+    async def _start_system_event_listener(self):
+        """Start listening for daemon system events (MCP status, etc.)."""
+        if self._system_listener_running:
+            return
+
+        try:
+            self._system_subscriber = SystemSubscriber()
+            await self._system_subscriber.connect()
+            self._system_listener_running = True
+
+            # Run the listener loop
+            while self._system_listener_running and self._system_subscriber:
+                try:
+                    chunk = await self._system_subscriber.receive(timeout=1.0)
+                    if chunk is None:
+                        continue
+
+                    # Handle MCP status events
+                    if chunk.event_type == StreamEventType.MCP_INIT_START:
+                        self._handle_mcp_init_start(chunk.data)
+                    elif chunk.event_type == StreamEventType.MCP_INIT_COMPLETE:
+                        self._handle_mcp_init_complete(chunk.data)
+                except Exception as e:
+                    # Don't spam errors - just log once and continue
+                    pass
+
+        except Exception as e:
+            self.nvim.async_call(
+                self.nvim.err_write,
+                f"Anya: Error in system event listener: {e}\n",
+            )
+        finally:
+            self._system_listener_running = False
+            if self._system_subscriber:
+                await self._system_subscriber.disconnect()
+                self._system_subscriber = None
+
+    def _handle_mcp_init_start(self, data: dict):
+        """Handle MCP initialization start event."""
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaMcpInitStarted",
+            {
+                "message": data.get("message", "Initializing MCP servers..."),
+            },
+        )
+
+    def _handle_mcp_init_complete(self, data: dict):
+        """Handle MCP initialization complete event."""
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaMcpInitFinished",
+            {
+                "success": data.get("success", False),
+                "servers": data.get("servers", []),
+                "error": data.get("error"),
+                "message": data.get("message", ""),
+            },
+        )
 
     def _ensure_db(self):
         """Ensure the database is initialized (lazy initialization)."""

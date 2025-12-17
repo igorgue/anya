@@ -11,10 +11,12 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+import zmq.asyncio
 from agents import Agent
 
 from ..mcp_loader import MCPManager, load_mcp_server_configs, create_mcp_servers
 from ..agents import CodeAgent, MCPAgent, MAIN_AGENT_NAME
+from ..protocol import StreamChunk, StreamEventType
 
 
 @dataclass
@@ -41,6 +43,7 @@ class AgentManager:
         self._mcp_servers: list = []
         self._mcp_agent: Agent | None = None
         self._mcp_initialized = False
+        self._mcp_ready = False  # True when MCP servers are connected
 
         # Session state (per-session Code agents)
         self._sessions: dict[str, SessionState] = {}
@@ -52,19 +55,87 @@ class AgentManager:
         # Lock for agent initialization
         self._init_lock = asyncio.Lock()
 
-    async def initialize(self):
-        """Initialize the agent manager and MCP servers."""
+        # Background task for MCP initialization
+        self._mcp_init_task: asyncio.Task | None = None
+
+        # PUB socket for emitting status events (set by daemon)
+        self._pub_socket: zmq.asyncio.Socket | None = None
+
+    async def initialize(self, pub_socket: zmq.asyncio.Socket | None = None):
+        """Initialize the agent manager. MCP initialization runs in background.
+
+        Args:
+            pub_socket: PUB socket for emitting status events to clients
+        """
         async with self._init_lock:
             if self._mcp_initialized:
                 return
 
             self.logger.info("Initializing agent manager...")
+            self._pub_socket = pub_socket
 
             if self._mcp_enabled:
-                await self._initialize_mcp()
+                # Start MCP initialization in background - don't block daemon startup
+                self._mcp_init_task = asyncio.create_task(
+                    self._initialize_mcp_background()
+                )
 
             self._mcp_initialized = True
-            self.logger.info("Agent manager initialized")
+            self.logger.info(
+                "Agent manager initialized (MCP initializing in background)"
+            )
+
+    async def _initialize_mcp_background(self):
+        """Background task for MCP initialization."""
+        # Emit start event
+        await self._emit_mcp_status(
+            StreamEventType.MCP_INIT_START,
+            {"message": "Initializing MCP servers..."},
+        )
+
+        try:
+            await self._initialize_mcp()
+            self._mcp_ready = True
+            server_names = [getattr(s, "name", "unknown") for s in self._mcp_servers]
+            self.logger.info(f"MCP initialization complete: {server_names}")
+            await self._emit_mcp_status(
+                StreamEventType.MCP_INIT_COMPLETE,
+                {
+                    "success": True,
+                    "servers": server_names,
+                    "message": f"Connected to {len(server_names)} MCP server(s)",
+                },
+            )
+        except Exception as e:
+            self.logger.error(f"MCP initialization failed: {e}")
+            await self._emit_mcp_status(
+                StreamEventType.MCP_INIT_COMPLETE,
+                {
+                    "success": False,
+                    "error": str(e),
+                    "message": f"MCP initialization failed: {e}",
+                },
+            )
+
+    async def _emit_mcp_status(self, event_type: StreamEventType, data: dict):
+        """Emit MCP status event via PUB socket.
+
+        Uses 'system' topic for daemon-wide events not tied to a specific request.
+        """
+        if self._pub_socket is None:
+            return
+
+        try:
+            chunk = StreamChunk(
+                request_id="system",
+                session_id="system",
+                event_type=event_type,
+                data=data,
+            )
+            await self._pub_socket.send(chunk.serialize())
+            self.logger.debug(f"Emitted MCP status: {event_type.value}")
+        except Exception as e:
+            self.logger.warning(f"Failed to emit MCP status: {e}")
 
     async def _initialize_mcp(self):
         """Initialize MCP servers and MCP agent."""
@@ -204,11 +275,16 @@ class AgentManager:
         return {
             "mcp_enabled": self._mcp_enabled,
             "mcp_initialized": self._mcp_initialized,
+            "mcp_ready": self._mcp_ready,
             "mcp_servers_count": len(self._mcp_servers),
             "mcp_servers": [getattr(s, "name", "unknown") for s in self._mcp_servers],
             "sessions_count": len(self._sessions),
             "sessions": list(self._sessions.keys()),
         }
+
+    def is_mcp_ready(self) -> bool:
+        """Check if MCP servers are connected and ready."""
+        return self._mcp_ready
 
     async def shutdown(self):
         """Shutdown the agent manager and clean up resources."""

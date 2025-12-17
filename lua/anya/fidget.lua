@@ -13,6 +13,9 @@ end
 
 M.handles = {}
 
+-- Handle for MCP initialization progress (not tied to a specific request)
+M.mcp_handle = nil
+
 -- Fun status phrases that will randomly show up
 M.status_phrases = {
   -- "brewing",
@@ -111,6 +114,49 @@ function M:init()
             message = M:get_random_phrase(),
           })
         end
+      end
+    end,
+  })
+
+  -- MCP initialization events (daemon-wide, not tied to a specific request)
+  vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AnyaMcpInitStarted",
+    group = group,
+    callback = function(event)
+      -- Create a progress handle for MCP initialization
+      M.mcp_handle = fidget_progress.handle.create({
+        title = "MCP",
+        message = event.data.message or "initializing...",
+        lsp_client = {
+          name = " Anya",
+        },
+      })
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AnyaMcpInitFinished",
+    group = group,
+    callback = function(event)
+      if M.mcp_handle then
+        if event.data.success then
+          local server_count = #(event.data.servers or {})
+          if server_count > 0 then
+            M.mcp_handle.message =
+              string.format("connected (%d server%s)", server_count, server_count == 1 and "" or "s")
+          else
+            M.mcp_handle.message = "no servers configured"
+          end
+        else
+          M.mcp_handle.message = "failed"
+        end
+        -- Show completion message for 2 seconds before finishing
+        vim.defer_fn(function()
+          if M.mcp_handle then
+            M.mcp_handle:finish()
+            M.mcp_handle = nil
+          end
+        end, 2000)
       end
     end,
   })
