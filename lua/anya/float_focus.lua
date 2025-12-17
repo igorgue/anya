@@ -49,14 +49,38 @@ function M.redirect_to_float()
   end
 end
 
----Focus the chat window
-function M.focus_chat()
+---Toggle between chat and prompt windows
+function M.toggle_focus()
+  local current_win = vim.api.nvim_get_current_win()
+  local current_buf = vim.api.nvim_win_get_buf(current_win)
+  local current_ft = vim.api.nvim_buf_get_option(current_buf, "filetype")
+
+  local target_ft = (current_ft == "anya-chat") and "anya-prompt" or "anya-chat"
+
   local windows = vim.api.nvim_list_wins()
   for _, win_id in ipairs(windows) do
     if vim.api.nvim_win_is_valid(win_id) then
       local buf = vim.api.nvim_win_get_buf(win_id)
       local ft = vim.api.nvim_buf_get_option(buf, "filetype")
-      if ft == "anya-chat" then
+      if ft == target_ft then
+        vim.api.nvim_set_current_win(win_id)
+        vim.g.anya_last_float_ft = target_ft
+        return
+      end
+    end
+  end
+end
+
+---Focus the chat window
+function M.focus_chat()
+  local current_win = vim.api.nvim_get_current_win()
+
+  local windows = vim.api.nvim_list_wins()
+  for _, win_id in ipairs(windows) do
+    if vim.api.nvim_win_is_valid(win_id) then
+      local buf = vim.api.nvim_win_get_buf(win_id)
+      local ft = vim.api.nvim_buf_get_option(buf, "filetype")
+      if ft == "anya-chat" and win_id ~= current_win then
         vim.api.nvim_set_current_win(win_id)
         vim.g.anya_last_float_ft = "anya-chat"
         return
@@ -67,12 +91,14 @@ end
 
 ---Focus the prompt window
 function M.focus_prompt()
+  local current_win = vim.api.nvim_get_current_win()
+
   local windows = vim.api.nvim_list_wins()
   for _, win_id in ipairs(windows) do
     if vim.api.nvim_win_is_valid(win_id) then
       local buf = vim.api.nvim_win_get_buf(win_id)
       local ft = vim.api.nvim_buf_get_option(buf, "filetype")
-      if ft == "anya-prompt" then
+      if ft == "anya-prompt" and win_id ~= current_win then
         vim.api.nvim_set_current_win(win_id)
         vim.g.anya_last_float_ft = "anya-prompt"
         return

@@ -201,8 +201,8 @@ vim.keymap.set("n", "<C-j>", function()
 end, { buffer = true, desc = "Focus prompt window" })
 
 vim.keymap.set("n", "<localleader><localleader>", function()
-  require("anya.float_focus").focus_prompt()
-end, { buffer = true, desc = "Focus chat window (toggle)" })
+  require("anya.float_focus").toggle_focus()
+end, { buffer = true, desc = "Toggle between chat and prompt" })
 
 -- Toggle YOLO mode
 vim.keymap.set("n", "<localleader>y", function()
