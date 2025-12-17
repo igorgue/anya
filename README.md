@@ -1,4 +1,7 @@
 # Anya
+
+> Why do programmers prefer dark mode? Because light attracts bugs!
+
 An AI-powered Neovim plugin built on the OpenAI Agents SDK.
 
 ## Features
@@ -199,3 +202,7 @@ MIT
 Why do programmers prefer dark mode?
 
 Because the light attracts bugs!
+
+Why do Java developers wear glasses?
+
+Because they don't C#!
