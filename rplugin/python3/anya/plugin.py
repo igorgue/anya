@@ -633,7 +633,7 @@ class AnyaPlugin:
 
                         if is_first:
                             pending_header = (
-                                "\n"
+                                "\n\n"
                                 + combined_header
                                 + "\n"
                                 + markers.make_marker("fold_start", status)

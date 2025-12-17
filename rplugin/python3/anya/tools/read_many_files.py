@@ -1,7 +1,7 @@
 from agents import function_tool
 
 from .utils import create_error_handler
-from .read_file import read_file
+from .read_file import read_file_impl
 
 
 @function_tool(failure_error_function=create_error_handler)
@@ -43,9 +43,9 @@ async def read_many_files(files: list[str], cwd: str = None) -> str:
         if not file_spec:
             continue
 
-        # Call the underlying read_file async function directly
+        # Call the underlying read_file implementation directly
         try:
-            content = await read_file.__wrapped__(file_spec, cwd)
+            content = read_file_impl(file_spec, cwd)
         except Exception as e:
             content = f"Error reading {file_spec}: {str(e)}"
 

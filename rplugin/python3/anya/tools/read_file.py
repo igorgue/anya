@@ -4,30 +4,11 @@ from agents import function_tool
 from .utils import create_error_handler
 
 
-@function_tool(failure_error_function=create_error_handler)
-async def read_file(path_with_range: str, cwd: str = None) -> str:
-    """Reads file content with optional line range specifications.
+def read_file_impl(path_with_range: str, cwd: str = None) -> str:
+    """Internal implementation of read_file that can be called directly.
 
-    CRITICAL - read_file tool behavior:
-    - Files with <= 300 lines: always shown in full
-    - Files with > 300 lines: only first 300 lines shown by default with "[FILE TOO LARGE]" message
-    - When you see "[FILE TOO LARGE]", use syntax like read_file("file.py@start-end") to read the full file
-    - The @start-end syntax ALWAYS works to read the entire file, regardless of size
-    - Do NOT make multiple calls to read_file with the same path without changing the range - you'll get the same truncated output
-
-    Syntax:
-        filename.py              - Read first 300 lines (default truncation)
-        filename.py @start-end   - Read entire file
-        filename.py @32-234      - Read lines 32-234
-        filename.py @start-800   - Read lines 1-800
-        filename.py @3202-end    - Read from line 3202 to end
-
-    Args:
-        path_with_range: File path with optional @start-end range specification
-        cwd: Current working directory for relative path resolution
-
-    Returns:
-        File content as string with metadata about size and range, or error message
+    This is the core logic, separated so it can be called by read_many_files
+    without going through the @function_tool decorator.
     """
     # Parse path and range specification
     path = path_with_range
@@ -57,7 +38,6 @@ async def read_file(path_with_range: str, cwd: str = None) -> str:
             # Parse end
             if end_part == "end":
                 end_line = None  # Will read to end
-                # force_full = True
             elif end_part.isdigit():
                 end_line = int(end_part)
             else:
@@ -123,8 +103,34 @@ async def read_file(path_with_range: str, cwd: str = None) -> str:
             f"Or use specific ranges: @{actual_end + 1}-{min(actual_end + 300, total_lines)} (next 300) or @{max(1, total_lines - 300)}-end (last 300)\n"
         )
 
-    info_parts.append("--- FILE CONTENT ---\n")
     info_parts.append(content)
-    info_parts.append("\n--- END FILE ---")
 
     return "".join(info_parts)
+
+
+@function_tool(failure_error_function=create_error_handler)
+async def read_file(path_with_range: str, cwd: str = None) -> str:
+    """Reads file content with optional line range specifications.
+
+    CRITICAL - read_file tool behavior:
+    - Files with <= 300 lines: always shown in full
+    - Files with > 300 lines: only first 300 lines shown by default with "[FILE TOO LARGE]" message
+    - When you see "[FILE TOO LARGE]", use syntax like read_file("file.py@start-end") to read the full file
+    - The @start-end syntax ALWAYS works to read the entire file, regardless of size
+    - Do NOT make multiple calls to read_file with the same path without changing the range - you'll get the same truncated output
+
+    Syntax:
+        filename.py              - Read first 300 lines (default truncation)
+        filename.py @start-end   - Read entire file
+        filename.py @32-234      - Read lines 32-234
+        filename.py @start-800   - Read lines 1-800
+        filename.py @3202-end    - Read from line 3202 to end
+
+    Args:
+        path_with_range: File path with optional @start-end range specification
+        cwd: Current working directory for relative path resolution
+
+    Returns:
+        File content as string with metadata about size and range, or error message
+    """
+    return read_file_impl(path_with_range, cwd)
