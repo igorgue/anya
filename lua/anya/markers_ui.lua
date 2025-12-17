@@ -186,15 +186,33 @@ function M._apply_message_info(bufnr, line_num, meta, end_line_num)
     if start_ts and end_ts then
       local duration = M._calculate_duration(start_ts, end_ts)
       if duration then
-        local end_line_idx = end_line_num - 1
-        local lines = vim.api.nvim_buf_get_lines(bufnr, end_line_idx, end_line_idx + 1, false)
-        if #lines > 0 then
-          local line_content = lines[1]
-          vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, end_line_idx, #line_content, {
-            virt_text = { { duration .. " 󰾩  ", "Comment" } },
-            virt_text_pos = "eol",
-            hl_mode = "combine",
-          })
+        -- Find the last non-marker line within the message range
+        -- (marker lines are hidden, so we need to find a visible line)
+        local all_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        local last_visible_line = end_line_num
+        for i = end_line_num, line_num, -1 do
+          if i >= 1 and i <= #all_lines then
+            local line = all_lines[i]
+            -- Skip marker lines and message markers
+            if not markers.is_marker_line(line) and not markers.is_message_marker(line) then
+              last_visible_line = i
+              break
+            end
+          end
+        end
+
+        -- Only place duration if we found a visible line
+        if last_visible_line >= line_num then
+          local end_line_idx = last_visible_line - 1
+          local lines = vim.api.nvim_buf_get_lines(bufnr, end_line_idx, end_line_idx + 1, false)
+          if #lines > 0 then
+            local line_content = lines[1]
+            vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, end_line_idx, #line_content, {
+              virt_text = { { duration .. " 󰾩  ", "Comment" } },
+              virt_text_pos = "eol",
+              hl_mode = "combine",
+            })
+          end
         end
       end
     end
@@ -254,7 +272,6 @@ function M._clear_folds(bufnr)
       vim.api.nvim_win_call(win, function()
         pcall(vim.cmd, "normal! zE")
       end)
-      break
     end
   end
 end

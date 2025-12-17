@@ -21,6 +21,7 @@ async def list_files(path: str = ".", cwd: str = None, max_results: int = 100) -
     # Expand ~ to home directory and environment variables
     path = os.path.expandvars(os.path.expanduser(path))
     if cwd is None:
+        # Use os.getcwd() which will be the daemon's CWD (updated per-request from client)
         cwd = os.getcwd()
     else:
         cwd = os.path.expandvars(os.path.expanduser(cwd))

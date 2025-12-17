@@ -20,6 +20,7 @@ async def search(query: str, cwd: str = None, max_results: int = 2000) -> str:
         Search results with line numbers, or error message
     """
     if cwd is None:
+        # Use os.getcwd() which will be the daemon's CWD (updated per-request from client)
         cwd = os.getcwd()
 
     # Expand ~ to home directory and environment variables

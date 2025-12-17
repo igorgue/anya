@@ -114,30 +114,43 @@ async def exec(
     elif yolo_mode:
         # YOLO mode: auto-allow and execute without asking
         plugin_context.allowed_commands.add(cmd_name)
-    elif not plugin_context.has_nvim:
-        # In daemon mode without YOLO, we cannot prompt the user
-        # Only allow if command is already in allowed list
-        raise Exception(
-            f"Command '{cmd_name}' requires user confirmation. "
-            "Enable YOLO mode or run with direct Neovim access to approve commands."
-        )
     else:
-        # Ask user for confirmation using vim.ui.select
-        nvim = plugin_context.nvim
-        choice = await _nvim_ui_select(
-            nvim,
-            ["Execute", "Allow for this session", "Cancel"],
-            f"Execute command?\n\n{command[:100]}",
-        )
+        # Request user confirmation
+        choice = None
+
+        if plugin_context.has_nvim:
+            # Direct Neovim access - use UI select
+            nvim = plugin_context.nvim
+            choice = await _nvim_ui_select(
+                nvim,
+                ["Execute", "Allow for this session", "Cancel"],
+                f"Execute command?\n\n{command[:100]}",
+            )
+        elif plugin_context.confirmation_callback:
+            # Daemon mode with confirmation callback
+            choice = await plugin_context.confirmation_callback(
+                f"Execute command?\n\n{command[:100]}",
+                ["Execute", "Allow for this session", "Cancel"],
+            )
+        else:
+            # No confirmation mechanism available - require YOLO mode
+            raise Exception(
+                f"Command '{cmd_name}' requires user confirmation. "
+                "Run in YOLO mode (set g:anya_yolo_mode=1) to auto-approve commands, "
+                "or use direct Neovim mode."
+            )
 
         if choice == "Allow for this session":
             # Add to allowed commands and execute
             plugin_context.allowed_commands.add(cmd_name)
-        elif choice != "Execute":
+        elif choice and choice != "Execute":
             raise Exception("Command execution cancelled by user")
+        elif not choice:
+            raise Exception("No response received from user confirmation")
 
     if cwd is None:
-        cwd = os.getcwd()
+        # Prefer context.cwd if available (from client), otherwise use os.getcwd()
+        cwd = plugin_context.cwd if plugin_context.cwd else os.getcwd()
     else:
         cwd = os.path.expandvars(os.path.expanduser(cwd))
 
@@ -174,4 +187,4 @@ async def exec(
         output_parts.append(f"Exit code: {process.returncode}")
 
     result = "\n".join(output_parts) if output_parts else "(no output)"
-    return f"n{result}\n"
+    return f"{result}\n"

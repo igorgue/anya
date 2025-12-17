@@ -110,11 +110,20 @@ def stream_text_to_buffer(nvim, bufnr, text):
     nvim.exec_lua("require('anya.text').output(...)", bufnr, text)
 
 
-def stream_text_to_buffer_sync(nvim, bufnr, text):
-    """Output text to buffer immediately without animation."""
+def stream_text_to_buffer_sync(nvim, bufnr, text, skip_process_markers=False):
+    """Output text to buffer immediately without animation.
+
+    Args:
+        nvim: Neovim instance
+        bufnr: Buffer number
+        text: Text to write
+        skip_process_markers: If True, skip processing markers (caller will do it)
+    """
     if not nvim.api.buf_is_valid(bufnr):
         return
-    nvim.exec_lua("require('anya.text').output_sync(...)", bufnr, text)
+    nvim.exec_lua(
+        "require('anya.text').output_sync(...)", bufnr, text, None, skip_process_markers
+    )
 
 
 def autoscroll(nvim, bufnr):
@@ -137,7 +146,8 @@ def ensure_blank_line_before_tool(nvim, bufnr):
     if not nvim.api.buf_is_valid(bufnr):
         return
     # Flush the streaming queue first so we can check actual buffer state
-    nvim.exec_lua("require('anya.text').flush_queue()")
+    # Don't process markers here - just need to write text to check state
+    nvim.exec_lua("require('anya.text').flush_queue(...)", False)
     # Check if last line has content
     line_count = nvim.api.buf_line_count(bufnr)
     if line_count > 0:
@@ -156,7 +166,8 @@ def update_tool_header_line(nvim, bufnr, new_header: str):
     if not nvim.api.buf_is_valid(bufnr):
         return
 
-    nvim.exec_lua("require('anya.text').flush_queue()")
+    # Flush queue without processing markers - we'll process after update
+    nvim.exec_lua("require('anya.text').flush_queue(...)", False)
 
     lines = nvim.api.buf_get_lines(bufnr, 0, -1, False)
     # Scan backwards
@@ -179,48 +190,56 @@ def flush_queue(nvim):
     nvim.exec_lua("require('anya.text').flush_queue()")
 
 
-def update_pending_markers_to_success(nvim, bufnr):
-    """Update all tool_pending markers to tool_success in the buffer.
+def update_last_tool_pending_marker(nvim, bufnr: int, new_status: str) -> bool:
+    """Update the most recent tool_pending marker line to the given status.
 
-    Also flushes queue first.
+    This only edits buffer text (no marker processing - caller should do it).
+    Returns True if a marker was updated, False otherwise.
     """
-    flush_queue(nvim)
-
     if not nvim.api.buf_is_valid(bufnr):
-        return
+        return False
 
     lines = nvim.api.buf_get_lines(bufnr, 0, -1, False)
-    pending_marker = markers.make_marker("fold_start", "tool_pending")
-    success_marker = markers.make_marker("fold_start", "tool_success")
 
-    for i, line in enumerate(lines):
-        if line == pending_marker:
-            nvim.api.buf_set_lines(bufnr, i, i + 1, False, [success_marker])
+    for i in range(len(lines) - 1, -1, -1):
+        line = lines[i]
+        if not markers.has_marker(line, markers.TOOL_PENDING):
+            continue
 
-    # Reprocess markers to update extmarks
-    process_markers(nvim, bufnr)
+        parsed = markers.parse_marker(line)
+        if not parsed:
+            continue
+
+        # Only update tool fold-start markers (avoid touching unrelated markers).
+        if markers.FOLD_START not in parsed:
+            continue
+
+        # Remove pending + any existing status, then add new status.
+        new_markers = [
+            m
+            for m in parsed
+            if m
+            not in (markers.TOOL_PENDING, markers.TOOL_SUCCESS, markers.TOOL_FAILURE)
+        ]
+        new_markers.append(new_status)
+
+        nvim.api.buf_set_lines(
+            bufnr, i, i + 1, False, [markers.make_marker(*new_markers)]
+        )
+        # NOTE: Don't call process_markers here - caller will do it once at the end
+        return True
+
+    return False
+
+
+def update_pending_markers_to_success(nvim, bufnr):
+    """Update the most recent tool_pending marker to tool_success."""
+    update_last_tool_pending_marker(nvim, bufnr, markers.TOOL_SUCCESS)
 
 
 def update_pending_markers_to_failure(nvim, bufnr):
-    """Update all tool_pending markers to tool_failure in the buffer.
-
-    Also flushes queue first.
-    """
-    flush_queue(nvim)
-
-    if not nvim.api.buf_is_valid(bufnr):
-        return
-
-    lines = nvim.api.buf_get_lines(bufnr, 0, -1, False)
-    pending_marker = markers.make_marker("fold_start", "tool_pending")
-    failure_marker = markers.make_marker("fold_start", "tool_failure")
-
-    for i, line in enumerate(lines):
-        if line == pending_marker:
-            nvim.api.buf_set_lines(bufnr, i, i + 1, False, [failure_marker])
-
-    # Reprocess markers to update extmarks
-    process_markers(nvim, bufnr)
+    """Update the most recent tool_pending marker to tool_failure."""
+    update_last_tool_pending_marker(nvim, bufnr, markers.TOOL_FAILURE)
 
 
 def render_edit_blocks(nvim, bufnr, edit_str):

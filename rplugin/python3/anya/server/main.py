@@ -116,23 +116,42 @@ class AnyaDaemon:
         await self._main_loop()
 
     async def _main_loop(self):
-        """Main request handling loop."""
+        """Main request handling loop.
+
+        ZeroMQ REP sockets require strict recv-send alternation.
+        We must send a response before we can receive the next request.
+        Handlers that need async processing (like SEND_MESSAGE) return
+        immediately and continue processing in background tasks.
+        """
         self.logger.info("Entering main loop...")
 
         while self.running:
             try:
-                # Wait for request with timeout to check shutdown
-                if self.rep_socket.poll(1000, zmq.POLLIN):
-                    message = await self.rep_socket.recv()
+                # Receive with timeout to allow checking shutdown
+                try:
+                    message = await asyncio.wait_for(
+                        self.rep_socket.recv(), timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    # No message, check shutdown flag and continue
+                    continue
+
+                # Handle request and send response immediately
+                # This is required by ZeroMQ REP socket semantics
+                try:
                     response = await self._handle_request(message)
                     await self.rep_socket.send(response.serialize())
-            except zmq.ZMQError as e:
-                if self.running:
-                    self.logger.error(f"ZMQ error: {e}")
+                except Exception as e:
+                    self.logger.exception(f"Error handling request: {e}")
+                    # Send error response to maintain REP socket state
+                    error_response = make_error_response("unknown", str(e))
+                    await self.rep_socket.send(error_response.serialize())
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self.logger.exception(f"Error in main loop: {e}")
+                await asyncio.sleep(0.1)
 
         self.logger.info("Main loop exited")
 

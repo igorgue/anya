@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable, Awaitable
 
 
 @dataclass
@@ -19,6 +19,8 @@ class NvimPluginContext:
     cwd: str = ""
     current_buffer: str = ""
     open_buffers: list[dict] = field(default_factory=list)
+    # Confirmation callback for requesting user confirmation in daemon mode
+    confirmation_callback: Callable[[str, list[str]], Awaitable[str]] | None = None
 
     @property
     def has_nvim(self) -> bool:

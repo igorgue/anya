@@ -19,6 +19,7 @@ from . import daemon as daemon_mgmt
 from .client import AnyaClient, StreamSubscriber
 from .protocol import (
     NvimContext,
+    RequestType,
     StreamEventType,
 )
 
@@ -51,6 +52,8 @@ class AnyaPlugin:
 
         # Daemon client
         self._client = AnyaClient()
+        # Separate client for confirmations (to avoid blocking on main request socket)
+        self._confirmation_client = AnyaClient()
         self._daemon_check_done = False
 
         # Start daemon check in background on plugin load
@@ -464,15 +467,17 @@ class AnyaPlugin:
             )
 
             # Process streaming events
+            # Note: We don't check send_task.done() anymore because the daemon
+            # returns immediately after starting the background task. We rely on
+            # MESSAGE_END event to know when streaming is complete.
             while True:
                 if self._request_cancelled:
                     raise asyncio.CancelledError()
 
                 chunk = await subscriber.receive(timeout=1.0)
                 if chunk is None:
-                    # Check if send task completed
-                    if send_task.done():
-                        break
+                    # Timeout - continue waiting for events
+                    # Don't break on send_task.done() since daemon returns immediately
                     continue
 
                 self._streaming_started = True
@@ -565,7 +570,7 @@ class AnyaPlugin:
                             collected_content.append(pending_header)
                             if not self._request_cancelled:
                                 self.nvim.async_call(
-                                    ui.stream_text_to_buffer,
+                                    ui.stream_text_to_buffer_sync,
                                     self.nvim,
                                     chat_bufnr,
                                     pending_header,
@@ -588,7 +593,8 @@ class AnyaPlugin:
                     skip_output = chunk.data.get("skip_output", False)
                     unclosed = chunk.data.get("unclosed", False)
 
-                    # Update markers
+                    # Update markers (don't process yet - wait until fold_end is written)
+                    # Note: These markers are already written by fold_start, just update them
                     if (
                         not self._request_cancelled
                         and not is_edit_tool
@@ -607,7 +613,7 @@ class AnyaPlugin:
                                 chat_bufnr,
                             )
 
-                    # Output tool result
+                    # Output tool result (skip marker processing - do it once at end)
                     if not is_edit_tool and not skip_output and output:
                         wrapped_output = f"``````\n{output}\n``````"
                         collected_content.append(wrapped_output)
@@ -617,20 +623,27 @@ class AnyaPlugin:
                                 self.nvim,
                                 chat_bufnr,
                                 wrapped_output,
+                                True,  # skip_process_markers
                             )
 
-                    # Close fold
-                    if not is_edit_tool and not skip_output:
+                    # Close fold (skip marker processing - do it once at end)
+                    # Write fold_end even if skip_output=True to ensure folds are closed
+                    if not is_edit_tool:
                         fold_end_marker = "\n" + markers.make_marker("fold_end") + "\n"
                         collected_content.append(fold_end_marker)
                         if not self._request_cancelled:
                             self.nvim.async_call(
-                                ui.stream_text_to_buffer,
+                                ui.stream_text_to_buffer_sync,
                                 self.nvim,
                                 chat_bufnr,
                                 fold_end_marker,
+                                True,  # skip_process_markers
                             )
                             self.nvim.async_call(self._set_tool_fold_open, False)
+                            # Process markers ONCE after everything is written
+                            self.nvim.async_call(
+                                ui.process_markers, self.nvim, chat_bufnr
+                            )
 
                     # Emit completion events
                     for tool in tools:
@@ -651,6 +664,132 @@ class AnyaPlugin:
                     status = chunk.data.get("status", "success")
                     break
 
+                elif chunk.event_type == StreamEventType.TOOL_CONFIRMATION_REQUEST:
+                    confirmation_id = chunk.data.get("confirmation_id")
+                    prompt = chunk.data.get("prompt", "")
+                    options = chunk.data.get("options", ["Yes", "No"])
+
+                    # Log that we received the confirmation request
+                    self.nvim.async_call(
+                        self.nvim.out_write,
+                        f"Anya: Received confirmation request: {prompt[:50]}...\n",
+                    )
+
+                    # Show confirmation dialog and send response
+                    async def handle_confirmation():
+                        # Format options for Lua table
+                        lua_options = (
+                            "{" + ", ".join(f'"{opt}"' for opt in options) + "}"
+                        )
+                        lua_prompt = prompt.replace('"', '\\"').replace("\n", "\\n")
+
+                        def run_select():
+                            self.nvim.exec_lua(
+                                f"""
+vim.g.anya_confirmation_result = nil
+vim.ui.select({lua_options},
+    {{prompt = "{lua_prompt}"}},
+    function(selection)
+        vim.g.anya_confirmation_result = selection or "Cancel"
+    end)
+"""
+                            )
+
+                        # Schedule the select UI to run on Neovim thread
+                        self.nvim.async_call(run_select)
+
+                        # Wait a bit for UI to appear
+                        await asyncio.sleep(0.2)
+
+                        # Poll for result (same pattern as exec.py)
+                        start_time = asyncio.get_event_loop().time()
+                        while asyncio.get_event_loop().time() - start_time < 300.0:
+                            result = [None]
+
+                            def get_result():
+                                try:
+                                    val = self.nvim.eval(
+                                        "get(g:, 'anya_confirmation_result', v:null)"
+                                    )
+                                    # Handle v:null - it might be returned as None or as a string
+                                    if (
+                                        val is not None
+                                        and val != "v:null"
+                                        and val != "null"
+                                    ):
+                                        result[0] = val
+                                except Exception:
+                                    pass
+
+                            self.nvim.async_call(get_result)
+                            await asyncio.sleep(0.1)  # Give async_call time to execute
+
+                            if result[0] is not None:
+                                choice = str(result[0])
+                                # Send confirmation response to daemon
+                                self.nvim.async_call(
+                                    self.nvim.out_write,
+                                    f"Anya: Sending confirmation response: {choice}\n",
+                                )
+                                try:
+                                    # Send confirmation response to daemon
+                                    import functools
+
+                                    loop = asyncio.get_event_loop()
+                                    response = await loop.run_in_executor(
+                                        None,
+                                        functools.partial(
+                                            self._confirmation_client.send_request,
+                                            RequestType.TOOL_CONFIRMATION_RESPONSE,
+                                            self.session_id,
+                                            confirmation_id,
+                                            {
+                                                "confirmation_id": confirmation_id,
+                                                "choice": choice,
+                                            },
+                                            5.0,
+                                        ),
+                                    )
+                                    self.nvim.async_call(
+                                        self.nvim.out_write,
+                                        f"Anya: Confirmation choice sent: {choice}\n",
+                                    )
+                                except Exception as e:
+                                    self.nvim.async_call(
+                                        self.nvim.err_write,
+                                        f"Anya: Exception sending confirmation: {e}\n",
+                                    )
+                                return
+
+                        # Timeout - send Cancel
+                        self.nvim.async_call(
+                            self.nvim.out_write,
+                            "Anya: Confirmation timed out, sending Cancel\n",
+                        )
+                        try:
+                            import functools
+
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(
+                                None,
+                                functools.partial(
+                                    self._confirmation_client.send_request,
+                                    RequestType.TOOL_CONFIRMATION_RESPONSE,
+                                    self.session_id,
+                                    confirmation_id,
+                                    {
+                                        "confirmation_id": confirmation_id,
+                                        "choice": "Cancel",
+                                    },
+                                    5.0,
+                                ),
+                            )
+                        except Exception:
+                            pass  # Silent fail on timeout
+
+                    # Handle confirmation in background task
+                    asyncio.create_task(handle_confirmation())
+
                 elif chunk.event_type == StreamEventType.ERROR:
                     error = chunk.data.get("error", "Unknown error")
                     self.nvim.async_call(
@@ -661,8 +800,11 @@ class AnyaPlugin:
                     )
                     break
 
-            # Wait for send task to complete
-            await send_task
+            # Wait for send task to complete (should be immediate now)
+            try:
+                await send_task
+            except Exception as e:
+                self.nvim.err_write(f"Anya: Error sending request: {e}\n")
 
             # Ensure thinking is closed
             if thinking_started and not thinking_finalized:

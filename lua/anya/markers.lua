@@ -62,6 +62,23 @@ function M.is_marker_line(line)
   return line:match(M.TOOLS_PATTERN) ~= nil
 end
 
+--- Check if a line contains a specific marker
+--- @param line string The line to check
+--- @param marker_name string The marker name to look for (e.g., "tool_pending")
+--- @return boolean True if the line is a marker line containing the specified marker
+function M.has_marker(line, marker_name)
+  local parsed = M.parse_marker(line)
+  if not parsed then
+    return false
+  end
+  for _, m in ipairs(parsed) do
+    if m == marker_name then
+      return true
+    end
+  end
+  return false
+end
+
 --- Check if a line is a message marker line
 --- @param line string The line to check
 --- @return boolean True if the line is a message marker line

@@ -18,6 +18,7 @@ class RequestType(Enum):
     END_SESSION = "end_session"
     SHUTDOWN = "shutdown"
     PING = "ping"
+    TOOL_CONFIRMATION_RESPONSE = "tool_confirmation_response"
 
 
 class ResponseType(Enum):
@@ -44,6 +45,7 @@ class StreamEventType(Enum):
     MESSAGE_START = "message_start"
     MESSAGE_END = "message_end"
     ERROR = "error"
+    TOOL_CONFIRMATION_REQUEST = "tool_confirmation_request"
 
 
 @dataclass

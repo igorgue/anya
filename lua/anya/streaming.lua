@@ -53,8 +53,8 @@ end
 function M.output(bufnr, text, marker_list)
   local final_text = text
 
-  -- Inject markers if requested
-  if marker_list and #marker_list > 0 then
+  -- Inject markers if requested (check type because Python None becomes userdata)
+  if type(marker_list) == "table" and #marker_list > 0 then
     final_text = markers_ui._inject_markers(text, marker_list)
   end
 
@@ -134,8 +134,8 @@ function M._ensure_timer_running()
 
     -- Remove item if all text written
     if item.text == "" then
-      -- Process markers and create folds from buffer content
-      markers_ui._process_markers(item.bufnr)
+      -- NOTE: Don't process markers here - let callers do it explicitly
+      -- to avoid duplicate processing during tool calls
       table.remove(_G.anya_stream_queue, 1)
     end
   end
@@ -151,7 +151,8 @@ end
 -- @param bufnr number: Buffer number to write to
 -- @param text string: Text to output (can contain newlines and marker lines)
 -- @param marker_list string[]|nil: List of markers to inject (e.g., {"fold", "tool_success"})
-function M.output_sync(bufnr, text, marker_list)
+-- @param skip_process_markers boolean|nil: If true, skip processing markers (caller will do it)
+function M.output_sync(bufnr, text, marker_list, skip_process_markers)
   -- Validate buffer
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
@@ -159,16 +160,18 @@ function M.output_sync(bufnr, text, marker_list)
 
   local final_text = text
 
-  -- Inject markers if requested
-  if marker_list and #marker_list > 0 then
+  -- Inject markers if requested (check type because Python None becomes userdata)
+  if type(marker_list) == "table" and #marker_list > 0 then
     final_text = markers_ui._inject_markers(text, marker_list)
   end
 
   -- Write all text at once
   M._append_to_buffer(bufnr, final_text)
 
-  -- Process markers and create folds
-  markers_ui._process_markers(bufnr)
+  -- Process markers and create folds (unless caller will do it)
+  if not skip_process_markers then
+    markers_ui._process_markers(bufnr)
+  end
 
   -- Autoscroll to bottom
   M._autoscroll_to_bottom(bufnr)
@@ -211,7 +214,16 @@ end
 
 -- Flush the streaming queue by writing all remaining text immediately
 -- Used when cancelling to finish streaming animation without waiting
-function M.flush_queue()
+-- @param process_markers_after boolean|nil: If true, process markers after flushing (default: true)
+function M.flush_queue(process_markers_after)
+  -- Default to processing markers after flush
+  if process_markers_after == nil then
+    process_markers_after = true
+  end
+
+  -- Track which buffers we flushed to
+  local flushed_buffers = {}
+
   -- Process all remaining items in the queue
   while #_G.anya_stream_queue > 0 do
     local item = _G.anya_stream_queue[1]
@@ -224,8 +236,7 @@ function M.flush_queue()
         M._autoscroll_to_bottom(item.bufnr)
       end
 
-      -- Process markers
-      markers_ui._process_markers(item.bufnr)
+      flushed_buffers[item.bufnr] = true
     end
 
     table.remove(_G.anya_stream_queue, 1)
@@ -235,6 +246,13 @@ function M.flush_queue()
   if _G.anya_stream_timer then
     _G.anya_stream_timer:stop()
     _G.anya_stream_timer = nil
+  end
+
+  -- Process markers once per buffer if requested
+  if process_markers_after then
+    for bufnr, _ in pairs(flushed_buffers) do
+      markers_ui._process_markers(bufnr)
+    end
   end
 end
 

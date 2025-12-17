@@ -34,6 +34,43 @@ def make_message_marker(msg_id: str) -> str:
     return f"{MESSAGE_PREFIX} {msg_id} {MESSAGE_SUFFIX}"
 
 
+def parse_marker(line: str) -> list[str] | None:
+    """Parse a marker line and return the list of marker names.
+
+    Args:
+        line: The line to parse (e.g., "<!-- at: fold_start, tool_pending -->")
+
+    Returns:
+        List of marker names, or None if not a marker line
+    """
+    line = line.strip()
+    if not line.startswith(PREFIX) or not line.endswith(SUFFIX):
+        return None
+
+    # Extract content between PREFIX and SUFFIX
+    content = line[len(PREFIX) : -len(SUFFIX)].strip()
+    if not content:
+        return None
+
+    # Split by comma and strip whitespace
+    markers = [m.strip() for m in content.split(",") if m.strip()]
+    return markers if markers else None
+
+
+def has_marker(line: str, marker_name: str) -> bool:
+    """Check if a line contains a specific marker.
+
+    Args:
+        line: The line to check
+        marker_name: The marker name to look for (e.g., "tool_pending")
+
+    Returns:
+        True if the line is a marker line containing the specified marker
+    """
+    parsed = parse_marker(line)
+    return parsed is not None and marker_name in parsed
+
+
 def with_markers(text: str, marker_list: list[str]) -> str:
     """Inject markers into text.
 
