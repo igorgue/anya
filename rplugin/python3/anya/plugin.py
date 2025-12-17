@@ -521,6 +521,7 @@ class AnyaPlugin:
         thinking_started = False
         thinking_finalized = False
         tool_was_called = False
+        tool_fold_opened = False  # Track if a tool fold was opened (needs closing)
         needs_blank_before_text = False
 
         try:
@@ -639,6 +640,7 @@ class AnyaPlugin:
                                 + "\n"
                             )
                             collected_content.append(pending_header)
+                            tool_fold_opened = True  # Track that we opened a fold
                             if not self._request_cancelled:
                                 self.nvim.async_call(
                                     ui.stream_text_to_buffer_sync,
@@ -698,10 +700,11 @@ class AnyaPlugin:
                             )
 
                     # Close fold (skip marker processing - do it once at end)
-                    # Write fold_end even if skip_output=True to ensure folds are closed
-                    if not is_edit_tool:
+                    # Write fold_end if a fold was opened (tracked by tool_fold_opened)
+                    if tool_fold_opened:
                         fold_end_marker = "\n" + markers.make_marker("fold_end") + "\n"
                         collected_content.append(fold_end_marker)
+                        tool_fold_opened = False  # Reset fold tracking
                         if not self._request_cancelled:
                             self.nvim.async_call(
                                 ui.stream_text_to_buffer_sync,
@@ -747,12 +750,17 @@ class AnyaPlugin:
                     )
 
                     # Show confirmation dialog and send response
-                    async def handle_confirmation():
+                    # Use default args to capture values by value, not reference
+                    async def handle_confirmation(
+                        _confirmation_id=confirmation_id,
+                        _prompt=prompt,
+                        _options=options,
+                    ):
                         # Format options for Lua table
                         lua_options = (
-                            "{" + ", ".join(f'"{opt}"' for opt in options) + "}"
+                            "{" + ", ".join(f'"{opt}"' for opt in _options) + "}"
                         )
-                        lua_prompt = prompt.replace('"', '\\"').replace("\n", "\\n")
+                        lua_prompt = _prompt.replace('"', '\\"').replace("\n", "\\n")
 
                         def run_select():
                             self.nvim.exec_lua(
@@ -813,9 +821,9 @@ vim.ui.select({lua_options},
                                             self._confirmation_client.send_request,
                                             RequestType.TOOL_CONFIRMATION_RESPONSE,
                                             self.session_id,
-                                            confirmation_id,
+                                            _confirmation_id,
                                             {
-                                                "confirmation_id": confirmation_id,
+                                                "confirmation_id": _confirmation_id,
                                                 "choice": choice,
                                             },
                                             5.0,
@@ -847,9 +855,9 @@ vim.ui.select({lua_options},
                                     self._confirmation_client.send_request,
                                     RequestType.TOOL_CONFIRMATION_RESPONSE,
                                     self.session_id,
-                                    confirmation_id,
+                                    _confirmation_id,
                                     {
-                                        "confirmation_id": confirmation_id,
+                                        "confirmation_id": _confirmation_id,
                                         "choice": "Cancel",
                                     },
                                     5.0,
@@ -867,18 +875,24 @@ vim.ui.select({lua_options},
                     edit_yolo_mode = chunk.data.get("yolo_mode", False)
 
                     # Handle edit confirmation in background task
-                    async def handle_edit_confirmation():
+                    # Use default args to capture values by value, not reference
+                    async def handle_edit_confirmation(
+                        _confirmation_id=confirmation_id,
+                        _edit_blocks=edit_blocks,
+                        _edit_yolo_mode=edit_yolo_mode,
+                        _chat_bufnr=chat_bufnr,
+                    ):
                         import functools
                         import json
 
-                        edit_id = confirmation_id[:8]  # Use confirmation_id as edit_id
+                        edit_id = _confirmation_id[:8]  # Use confirmation_id as edit_id
 
                         # Render edit blocks and setup callback
                         def render_and_setup():
                             try:
                                 # Render edit blocks
                                 self.nvim.call(
-                                    "AnyaRenderEditBlocks", chat_bufnr, edit_blocks
+                                    "AnyaRenderEditBlocks", _chat_bufnr, _edit_blocks
                                 )
 
                                 # Setup callback for when user makes decision
@@ -903,7 +917,7 @@ vim.ui.select({lua_options},
                         await asyncio.sleep(0.2)  # Give time to render
 
                         # If YOLO mode, auto-apply
-                        if edit_yolo_mode:
+                        if _edit_yolo_mode:
 
                             def auto_apply():
                                 try:
@@ -965,9 +979,9 @@ vim.ui.select({lua_options},
                                             self._confirmation_client.send_request,
                                             RequestType.TOOL_CONFIRMATION_RESPONSE,
                                             self.session_id,
-                                            confirmation_id,
+                                            _confirmation_id,
                                             {
-                                                "confirmation_id": confirmation_id,
+                                                "confirmation_id": _confirmation_id,
                                                 "choice": json.dumps(result[0]),
                                             },
                                             5.0,
@@ -989,9 +1003,9 @@ vim.ui.select({lua_options},
                                     self._confirmation_client.send_request,
                                     RequestType.TOOL_CONFIRMATION_RESPONSE,
                                     self.session_id,
-                                    confirmation_id,
+                                    _confirmation_id,
                                     {
-                                        "confirmation_id": confirmation_id,
+                                        "confirmation_id": _confirmation_id,
                                         "choice": json.dumps(
                                             {
                                                 "action": "timeout",
@@ -1007,6 +1021,88 @@ vim.ui.select({lua_options},
                             pass
 
                     asyncio.create_task(handle_edit_confirmation())
+
+                elif chunk.event_type == StreamEventType.EXEC_REQUEST:
+                    # Handle exec request - execute command locally on user's machine
+                    confirmation_id = chunk.data.get("confirmation_id")
+                    exec_command = chunk.data.get("command", "")
+                    exec_cwd = chunk.data.get("cwd", "")
+                    exec_timeout = chunk.data.get("timeout", 30)
+
+                    # Use default args to capture values by value, not reference
+                    async def handle_exec_request(
+                        _confirmation_id=confirmation_id,
+                        _exec_command=exec_command,
+                        _exec_cwd=exec_cwd,
+                        _exec_timeout=exec_timeout,
+                    ):
+                        import functools
+                        import json
+                        import subprocess
+
+                        try:
+                            # Use the cwd from the request, or fall back to current
+                            cwd = _exec_cwd or self.nvim.call("getcwd")
+
+                            # Execute command locally
+                            process = subprocess.Popen(
+                                _exec_command,
+                                shell=True,
+                                cwd=cwd,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                            )
+
+                            try:
+                                stdout, stderr = process.communicate(
+                                    timeout=_exec_timeout
+                                )
+                                result = {
+                                    "stdout": stdout,
+                                    "stderr": stderr,
+                                    "returncode": process.returncode,
+                                }
+                            except subprocess.TimeoutExpired:
+                                process.kill()
+                                result = {
+                                    "stdout": "",
+                                    "stderr": "",
+                                    "returncode": -1,
+                                    "error": f"Command timed out after {_exec_timeout} seconds",
+                                }
+                        except Exception as e:
+                            result = {
+                                "stdout": "",
+                                "stderr": "",
+                                "returncode": -1,
+                                "error": str(e),
+                            }
+
+                        # Send result back to daemon
+                        try:
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(
+                                None,
+                                functools.partial(
+                                    self._confirmation_client.send_request,
+                                    RequestType.TOOL_CONFIRMATION_RESPONSE,
+                                    self.session_id,
+                                    _confirmation_id,
+                                    {
+                                        "confirmation_id": _confirmation_id,
+                                        "choice": json.dumps(result),
+                                    },
+                                    5.0,
+                                ),
+                            )
+                        except Exception as e:
+                            self.nvim.async_call(
+                                self.nvim.err_write,
+                                f"Anya: Error sending exec response: {e}\n",
+                            )
+
+                    asyncio.create_task(handle_exec_request())
 
                 elif chunk.event_type == StreamEventType.ERROR:
                     error = chunk.data.get("error", "Unknown error")
@@ -1036,7 +1132,7 @@ vim.ui.select({lua_options},
                 )
 
             # Close any open tool folds
-            if tool_was_called:
+            if tool_fold_opened:
                 fold_end_marker = "\n" + markers.make_marker("fold_end")
                 collected_content.append(fold_end_marker)
                 self.nvim.async_call(
@@ -1083,7 +1179,7 @@ vim.ui.select({lua_options},
                 + f"{int(now.microsecond / 1000):03d}Z"
             )
 
-            if tool_was_called:
+            if tool_fold_opened:
                 fold_end_marker = "\n" + markers.make_marker("fold_end")
                 collected_content.append(fold_end_marker)
                 self.nvim.async_call(

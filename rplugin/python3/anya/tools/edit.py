@@ -147,25 +147,53 @@ async def edit(
     # Check YOLO mode from context
     yolo_mode = plugin_context.yolo_mode
 
-    # Daemon mode - use edit_confirmation_callback
-    if plugin_context.edit_confirmation_callback:
-        result = await plugin_context.edit_confirmation_callback(
-            edit_blocks,
-            yolo_mode,
-        )
-        return _format_edit_result(result)
+    # Parse into individual blocks and process ONE AT A TIME
+    # This ensures each edit is confirmed before the next one is shown
+    from ..search_replace import parse_search_replace_blocks
 
-    # Direct Neovim mode - use UI directly
-    if plugin_context.has_nvim:
-        nvim = plugin_context.nvim
-        result = await _handle_edit_with_nvim(nvim, edit_blocks, yolo_mode)
-        return _format_edit_result(result)
+    parsed_blocks = parse_search_replace_blocks(edit_blocks)
 
-    # No way to handle edits
-    raise Exception(
-        "edit tool requires either direct Neovim access or daemon mode with "
-        "edit_confirmation_callback. Neither is available."
-    )
+    if not parsed_blocks:
+        return "EDIT_FAILED: No valid SEARCH/REPLACE blocks found in the input."
+
+    results = []
+    for block in parsed_blocks:
+        # Format single block for confirmation
+        single_block = block.raw_block
+        if not single_block.endswith("\n"):
+            single_block += "\n"
+
+        # Daemon mode - use edit_confirmation_callback
+        if plugin_context.edit_confirmation_callback:
+            result = await plugin_context.edit_confirmation_callback(
+                single_block,
+                yolo_mode,
+            )
+            results.append(result)
+            # If user rejected or edit failed, stop processing
+            if result.get("action") != "apply" or not result.get("success", False):
+                break
+        # Direct Neovim mode - use UI directly
+        elif plugin_context.has_nvim:
+            nvim = plugin_context.nvim
+            result = await _handle_edit_with_nvim(nvim, single_block, yolo_mode)
+            results.append(result)
+            # If user rejected or edit failed, stop processing
+            if result.get("action") != "apply" or not result.get("success", False):
+                break
+        else:
+            # No way to handle edits
+            raise Exception(
+                "edit tool requires either direct Neovim access or daemon mode with "
+                "edit_confirmation_callback. Neither is available."
+            )
+
+    # Combine results
+    if not results:
+        return "EDIT_FAILED: No edits were processed."
+
+    # Return the last result (which determines overall success/failure)
+    return _format_edit_result(results[-1])
 
 
 def _format_edit_result(result: dict) -> str:

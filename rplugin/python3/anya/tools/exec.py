@@ -154,7 +154,25 @@ async def exec(
     else:
         cwd = os.path.expandvars(os.path.expanduser(cwd))
 
-    # Use Popen to get full control over stdout/stderr
+    # Daemon mode with exec callback - delegate to plugin for execution on user's machine
+    if plugin_context.exec_callback:
+        result = await plugin_context.exec_callback(command, cwd, timeout)
+
+        if result.get("error"):
+            raise Exception(result["error"])
+
+        stdout = result.get("stdout", "")
+        stderr = result.get("stderr", "")
+        returncode = result.get("returncode", 0)
+
+        return _format_exec_output(stdout, stderr, returncode)
+
+    # Direct execution (local or direct Neovim mode)
+    return _execute_command_locally(command, cwd, timeout)
+
+
+def _execute_command_locally(command: str, cwd: str, timeout: int) -> str:
+    """Execute a command locally using subprocess."""
     process = subprocess.Popen(
         command,
         shell=True,
@@ -170,7 +188,11 @@ async def exec(
         process.kill()
         raise Exception(f"Command timed out after {timeout} seconds")
 
-    # Build output with both stdout and stderr
+    return _format_exec_output(stdout, stderr, process.returncode)
+
+
+def _format_exec_output(stdout: str, stderr: str, returncode: int) -> str:
+    """Format exec output with stdout, stderr, and exit code."""
     output_parts = []
 
     if stdout:
@@ -181,10 +203,10 @@ async def exec(
             output_parts.append("")  # Add blank line separator
         output_parts.append(f"STDERR:\n{stderr}")
 
-    if process.returncode != 0:
+    if returncode != 0:
         if output_parts:
             output_parts.append("")
-        output_parts.append(f"Exit code: {process.returncode}")
+        output_parts.append(f"Exit code: {returncode}")
 
     result = "\n".join(output_parts) if output_parts else "(no output)"
     return f"{result}\n"

@@ -26,6 +26,9 @@ class NvimPluginContext:
     edit_confirmation_callback: (
         Callable[[str, bool], Awaitable[dict[str, Any]]] | None
     ) = None
+    # Exec callback for running commands on the client machine in daemon mode
+    # Takes (command: str, cwd: str, timeout: int) and returns dict with stdout/stderr/returncode
+    exec_callback: Callable[[str, str, int], Awaitable[dict[str, Any]]] | None = None
 
     @property
     def has_nvim(self) -> bool:

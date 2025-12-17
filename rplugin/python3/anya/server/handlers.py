@@ -52,6 +52,8 @@ class RequestHandler:
         self.confirmation_responses: dict[str, asyncio.Future] = {}
         # Store responses that arrive before the future is created
         self.pending_confirmation_responses: dict[str, str] = {}
+        # Lock to serialize edit confirmations - only one edit at a time
+        self._edit_lock = asyncio.Lock()
 
     async def handle(self, request: Request) -> Response:
         """Handle an incoming request."""
@@ -290,51 +292,114 @@ class RequestHandler:
             Sends edit blocks to the plugin which renders them in the UI,
             waits for user to press 1 (apply) or 2 (reject), applies the
             edit if approved, and returns the result.
+
+            Uses a lock to ensure only one edit is shown to the user at a time.
+            This prevents multiple edit UIs from appearing simultaneously.
+            """
+            # Acquire lock BEFORE sending anything to client
+            # This ensures only one edit confirmation is active at a time
+            async with self._edit_lock:
+                confirmation_id = str(uuid.uuid4())
+
+                # Send edit confirmation request to plugin
+                await self._send_stream_chunk(
+                    session_id,
+                    request_id,
+                    StreamEventType.EDIT_CONFIRMATION_REQUEST,
+                    {
+                        "confirmation_id": confirmation_id,
+                        "edit_blocks": edit_blocks,
+                        "yolo_mode": yolo_mode,
+                    },
+                )
+
+                # Wait for user response
+                try:
+                    result = await self.wait_for_confirmation(
+                        confirmation_id, timeout=300.0
+                    )
+                    # Result should be a JSON string with action/success/message
+                    # The plugin will have already applied/rejected the edit
+                    if isinstance(result, dict):
+                        return result
+                    elif isinstance(result, str):
+                        # Parse JSON if it's a string
+                        import json
+
+                        try:
+                            return json.loads(result)
+                        except json.JSONDecodeError:
+                            # Treat as action name
+                            return {
+                                "action": result,
+                                "success": result == "apply",
+                                "message": "",
+                            }
+                    return {
+                        "action": "timeout",
+                        "success": False,
+                        "message": "Invalid response",
+                    }
+                except Exception as e:
+                    self.logger.error(f"Error waiting for edit confirmation: {e}")
+                    return {"action": "failed", "success": False, "message": str(e)}
+
+        async def exec_callback(command: str, cwd: str, timeout: int) -> dict:
+            """Request command execution on the plugin (user's machine).
+
+            Sends the command to the plugin which executes it locally and
+            returns the result. This ensures commands run on the user's
+            machine even if the daemon is running remotely.
             """
             confirmation_id = str(uuid.uuid4())
 
-            # Send edit confirmation request to plugin
+            # Send exec request to plugin
             await self._send_stream_chunk(
                 session_id,
                 request_id,
-                StreamEventType.EDIT_CONFIRMATION_REQUEST,
+                StreamEventType.EXEC_REQUEST,
                 {
                     "confirmation_id": confirmation_id,
-                    "edit_blocks": edit_blocks,
-                    "yolo_mode": yolo_mode,
+                    "command": command,
+                    "cwd": cwd,
+                    "timeout": timeout,
                 },
             )
 
-            # Wait for user response
+            # Wait for execution result (timeout + buffer for network latency)
             try:
                 result = await self.wait_for_confirmation(
-                    confirmation_id, timeout=300.0
+                    confirmation_id, timeout=timeout + 30.0
                 )
-                # Result should be a JSON string with action/success/message
-                # The plugin will have already applied/rejected the edit
+                # Result should be a JSON string with stdout/stderr/returncode
                 if isinstance(result, dict):
                     return result
                 elif isinstance(result, str):
-                    # Parse JSON if it's a string
                     import json
 
                     try:
                         return json.loads(result)
                     except json.JSONDecodeError:
-                        # Treat as action name
                         return {
-                            "action": result,
-                            "success": result == "apply",
-                            "message": "",
+                            "stdout": "",
+                            "stderr": "",
+                            "returncode": 1,
+                            "error": f"Invalid response: {result}",
                         }
                 return {
-                    "action": "timeout",
-                    "success": False,
-                    "message": "Invalid response",
+                    "stdout": "",
+                    "stderr": "",
+                    "returncode": 1,
+                    "error": "Invalid response type",
                 }
             except Exception as e:
-                self.logger.error(f"Error waiting for edit confirmation: {e}")
-                return {"action": "failed", "success": False, "message": str(e)}
+                self.logger.error(f"Error waiting for exec result: {e}")
+                return {
+                    "stdout": "",
+                    "stderr": "",
+                    "returncode": 1,
+                    "error": str(e),
+                }
 
         context = NvimPluginContext(
             nvim=None,  # No nvim in daemon
@@ -343,6 +408,7 @@ class RequestHandler:
             yolo_mode=nvim_context.yolo_mode,
             confirmation_callback=confirmation_callback,
             edit_confirmation_callback=edit_confirmation_callback,
+            exec_callback=exec_callback,
             cwd=nvim_context.cwd,
             current_buffer=nvim_context.current_buffer,
             open_buffers=nvim_context.open_buffers,
