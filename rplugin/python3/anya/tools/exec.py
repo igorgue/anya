@@ -190,18 +190,22 @@ def _format_exec_output(stdout: str, stderr: str, returncode: int) -> str:
     """Format exec output with stdout, stderr, and exit code."""
     output_parts = []
 
-    if stdout:
-        output_parts.append(f"STDOUT:\n{stdout}")
-
-    if stderr:
-        if output_parts:
-            output_parts.append("")  # Add blank line separator
-        output_parts.append(f"STDERR:\n{stderr}")
-
-    if returncode != 0:
-        if output_parts:
-            output_parts.append("")
-        output_parts.append(f"Exit code: {returncode}")
+    if returncode == 0:
+        # Command succeeded
+        if stdout:
+            output_parts.append(stdout.rstrip())
+        if not output_parts:
+            output_parts.append("(command completed successfully)")
+        # Don't show stderr for successful commands - it's usually just warnings
+    else:
+        # Command failed - show everything
+        if stdout:
+            output_parts.append(f"STDOUT:\n{stdout}")
+        if stderr:
+            if output_parts:
+                output_parts.append("")
+            output_parts.append(f"STDERR:\n{stderr}")
+        output_parts.append(f"\nExit code: {returncode}")
 
     result = "\n".join(output_parts) if output_parts else "(no output)"
     return f"{result}\n"
