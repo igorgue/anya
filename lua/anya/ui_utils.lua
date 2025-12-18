@@ -130,11 +130,11 @@ function M.get_winbar()
   -- %#Group#text%* applies highlight group
   local yolo_text
   if is_yolo_on then
-    -- When ON: "YOLO: " (default) + "on" (OkMsg highlight)
-    yolo_text = "YOLO: %#OkMsg#on%*"
+    -- When ON: "yolo" with Type highlight
+    yolo_text = "%#Type#yolo%*"
   else
-    -- When OFF: "YOLO: " + "off" (both use AnyaWinBar/default)
-    yolo_text = "YOLO: off"
+    -- When OFF: "yolo" with Comment highlight
+    yolo_text = "%#Comment#yolo%*"
   end
 
   -- Make the entire YOLO section clickable
