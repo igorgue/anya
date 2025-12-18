@@ -6,6 +6,7 @@ from .gh import gh
 from .list_files import list_files
 from .read_file import read_file
 from .read_many_files import read_many_files
+from .replace_file import replace_file
 from .search_code import search_code
 from .parrot import parrot
 from .buffer_name import buffer_name
@@ -19,6 +20,7 @@ _ = (
     list_files,
     read_file,
     read_many_files,
+    replace_file,
     search_code,
     parrot,
     buffer_name,
@@ -34,6 +36,7 @@ __all__ = [
     "list_files",
     "read_file",
     "read_many_files",
+    "replace_file",
     "search",
     "parrot",
     "buffer_name",

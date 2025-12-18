@@ -1,88 +1,287 @@
 # AGENTS.md
 
-This file provides guidance to an agent when working with code in this repository.
+This document explains the design, usage, and contribution workflow for the Anya agent system—a Neovim AI assistant that persists conversations and interacts contextually with your code editor.
 
-## Project Overview
+---
 
-Anya is a Neovim plugin that integrates OpenAI's Agents SDK, providing an AI assistant with conversation persistence and context awareness. It's a Python remote plugin that communicates with Neovim via pynvim.
+## Table of Contents
 
-Named after Anya Forger from Spy x Family - she can read minds, this plugin reads your code.
+1. [Overview](#overview)
+2. [Architecture](#architecture)
+   - [Daemon Architecture](#daemon-architecture)
+   - [Component Breakdown](#component-breakdown)
+   - [Process & Data Flow](#process--data-flow)
+3. [File & Directory Structure](#file--directory-structure)
+4. [Commands & Keymaps](#commands--keymaps)
+5. [Editing & Streaming System](#editing--streaming-system)
+6. [Database and Persistence](#database-and-persistence)
+7. [Extending Anya (Agents & Tools)](#extending-anya-agents--tools)
+8. [Environment & Dependencies](#environment--dependencies)
+9. [Best Practices](#best-practices)
+10. [Troubleshooting](#troubleshooting)
+11. [Appendix: Marker Format](#appendix-marker-format)
+
+---
+
+## Overview
+
+**Anya** is a Neovim plugin using OpenAI's Agents SDK to provide fast, contextual AI assistance in your code editor. It features persistent conversations, context tracking (via buffer content and markers), and a robust, modular, ZeroMQ-based backend.
+
+- **Main Features:**
+  - Fast response via a persistent background daemon
+  - Multi-buffer, multi-conversation capability
+  - Streaming LLM output directly into the editor, as you type and edit
+  - SQLite-based conversation and message history
+  - Message boundaries and tool output are tracked with hidden markers
+  - Extensible with your own agents and tools
+
+---
 
 ## Architecture
 
 ### Daemon Architecture
 
-Anya uses a standalone daemon process for agent execution, communicating with Neovim via ZeroMQ IPC and CBOR2 serialization.
+Anya's core runs as an independent background server ("daemon") that communicates with Neovim through ZeroMQ sockets using CBOR2 serialization.
 
 ```
-Neovim Plugin <--ZeroMQ IPC--> Daemon Server <--> Agent Execution
-     |                              |
-     |                              +-- MCP Agent (singleton, always running)
-     +-- Streaming via PUB/SUB      +-- Code Agent (per session)
+Neovim Plugin <-> ZeroMQ IPC <-> Daemon Server <-> Agents (MCP + Code Agents)
+        |                           |
+        |                           +-- MCP Agent (singleton, persistent)
+        +-- Streaming (PUB/SUB)     +-- Code Agent (per session)
 ```
 
-**Benefits:**
-- Daemon persists across Neovim restarts
-- Single daemon serves multiple Neovim instances
-- MCP connections remain active for faster first message
-- Agent state maintained between requests
+**Advantages:**
+- **Persistence:** Survives Neovim restarts, enables instant reconnects, and caches state
+- **Concurrency:** Handles multiple Neovim instances and conversations at once
+- **Performance:** Maintains live connections to MCP (lower latency)
+- **Isolation:** Protects Neovim event loop from blocking LLM calls or expensive computation
 
-### Daemon Components
+#### Communication Sockets
+
+| Purpose       | Path                                        |
+|---------------|---------------------------------------------|
+| REQ/REP       | `~/.local/share/anya/daemon.sock`           |
+| PUB/SUB       | `~/.local/share/anya/daemon_stream.sock`    |
+| Log file      | `~/.local/share/anya/daemon.log`            |
+| PID file      | `~/.local/share/anya/daemon.pid`            |
+
+### Component Breakdown
+
+**Python Remote Plugin** (`rplugin/python3/anya/plugin.py`)
+- Uses `pynvim` API and manages commands, buffer lifecycles, and streaming
 
 **Daemon Server** (`rplugin/python3/anya/server/`)
-- `main.py`: Main daemon process with ZeroMQ sockets
-- `agents.py`: Agent lifecycle management (MCP singleton, Code per-session)
-- `handlers.py`: Request handlers for agent operations
+- **main.py**: Top-level process: starts sockets, loads agents, runs event loops
+- **agents.py**: Handles Agent lifecycles (singleton MCP, per-session code agent)
+- **handlers.py**: Dispatches incoming requests/events
 
 **Client Library** (`rplugin/python3/anya/client.py`)
-- ZeroMQ client for plugin-to-daemon communication
-- Request/response and streaming subscription
+- Encapsulates all ZeroMQ IPC for communication between editor and daemon
 
-**Protocol** (`rplugin/python3/anya/protocol.py`)
-- CBOR2-serialized message types: Request, Response, StreamChunk
-- Request types: SEND_MESSAGE, CANCEL_REQUEST, GET_STATUS, END_SESSION, SHUTDOWN
+**Other Key Modules:**
+- `db.py` (SQLite conversation DB)
+- `history.py` (parsing markers and buffer content)
+- `buffers.py` (buffer creation, floating windows, prompt and chat panes)
+- `markers.py` (marker encoding/decoding)
+- `ids.py` (hashid-based unique ID generation)
+- `tools/` (custom tool definitions, e.g., `buffer_name`, `parrot`)
 
-**Daemon Management** (`rplugin/python3/anya/daemon.py`)
-- Start/stop daemon process
-- PID file and socket path management
+### Process & Data Flow
 
-### Daemon Files
+1. **User opens Anya UI** (`:Anya`)
+2. **Buffers created** for chat and prompt
+3. **User sends message**; entered text goes into prompt buffer
+4. **Plugin sends request** via ZeroMQ to daemon
+5. **Daemon executes agent**, streaming output (chunked tokens or tool responses) back
+6. **Plugin displays and animates AI replies** in chat buffer; all output is persisted in SQLite
 
-| File | Location |
-|------|----------|
-| PID file | `~/.local/share/anya/daemon.pid` |
-| REQ/REP socket | `~/.local/share/anya/daemon.sock` |
-| PUB/SUB socket | `~/.local/share/anya/daemon_stream.sock` |
-| Log file | `~/.local/share/anya/daemon.log` |
+---
 
-### Running the Daemon
+## File & Directory Structure
 
-```bash
-# Start in background (default)
-python -m anya.server
+A summarized, task-focused index of important files and their roles:
 
-# Start in foreground (for debugging)
-python -m anya.server --foreground
+```
+rplugin/python3/anya/
+├── plugin.py            # Entrypoint; sets up commands, buffer management
+├── client.py            # ZeroMQ client
+├── protocol.py          # Request/response message definitions
+├── daemon.py            # Daemon process lifecycle commands
+├── buffers.py           # Floating window logic, content management
+├── db.py                # Models and CRUD for conversations/messages
+├── history.py           # Logic for parsing messages from buffers
+├── markers.py           # HTML-like markers for conversation state
+├── ids.py               # Stable short IDs, via hashids
+├── server/
+│   ├── main.py          # Daemon process: event loop, socket setup
+│   ├── agents.py        # Agent and tool lifecycles
+│   ├── handlers.py      # Handles requests: message, tool, status, etc.
+├── agents/              # Agent configuration and constructors
+│   ├── __init__.py
+│   ├── context.py
+│   ├── utils.py
+├── tools/               # Tool implementations (buffer_name, parrot, etc.)
+│   ├── __init__.py
+│   ├── buffer_name.py
+│   ├── parrot.py
+│   ├── utils.py
 
-# With debug logging
-python -m anya.server --foreground --debug
+lua/anya/
+├── init.lua             # Lua-side API surface (require('anya'))
+├── conversation.lua     # Send/manage conversations from Lua
+├── text.lua             # Handles animation, streaming, queue
+├── markers.lua          # Marker helpers in Lua
+├── picker.lua           # UI: conversation browser (needs snacks.nvim)
+├── foldtext.lua         # Custom fold rendering
 
-# Or use the installed script
-anya-daemon --foreground
+ftplugin/anya-chat.lua   # Bufferfile settings for chat buffer
+ftplugin/anya-prompt.lua # Bufferfile settings for prompt buffer
+syntax/anya-chat.vim     # Syntax & conceal for markers
+
+prompts/                 # System prompt fragments for agents
+doc/anya.txt             # :help anya documentation
+
+plugin/anya.vim          # Vim bootstrap; just loads Python plugin
 ```
 
-### Daemon Commands in Neovim
+---
 
-```vim
-:Anya daemon status    " Check daemon status
-:Anya daemon start     " Start daemon
-:Anya daemon stop      " Stop daemon
-:Anya daemon restart   " Restart daemon
-```
+## Commands & Keymaps
 
-The daemon is automatically started by the plugin if not running.
+### User Commands
 
-### Key Components
+**ALL commands are subcommands of `:Anya` (convention!):**
+
+| Command                   | Purpose                                   |
+|---------------------------|-------------------------------------------|
+| `:Anya`                   | Opens chat UI in a floating window        |
+| `:Anya send <text>`       | Sends text directly (bypasses UI)         |
+| `:Anya history`           | Opens conversation history UI             |
+| `:Anya daemon status`     | Query daemon state                        |
+| `:Anya daemon start`      | Start daemon if not running               |
+| `:Anya daemon stop`       | Stop daemon                               |
+| `:Anya daemon restart`    | Restart the daemon                        |
+| `:Anya help`              | Show help documentation                   |
+
+### Buffer Keymaps (in prompt buffer)
+
+- `<CR>` (Normal) – Send message
+- `<CR>` (Insert) – Exit insert and send
+- (See `ftplugin/anya-prompt.lua` for more customizations)
+
+---
+
+## Editing & Streaming System
+
+Anya displays LLM output and tool messages as *animated, streaming text*. This system is two-stage:
+
+1. **Python-side**: Schedules streaming to Lua via batched text chunks
+2. **Lua-side**: Animates text character-by-character in UI
+
+**Markers** are hidden HTML comments, used to track boundaries, roles, tool output, etc. These markers are "concealed" with syntax rules in chat buffer, but always present in persisted content—enabling precise reconstruction for AI context.
+
+#### Streaming Queue Details
+
+- Python pushes messages and queues marker states
+- Lua handles a buffer-based animation queue and visible output
+- Tools/scripts **must** wait until the streaming queue is empty before making output edits, to avoid out-of-order rendering
+
+---
+
+## Database and Persistence
+
+**SQLite database**: Tracks every conversation and message with stable IDs, authors, timestamps, and role data.
+
+- Default DB: `~/.local/share/anya/conversations.db`
+- Each message and conversation is uniquely identified (using salt+hashids)
+- Buffer content is parsed on demand to reconstruct message boundaries (using markers)
+
+---
+
+## Extending Anya (Agents & Tools)
+
+Anya is designed for customization and extension.
+
+### Creating Agents
+
+- Agents are defined in `rplugin/python3/anya/agents/`
+- Each agent can expose its own tools, system prompt, and context
+- Main agent (`code`) is currently primary, but more can be added for specialized flows
+
+### Writing Tools
+
+- Place new tool implementations in `rplugin/python3/anya/tools/`
+- Tools follow a defined API: input/output spec, registered in `tools/__init__.py`
+- Example tools: 
+    - `parrot` (echoes input in uppercase)
+    - `buffer_name` (shows current buffer)
+
+### Lua-side Extensions
+
+- The Lua module `lua/anya/init.lua` and submodules can be required and used in user config or for UI enhancements
+
+---
+
+## Environment & Dependencies
+
+**Python**: 3.13+ required
+
+Install dependencies (minimal):
+
+- `pynvim`
+- `openai`
+- `openai-agents`
+- `hashids`
+- `pyzmq`
+- `cbor2`
+
+Optional for enhanced features:
+
+- `snacks.nvim` (fuzzy picker/browsing)
+- `stylua`, `ruff`, `luacheck` (formatting/linting)
+
+### Environment Variables
+
+| Variable           | Default    | Purpose                          |
+|--------------------|------------|----------------------------------|
+| `OPENAI_API_KEY`   | (required) | API key for OpenAI endpoints     |
+| `ANYA_MODEL`       | gpt-4.1    | Default model for LLM requests   |
+
+---
+
+## Best Practices
+
+- **Edit as needed, but keep commands under `:Anya`**, never add `:AnyaHistory` etc.
+- **Always update remote plugins** after Python changes:  
+  `:UpdateRemotePlugins` → Restart Neovim
+- **Respect marker logic**: Never write or edit buffer output if streaming queue isn't drained!
+- **Add tests/debug in real Neovim**; automated test coverage is currently minimal.
+- **Use provided formatting/linting scripts** (see below).
+- **Never add color emojis**—use only monochrome Unicode or plain text for all UI elements.
+
+---
+
+## Troubleshooting
+
+- **Daemon isn’t running?** Use `:Anya daemon start` or run `python -m anya.server --foreground`.
+- **Message output garbled/missing?**  
+  - Check correct ordering (are markers present?)
+  - Investigate log file: `~/.local/share/anya/daemon.log`
+- **Plugin changes not visible?**  
+  - Run `:UpdateRemotePlugins` and restart Neovim.
+- **Streaming/text out of order?**  
+  - Ensure your tool or agent waits for streaming queue to drain before output.
+
+---
+
+## Appendix: Marker Format
+
+Markers are special concealed comments, ensuring messages/boundaries are tracked and can be parsed out of buffer history even after many edits.
+
+Sample markers:
+
+```html
+<!-- ac: {id}, {timestamp} -->
 
 **Python Remote Plugin** (`rplugin/python3/anya/plugin.py`)
 - Main plugin logic using `@pynvim.plugin` decorator
@@ -162,351 +361,6 @@ Markers are HTML comments that track message metadata:
 <!-- at: {marker_names} -->
 ```
 
-## Development Commands
+---
 
-### Running
-
-```vim
-" Open Anya interface
-:Anya
-
-" Show help
-:Anya help
-
-" Send a prompt directly
-:Anya send <text>
-
-" Browse conversation history
-:Anya history
-```
-
-### Keymaps (in prompt buffer)
-
-- `<CR>` (normal mode) - Send message
-- `<CR>` (insert mode) - Exit insert and send message
-
-### After Code Changes
-
-```vim
-" Update remote plugins after Python code changes
-:UpdateRemotePlugins
-" Then restart Neovim
-```
-
-### Formatting and Linting
-
-Run the `./format` script to format and lint the codebase:
-
-```bash
-# Format only
-./format
-
-# Check formatting and run linting (no modifications)
-./format --check
-```
-
-This runs:
-- `ruff format` - Python formatting
-- `stylua` - Lua formatting
-- `luacheck` - Lua linting (only with `--check`)
-
-### Testing
-
-There are no automated tests for this plugin. Testing requires running Neovim and visually verifying behavior.
-
-However, you can catch many issues before running Neovim:
-
-```bash
-# Check Python syntax
-python -m py_compile rplugin/python3/anya/*.py rplugin/python3/anya/**/*.py
-
-# Check formatting and lint
-./format --check
-```
-
-## Dependencies
-
-- Python >= 3.13
-- `pynvim` - Neovim Python client
-- `openai` - OpenAI Python SDK
-- `openai-agents` - OpenAI Agents SDK
-- `hashids` - ID generation
-- `pyzmq` - ZeroMQ for daemon IPC
-- `cbor2` - CBOR serialization for messages
-
-Optional:
-- `snacks.nvim` - For conversation history picker
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENAI_API_KEY` | (required) | OpenAI API key |
-| `ANYA_MODEL` | `gpt-4.1` | Model to use for the agent |
-
-## Data Storage
-
-| Data | Location |
-|------|----------|
-| Conversations database | `~/.local/share/anya/conversations.db` |
-| ID generation salt | `~/.local/share/anya/salt.txt` |
-| ID state | `~/.local/share/anya/ids.json` |
-| Daemon PID file | `~/.local/share/anya/daemon.pid` |
-| Daemon log file | `~/.local/share/anya/daemon.log` |
-| Daemon REQ/REP socket | `~/.local/share/anya/daemon.sock` |
-| Daemon PUB/SUB socket | `~/.local/share/anya/daemon_stream.sock` |
-
-## Special Considerations
-
-### Async Execution
-- Agent runs in background asyncio event loop to prevent blocking Neovim
-- Uses `nvim.async_call` for all Neovim API calls from async context
-- Streaming text uses Lua timer for smooth animation
-
-### Buffer Lifecycle
-- Buffers are created fresh on each `:Anya` invocation
-- Chat buffer validity is checked before operations
-- Conversation ID stored as buffer variable `anya_conversation_id`
-
-### Marker Concealment
-- Markers are concealed in chat buffer using `conceallevel=2`
-- Cursor on marker line temporarily reveals it
-- Syntax rules in `anya-chat.vim` handle concealment
-
-### Conversation Persistence
-- Conversations auto-save to SQLite database
-- Each message has unique hashid
-- Conversation timestamps updated on each message
-
-## Codebase Context
-
-### Important Files
-
-```
-rplugin/python3/anya/
-  __init__.py          # Exports AnyaPlugin, VERSION
-  plugin.py            # Main plugin class with commands/functions
-  client.py            # ZeroMQ client for daemon communication
-  protocol.py          # CBOR message protocol definitions
-  daemon.py            # Daemon lifecycle management
-  buffers.py           # Buffer creation and content retrieval
-  db.py                # SQLite database operations
-  history.py           # Buffer content parsing for LLM
-  markers.py           # Marker generation utilities
-  ids.py               # Hashid generation
-  server/
-    __init__.py        # Daemon package
-    main.py            # Daemon main loop with ZeroMQ sockets
-    agents.py          # Agent lifecycle (MCP singleton, Code per-session)
-    handlers.py        # Request handlers for agent operations
-  agents/
-    __init__.py        # Agent definition (code agent)
-    context.py         # NvimPluginContext dataclass
-    utils.py           # Prompt loading helpers
-  tools/
-    __init__.py        # Tool exports
-    buffer_name.py     # Get buffer name tool
-    parrot.py          # Test echo tool
-    utils.py           # nvim_call_sync helper
-
-lua/anya/
-  init.lua             # Module entry point
-  conversation.lua     # Message sending and conversation management
-  text.lua             # Streaming animation and marker processing
-  markers.lua          # Marker parsing/creation (Lua side)
-  picker.lua           # Conversation history browser
-  foldtext.lua         # Custom fold text
-
-ftplugin/
-  anya-chat.lua        # Chat buffer configuration
-  anya-prompt.lua      # Prompt buffer configuration
-
-plugin/anya.vim        # Bootstrap script only
-syntax/anya-chat.vim   # Marker concealment syntax
-prompts/               # Agent system prompts
-doc/anya.txt           # Vim help documentation
-```
-
-### Prompts
-
-| File | Purpose |
-|------|---------|
-| `code.md` | Main coding agent prompt (currently used) |
-| `chat.md` | General conversation prompt |
-| `plan.md` | Task planning prompt |
-| `review.md` | Code review prompt |
-| `verify.md` | Output verification prompt |
-| `compact.md` | Context compaction prompt |
-| `title.md` | Title generation prompt |
-
-## Available Tools
-
-Currently implemented tools:
-
-1. **buffer_name** - Returns the name of the current Neovim buffer
-2. **parrot** - Test tool that echoes the message in uppercase
-
-## Vim Functions
-
-Functions exposed to Vim/Lua:
-
-| Function | Sync | Description |
-|----------|------|-------------|
-| `AnyaSend(text, conv_id?)` | async | Send prompt to agent |
-| `AnyaNewConversationId()` | sync | Generate new conversation ID |
-| `AnyaNewMessageId(conv_id?)` | sync | Generate new message ID |
-| `AnyaTimestamp()` | sync | Get current UTC ISO timestamp |
-| `AnyaSaveConversation(id, timestamp)` | sync | Save conversation to DB |
-| `AnyaSaveMessage(...)` | sync | Save message to DB |
-| `AnyaListConversations(limit?, offset?)` | sync | List recent conversations |
-| `AnyaLoadConversation(conv_id)` | sync | Load full conversation |
-| `AnyaUpdateConversationTitle(id, title)` | sync | Update conversation title |
-| `AnyaDeleteConversation(conv_id)` | sync | Delete conversation |
-| `AnyaRebuildBufferContent(conv_id)` | sync | Rebuild buffer from DB |
-
-## Request Lifecycle Events
-
-The plugin emits User autocommand events to track request state. These are useful for integrations (e.g., status indicators, blocking UI during requests).
-
-### Events
-
-| Event | Data | Description |
-|-------|------|-------------|
-| `AnyaRequestStarted` | `{id, model}` | Fired when Python agent starts processing |
-| `AnyaRequestFinished` | `{id, status}` | Fired when Python agent completes (`status`: "success" or "error") |
-
-### Listening to Events
-
-```lua
-vim.api.nvim_create_autocmd("User", {
-  pattern = "AnyaRequestStarted",
-  callback = function(event)
-    local request_id = event.data.id
-    local model = event.data.model
-    -- Handle request start
-  end,
-})
-
-vim.api.nvim_create_autocmd("User", {
-  pattern = "AnyaRequestFinished",
-  callback = function(event)
-    local request_id = event.data.id
-    local status = event.data.status  -- "success" or "error"
-    -- Handle request completion
-  end,
-})
-```
-
-### Tracking Complete Streaming State
-
-**Important**: `AnyaRequestFinished` fires when the Python agent completes, but the Lua streaming queue may still be animating text. To check if streaming is truly complete (both agent done AND queue empty), use:
-
-```lua
-local conversation = require("anya.conversation")
-
--- Returns true if agent is running OR queue has pending text
-if conversation.is_request_in_progress() then
-  -- Still streaming
-end
-```
-
-Or check the queue directly:
-
-```lua
-local text = require("anya.text")
-local status = text.get_queue_status()
--- status.queue_length: number of items in queue
--- status.timer_running: whether animation timer is active
-```
-
-## Streaming Queue Architecture
-
-The plugin uses a **two-stage streaming system**:
-
-1. **Python side** (`plugin.py`): Queues text via `nvim.async_call` to Lua
-2. **Lua side** (`text.lua`): Animates text character-by-character via `_G.anya_stream_queue`
-
-### Critical: Waiting for Streaming to Complete
-
-When Python calls `nvim.async_call(self._stream_text_to_buffer, ...)`, the text is added to a Lua queue but **not yet written to the buffer**. The Lua timer processes the queue asynchronously.
-
-**This means**: Any code that needs to render content AFTER previous content must wait for BOTH:
-1. The Python-side state (e.g., `g:anya_tool_fold_open`)
-2. The Lua streaming queue to be empty
-
-### Tool Fold State Tracking
-
-The plugin tracks open tool folds via:
-- `self._tool_fold_open` (Python)
-- `g:anya_tool_fold_open` (Vim global, for tools to read)
-
-Set to `true` when `fold_start` is queued, `false` when `fold_end` is queued.
-
-### Pattern: Waiting for Buffer to be Ready
-
-From an async Python tool, wait for both fold state AND queue:
-
-```python
-async def _wait_for_streaming_complete(nvim, timeout: float = 300.0) -> None:
-    start_time = asyncio.get_event_loop().time()
-    while asyncio.get_event_loop().time() - start_time < timeout:
-        state = [{"fold_open": False, "queue_length": 0}]
-
-        def get_state():
-            try:
-                fold_open = nvim.eval("get(g:, 'anya_tool_fold_open', v:false)")
-                queue_status = nvim.exec_lua(
-                    "return require('anya.text').get_queue_status()"
-                )
-                state[0] = {
-                    "fold_open": bool(fold_open),
-                    "queue_length": queue_status.get("queue_length", 0),
-                }
-            except Exception:
-                state[0] = {"fold_open": False, "queue_length": 0}
-
-        nvim.async_call(get_state)
-        await asyncio.sleep(0.05)
-
-        if not state[0]["fold_open"] and state[0]["queue_length"] == 0:
-            return
-```
-
-### Why This Matters
-
-Without waiting for the queue, content can appear in wrong locations:
-- Tool A outputs header + fold_start + content (queued)
-- Tool B tries to render immediately (before queue drains)
-- Tool B's content appears INSIDE Tool A's fold
-
-The `edit` tool uses this pattern to ensure edit blocks render after other tool folds close.
-
-## Known Patterns
-
-- All Neovim API calls from async contexts must use `nvim.async_call`
-- String responses are split on newlines before writing to buffers
-- Markers are HTML comments that get concealed in the UI
-- Streaming uses Lua timer with character-by-character animation
-- Database operations are lazy-initialized on first use
-- **Tools that render UI must wait for streaming queue to be empty**
-
-## Coding Guidelines for Agents
-
-- Do not add color emojis to the codebase. Use only monospace Unicode characters or text-based indicators where visual elements are needed.
-- Follow existing code conventions and formatting
-- Use type hints in Python code
-- Prefer minimal, focused changes over large rewrites
-
-## Command System
-
-**IMPORTANT**: All Anya commands must be implemented as subcommands of `:Anya`. Do NOT create new standalone commands like `:AnyaHistory`.
-
-Examples:
-- ✅ Correct: `:Anya history`, `:Anya send <text>`, `:Anya help`
-- ❌ Incorrect: `:AnyaHistory`, `:AnyaSend`, `:AnyaHelp`
-
-The main `:Anya` command in `plugin.py` uses `nargs="*"` to accept subcommands and their arguments. This keeps the command namespace clean and ensures all functionality is discoverable under `:Anya`.
-
-## Documentation
-
-Documentation for the OpenAI Agents SDK can be found at: `docs/openai-agents/` please look there for more information on how to work with agents and tools.
+*This document was last comprehensively revised in December 2025 for clarity, organization, and actionable reference. Please contribute back improvements if you extend Anya's agent or tool ecosystem.*

@@ -2,6 +2,10 @@
 
 An AI-powered Neovim plugin built on the OpenAI Agents SDK.
 
+> Why don't programmers like nature? It has too many bugs!
+
+> Why do programmers prefer dark mode? Because light attracts bugs!
+
 ## Features
 
 - **Chat Interface**: Split-window layout with streaming responses
@@ -70,6 +74,8 @@ export OPENAI_API_KEY="sk-..."
 
 ### Commands
 
+> Why do Java developers wear glasses? Because they don't C#!
+
 | Command | Description |
 |---------|-------------|
 | `:Anya` | Open the Anya interface |
@@ -98,6 +104,8 @@ Conversations are automatically saved to a SQLite database at `~/.local/share/an
 Use `:Anya history` to browse and load previous conversations (requires `snacks.nvim`).
 
 ## Architecture
+
+> How many programmers does it take to change a light bulb? None, that's a hardware problem!
 
 ### Buffer Types
 
@@ -188,6 +196,10 @@ After modifying Python code:
 ```
 
 Then restart Neovim.
+
+> Why did the developer go broke? Because he used up all his cache!
+
+> Why do Python programmers have low self-esteem? Because they're constantly comparing their self to others.
 
 ## License
 

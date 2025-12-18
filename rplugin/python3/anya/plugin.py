@@ -143,7 +143,7 @@ class AnyaPlugin:
                         self._handle_mcp_init_start(chunk.data)
                     elif chunk.event_type == StreamEventType.MCP_INIT_COMPLETE:
                         self._handle_mcp_init_complete(chunk.data)
-                except Exception as e:
+                except Exception:
                     # Don't spam errors - just log once and continue
                     pass
 
@@ -655,7 +655,8 @@ class AnyaPlugin:
 
                         if is_first:
                             pending_header = (
-                                combined_header
+                                "\n\n"
+                                + combined_header
                                 + "\n"
                                 + markers.make_marker("fold_start", status)
                                 + "\n"
@@ -1757,7 +1758,9 @@ Usage:
         try:
             delta = int(args[0])
             # Get current prompt height from the buffers module state
-            current_height = buffers._anya_state.get("prompt_height", buffers.PROMPT_HEIGHT)
+            current_height = buffers._anya_state.get(
+                "prompt_height", buffers.PROMPT_HEIGHT
+            )
             new_height = max(1, min(current_height + delta, buffers.PROMPT_MAX_HEIGHT))
 
             # Update the stored height
@@ -1766,7 +1769,9 @@ Usage:
             # Reposition the floats to apply the new height
             buffers.reposition_floats(self.nvim)
         except (ValueError, IndexError):
-            self.nvim.err_write("AnyaResizePromptHeight requires a valid integer delta.\n")
+            self.nvim.err_write(
+                "AnyaResizePromptHeight requires a valid integer delta.\n"
+            )
 
     @pynvim.function("AnyaCompleteAsync", sync=False)
     def anya_complete_async(self, args):

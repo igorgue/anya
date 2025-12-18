@@ -46,14 +46,22 @@ def append_to_chat_buffer(nvim, bufnr, text):
     """Append text to the chat buffer (sync, instant)."""
     if not nvim.api.buf_is_valid(bufnr):
         return
-    nvim.api.buf_set_option(bufnr, "modifiable", True)
-    lines = text.split("\n")
-    line_count = nvim.api.buf_line_count(bufnr)
-    last_line = nvim.api.buf_get_lines(bufnr, line_count - 1, line_count, False)
-    last_col = len(last_line[0]) if last_line else 0
-    nvim.api.buf_set_text(
-        bufnr, line_count - 1, last_col, line_count - 1, last_col, lines
-    )
+
+    lua_code = """
+    local bufnr, text = ...
+    vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(bufnr) then return end
+        vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+        
+        local lines = vim.split(text, "\\n", {plain=true})
+        local line_count = vim.api.nvim_buf_line_count(bufnr)
+        local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1] or ""
+        local last_col = #last_line
+        
+        vim.api.nvim_buf_set_text(bufnr, line_count - 1, last_col, line_count - 1, last_col, lines)
+    end)
+    """
+    nvim.exec_lua(lua_code, bufnr, text)
     autoscroll(nvim, bufnr)
 
 
