@@ -578,13 +578,16 @@ def reposition_floats(nvim: Nvim):
         layout_width = nvim.api.win_get_width(layout_win)
         layout_height = nvim.api.win_get_height(layout_win)
 
-        # Get prompt buffer content to determine height
-        prompt_buf = nvim.api.win_get_buf(prompt_win)
-        line_count = nvim.api.buf_line_count(prompt_buf)
-        prompt_height = min(max(1, line_count), PROMPT_MAX_HEIGHT)
-
-        # Persist for next reopen (e.g. pane toggle)
-        _anya_state["prompt_height"] = prompt_height
+        # Use the stored prompt height if available, otherwise fall back to buffer line count
+        stored_height = _anya_state.get("prompt_height")
+        if stored_height:
+            prompt_height = stored_height
+        else:
+            # Fallback to buffer line count for initial height
+            prompt_buf = nvim.api.win_get_buf(prompt_win)
+            line_count = nvim.api.buf_line_count(prompt_buf)
+            prompt_height = min(max(1, line_count), PROMPT_MAX_HEIGHT)
+            _anya_state["prompt_height"] = prompt_height
 
         # Calculate sizes (prompt border takes 2 lines)
         real_prompt_height = prompt_height + 2

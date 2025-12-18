@@ -1747,6 +1747,27 @@ Usage:
         """Reposition floating windows when terminal is resized."""
         buffers.reposition_floats(self.nvim)
 
+    @pynvim.function("AnyaResizePromptHeight", sync=True)
+    def resize_prompt_height(self, args):
+        """Resize the prompt float height by delta lines."""
+        if len(args) < 1:
+            self.nvim.err_write("AnyaResizePromptHeight requires a delta argument.\n")
+            return
+
+        try:
+            delta = int(args[0])
+            # Get current prompt height from the buffers module state
+            current_height = buffers._anya_state.get("prompt_height", buffers.PROMPT_HEIGHT)
+            new_height = max(1, min(current_height + delta, buffers.PROMPT_MAX_HEIGHT))
+
+            # Update the stored height
+            buffers._anya_state["prompt_height"] = new_height
+
+            # Reposition the floats to apply the new height
+            buffers.reposition_floats(self.nvim)
+        except (ValueError, IndexError):
+            self.nvim.err_write("AnyaResizePromptHeight requires a valid integer delta.\n")
+
     @pynvim.function("AnyaCompleteAsync", sync=False)
     def anya_complete_async(self, args):
         """Provide async file path completions for @mentions."""

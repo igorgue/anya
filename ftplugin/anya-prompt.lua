@@ -123,6 +123,42 @@ vim.keymap.set("i", "<C-j>", function()
   vim.api.nvim_put({ "" }, "l", false, true)
 end, { buffer = true, desc = "Append new line to prompt input" })
 
+-- Resize prompt height with Ctrl+Up/Ctrl+Down
+local function resize_prompt_height(delta)
+  -- Get current window and check if it's a floating prompt
+  local win = vim.api.nvim_get_current_win()
+  local config = vim.api.nvim_win_get_config(win)
+
+  if config.relative == 'win' then
+    -- We're in a floating window, use RPC to update the prompt height
+    vim.fn.AnyaResizePromptHeight(delta)
+  end
+end
+
+-- Add the requested keymaps for Ctrl+Up and Ctrl+Down
+-- In terminals, these might be sent as different escape sequences
+vim.keymap.set("n", "<C-Up>", function() resize_prompt_height(1) end, { buffer = true, desc = "Grow prompt height" })
+vim.keymap.set("i", "<C-Up>", function() resize_prompt_height(1) end, { buffer = true, desc = "Grow prompt height" })
+vim.keymap.set("n", "<C-Down>", function() resize_prompt_height(-1) end, { buffer = true, desc = "Reduce prompt height" })
+vim.keymap.set("i", "<C-Down>", function() resize_prompt_height(-1) end, { buffer = true, desc = "Reduce prompt height" })
+
+-- Alternative notations for different terminals
+vim.keymap.set("n", "<Esc>[A", function() resize_prompt_height(1) end, { buffer = true, desc = "Grow prompt height (term)" })
+vim.keymap.set("i", "<Esc>[A", function() resize_prompt_height(1) end, { buffer = true, desc = "Grow prompt height (term)" })
+vim.keymap.set("n", "<Esc>OA", function() resize_prompt_height(1) end, { buffer = true, desc = "Grow prompt height (app)" })
+vim.keymap.set("i", "<Esc>OA", function() resize_prompt_height(1) end, { buffer = true, desc = "Grow prompt height (app)" })
+
+vim.keymap.set("n", "<Esc>[B", function() resize_prompt_height(-1) end, { buffer = true, desc = "Reduce prompt height (term)" })
+vim.keymap.set("i", "<Esc>[B", function() resize_prompt_height(-1) end, { buffer = true, desc = "Reduce prompt height (term)" })
+vim.keymap.set("n", "<Esc>OB", function() resize_prompt_height(-1) end, { buffer = true, desc = "Reduce prompt height (app)" })
+vim.keymap.set("i", "<Esc>OB", function() resize_prompt_height(-1) end, { buffer = true, desc = "Reduce prompt height (app)" })
+
+-- Also try <C-k> and <C-l> as alternatives (since <C-j> is taken)
+vim.keymap.set("n", "<C-k>", function() resize_prompt_height(1) end, { buffer = true, desc = "Grow prompt height" })
+vim.keymap.set("i", "<C-k>", function() resize_prompt_height(1) end, { buffer = true, desc = "Grow prompt height" })
+vim.keymap.set("n", "<C-l>", function() resize_prompt_height(-1) end, { buffer = true, desc = "Reduce prompt height" })
+vim.keymap.set("i", "<C-l>", function() resize_prompt_height(-1) end, { buffer = true, desc = "Reduce prompt height" })
+
 -- Handle 1 and 2 key presses for edit responses
 -- If there's a pending edit, respond to it
 -- Otherwise, allow normal vim behavior (no-op for numbers)
