@@ -82,15 +82,21 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
     if thinking_budget is None:
         thinking_budget = os.environ.get("ANYA_THINKING_BUDGET")
 
-    # Only configure reasoning if the model supports it. Models that don't support
-    # reasoning will have model_settings.reasoning as None, and we should leave it that way.
-    if model_settings.reasoning is not None:
-        effort = _parse_reasoning_effort(thinking_budget)
-        base_effort = model_settings.reasoning.effort or "medium"
-        model_settings.reasoning = Reasoning(
-            effort=effort or base_effort,
-            summary="auto",
-        )
+    # Configure reasoning if ANYA_THINKING_BUDGET is set
+    if thinking_budget is not None:
+        effort = _parse_reasoning_effort(thinking_budget) or "medium"
+
+        # If model already has reasoning (like gpt-5), update the effort
+        if model_settings.reasoning is not None:
+            model_settings.reasoning.effort = effort
+            model_settings.reasoning.summary = "auto"
+        else:
+            # For models without native reasoning, set it anyway
+            # This may or may not produce reasoning events depending on the model
+            model_settings.reasoning = Reasoning(
+                effort=effort,
+                summary="auto",
+            )
 
     config = {
         "name": MAIN_AGENT_NAME,

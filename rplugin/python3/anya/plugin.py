@@ -655,8 +655,7 @@ class AnyaPlugin:
 
                         if is_first:
                             pending_header = (
-                                "\n\n"
-                                + combined_header
+                                combined_header
                                 + "\n"
                                 + markers.make_marker("fold_start", status)
                                 + "\n"
@@ -1155,7 +1154,7 @@ vim.ui.select({lua_options},
 
             # Close any open tool folds
             if tool_fold_opened:
-                fold_end_marker = "\n" + markers.make_marker("fold_end")
+                fold_end_marker = "\n" + markers.make_marker("fold_end") + "\n"
                 collected_content.append(fold_end_marker)
                 self.nvim.async_call(
                     ui.stream_text_to_buffer, self.nvim, chat_bufnr, fold_end_marker
@@ -1202,7 +1201,7 @@ vim.ui.select({lua_options},
             )
 
             if tool_fold_opened:
-                fold_end_marker = "\n" + markers.make_marker("fold_end")
+                fold_end_marker = "\n" + markers.make_marker("fold_end") + "\n"
                 collected_content.append(fold_end_marker)
                 self.nvim.async_call(
                     ui.append_to_chat_buffer, self.nvim, chat_bufnr, fold_end_marker
