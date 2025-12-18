@@ -15,7 +15,7 @@ async def create_file(
     """Creates a new file at the specified path with optional content.
 
     This tool creates a new file with the given content. If the file already exists,
-    it will return an error. Use the edit tool to modify existing files.
+    it will return an error. Use the `replace_file` tool to modify existing files.
 
     Args:
         path: File path where the new file should be created (supports ~ expansion, and environment variables)
@@ -42,7 +42,7 @@ async def create_file(
     # Check if file already exists
     if os.path.exists(path):
         raise Exception(
-            f"File {path} already exists. Use the edit tool to modify existing files."
+            f"File {path} already exists. Use the `replace_file` tool to modify existing files."
         )
 
     # Create parent directories if they don't exist

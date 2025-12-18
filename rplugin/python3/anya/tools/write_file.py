@@ -1,4 +1,3 @@
-import asyncio
 import os
 from agents import function_tool, RunContextWrapper
 
@@ -8,7 +7,7 @@ from .exec import _nvim_ui_select
 
 
 @function_tool(failure_error_function=create_error_handler)
-async def replace_file(
+async def write_file(
     ctx: RunContextWrapper[NvimPluginContext],
     path: str,
     content: str,
@@ -17,6 +16,8 @@ async def replace_file(
 
     SAFETY: This tool requires user confirmation before replacing file content.
     Operations can be allowed for the current session.
+
+    IMPORTANT: Use this tool to override existing files instead of trying to use the `create_file` tool that would return an error if the file already exists. This tool, doesn't do that intead it replaces the content of existing files.
 
     Args:
         path: File path to replace (supports ~ expansion and environment variables)
@@ -41,7 +42,9 @@ async def replace_file(
 
     # Check if file exists
     if not os.path.exists(path):
-        raise Exception(f"File {path} does not exist. Use the create_file tool to create new files.")
+        raise Exception(
+            f"File {path} does not exist. Use the create_file tool to create new files."
+        )
 
     # Check YOLO mode from context
     yolo_mode = plugin_context.yolo_mode
