@@ -7,7 +7,7 @@ from .utils import create_error_handler
 
 
 @function_tool(failure_error_function=create_error_handler)
-async def search(
+async def search_code(
     ctx: RunContextWrapper[NvimPluginContext],
     query: str,
     max_results: int = 2000,

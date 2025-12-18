@@ -13,7 +13,7 @@ from .dynamic_instructions import (
 from .utils import get_instructions
 from ..system_prompt import apply_system_prompt
 from ..tools import (
-    create,
+    create_file,
     edit,
     exec,
     exec_lua,
@@ -21,7 +21,7 @@ from ..tools import (
     list_files,
     read_file,
     read_many_files,
-    search,
+    search_code,
     parrot,
     buffer_name,
 )
@@ -98,7 +98,7 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
         "model": model_name,
         "model_settings": model_settings,
         "tools": [
-            create,
+            create_file,
             edit,
             exec,
             exec_lua,
@@ -106,7 +106,7 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
             list_files,
             read_file,
             read_many_files,
-            search,
+            search_code,
             parrot,
             buffer_name,
         ],

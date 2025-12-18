@@ -7,7 +7,7 @@ from .utils import create_error_handler
 
 
 @function_tool(failure_error_function=create_error_handler)
-async def create(
+async def create_file(
     ctx: RunContextWrapper[NvimPluginContext],
     path: str,
     content: str = "",
