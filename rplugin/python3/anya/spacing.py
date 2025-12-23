@@ -12,6 +12,8 @@ from . import markers
 class ContentType(Enum):
     TEXT = "text"
     MARKER = "marker"
+    TOOL_MARKER = "tool_marker"  # Marker from tool header/thinking (needs blank after)
+    MESSAGE_MARKER = "message_marker"  # Message boundary marker (no blank after)
     TOOL_HEADER = "tool_header"
     TOOL_OUTPUT = "tool_output"
     THINKING = "thinking"
@@ -106,25 +108,54 @@ class SpacingManager:
     def get_spacing_for_transition(
         self, next_type: ContentType, content: str = ""
     ) -> str:
-        """Get the required spacing before a new content block."""
+        """Get the required spacing before a new content block.
+
+        NOTE: This updates _last_content_type as a side effect.
+        """
         if self._last_content_type is None:
             self._last_content_type = next_type
             return ""
 
-        # If the last block was a marker type, we don't want to add extra spacing
-        # because the marker block already ends with a newline.
-        if self._last_content_type in [
-            ContentType.MARKER,
-            ContentType.MESSAGE_BOUNDARY,
-        ]:
+        # Special handling after MESSAGE_BOUNDARY
+        if self._last_content_type == ContentType.MESSAGE_BOUNDARY:
             self._last_content_type = next_type
             return ""
+
+        # After a tool marker (from tool header or thinking), we need blank line before text/output
+        if self._last_content_type == ContentType.TOOL_MARKER:
+            self._last_content_type = next_type
+            if next_type in [ContentType.TOOL_OUTPUT, ContentType.TEXT, ContentType.TOOL_HEADER, ContentType.EDIT_BLOCK]:
+                return "\n\n"
+            # MARKER type is for fold_end and similar - no spacing needed, marker has its own newline
+            if next_type == ContentType.MARKER:
+                return ""
+            return ""
+
+        # After a message marker (message boundary), no blank line needed
+        if self._last_content_type == ContentType.MESSAGE_MARKER:
+            self._last_content_type = next_type
+            return ""
+
+        # After MARKER (legacy, shouldn't happen with new types)
+        if self._last_content_type == ContentType.MARKER:
+            self._last_content_type = next_type
+            return ""
+
+        # After TOOL_OUTPUT or THINKING, no spacing before fold_end marker
+        if self._last_content_type in [ContentType.TOOL_OUTPUT, ContentType.THINKING]:
+            if next_type == ContentType.MARKER:
+                self._last_content_type = next_type
+                return ""
+            # After tool output/thinking, text needs just one newline (marker provides the other)
+            if next_type == ContentType.TEXT:
+                self._last_content_type = next_type
+                return "\n"
 
         # Default: one newline to separate blocks
         spacing = "\n"
 
         # Rules for transitions between non-marker blocks
-        if next_type == ContentType.TOOL_HEADER:
+        if next_type in [ContentType.TOOL_HEADER, ContentType.EDIT_BLOCK]:
             spacing = "\n\n"
         elif next_type == ContentType.TEXT:
             if self._last_content_type in [
@@ -142,6 +173,8 @@ class SpacingManager:
             # If we are following a marker, ensure the delta doesn't start with its own newlines
             if self._last_content_type in [
                 ContentType.MARKER,
+                ContentType.TOOL_MARKER,
+                ContentType.MESSAGE_MARKER,
                 ContentType.MESSAGE_BOUNDARY,
             ]:
                 delta = delta.lstrip("\n")
@@ -180,33 +213,51 @@ class SpacingManager:
         is_first_in_buffer: bool = False,
     ) -> str:
         """Format content with proper spacing and markers."""
-        # 1. Get transition spacing
-        prefix = self.get_spacing_for_transition(content_type, content)
-        if is_first_in_buffer:
-            prefix = ""
-
-        # 2. Handle markers
+        # 2. Handle markers first (to detect fold_end before calling get_spacing_for_transition)
         marker_lines = []
         if msg_id:
             marker_lines.append(markers.make_message_marker(msg_id))
         if marker_list is not None:
             marker_lines.append(markers.make_marker(*marker_list))
 
+        marker_at_end = False
+        is_tool_marker = False
+        is_fold_end = False  # Track if this is specifically fold_end
+
         if marker_lines:
+            # Check if this is fold_end before processing
+            if marker_list:
+                for marker in marker_list:
+                    if marker == "fold_end":
+                        is_fold_end = True
+                    if marker.startswith("fold_") or marker.startswith("tool_") or marker.startswith("edit_"):
+                        is_tool_marker = True
+                        break
+
             marker_str = "\n".join(marker_lines)
             if content:
                 # For tools and thinking, the marker follows the header
                 if content_type in [ContentType.TOOL_HEADER, ContentType.THINKING]:
                     content = f"{content}\n{marker_str}"
+                    marker_at_end = True
+                    is_tool_marker = True
                 else:
                     # Marker then content (default for messages)
                     content = f"{marker_str}\n{content}"
             else:
                 content = marker_str
+                marker_at_end = True
 
-            # If this block is purely markers, update state
-            if not content or content == marker_str:
-                self._last_content_type = ContentType.MARKER
+        # 1. Get transition spacing (after we know if it's fold_end)
+        if is_fold_end:
+            # For fold_end, save the current state and don't transition yet
+            previous_content_type = self._last_content_type
+            prefix = ""
+        else:
+            previous_content_type = None
+            prefix = self.get_spacing_for_transition(content_type, content)
+            if is_first_in_buffer:
+                prefix = ""
 
         # 3. Ensure marker isolation and NO blank lines around them
         isolated = self.ensure_marker_isolation(content)
@@ -217,6 +268,19 @@ class SpacingManager:
         # If it ends with a marker, ensure it has a trailing newline for the NEXT block
         if result.endswith("-->"):
             result += "\n"
+            marker_at_end = True
+
+        # Update _last_content_type based on what was actually written
+        if marker_at_end:
+            # Special case: fold_end marker preserves the previous content type
+            # so that text after tool output + fold_end gets correct spacing
+            if is_fold_end:
+                # Restore the previous state (TOOL_OUTPUT or THINKING)
+                self._last_content_type = previous_content_type
+            elif is_tool_marker:
+                self._last_content_type = ContentType.TOOL_MARKER
+            else:
+                self._last_content_type = ContentType.MESSAGE_MARKER
 
         if is_first_in_buffer:
             # Aggressively ensure NO leading whitespace/newlines at the start of the conversation

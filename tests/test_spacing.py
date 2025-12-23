@@ -32,10 +32,10 @@ class TestSpacingManager(unittest.TestCase):
         # Header then marker. Markers always end with \n for isolation.
         self.assertEqual(header, "\n\nls\n<!-- at: fold_start -->\n")
 
-        # Marker -> Text
+        # Marker -> Text (after tool marker, should have blank line)
         text = self.sm.format_delta("output", ContentType.TEXT)
-        # Should have leading newline from get_spacing_for_transition
-        self.assertEqual(text, "\noutput")
+        # Should have leading newlines from get_spacing_for_transition (blank line after marker)
+        self.assertEqual(text, "\n\noutput")
 
     def test_message_boundary(self):
         header = self.sm.format_content(
@@ -54,11 +54,11 @@ class TestSpacingManager(unittest.TestCase):
         # First delta in a new manager will NOT have a newline because _last_content_type is None
         self.assertEqual(delta1, "hello")
 
-        # Test delta starting with newline after marker
+        # Test delta starting with newline after tool marker (fold_start)
         self.sm.format_content("", ContentType.MARKER, ["fold_start"])
         delta2 = self.sm.format_delta("\nworld", ContentType.TEXT)
-        # Should strip the leading newline from delta - markers already have trailing newline so no extra needed
-        self.assertEqual(delta2, "world")
+        # fold_start is a tool marker, so text after it gets a blank line
+        self.assertEqual(delta2, "\n\nworld")
 
 
 if __name__ == "__main__":
