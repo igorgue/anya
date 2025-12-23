@@ -47,18 +47,36 @@ def append_to_chat_buffer(nvim, bufnr, text):
     if not nvim.api.buf_is_valid(bufnr):
         return
 
+    # Ensure marker isolation before appending
     lua_code = """
     local bufnr, text = ...
     vim.schedule(function()
         if not vim.api.nvim_buf_is_valid(bufnr) then return end
         vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-        
+
+        -- Ensure marker isolation
+        local markers = require("anya.markers")
+        text = markers.ensure_marker_line_isolation(text)
+
         local lines = vim.split(text, "\\n", {plain=true})
         local line_count = vim.api.nvim_buf_line_count(bufnr)
-        local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1] or ""
-        local last_col = #last_line
-        
-        vim.api.nvim_buf_set_text(bufnr, line_count - 1, last_col, line_count - 1, last_col, lines)
+
+        -- Check if the last line has content - if so, use buf_set_lines to append on new line
+        -- Otherwise, use buf_set_text to append to the current (empty/partial) line
+        if line_count > 0 then
+          local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1] or ""
+          if last_line:match("%S") then
+            -- Last line has content - append on a new line using buf_set_lines
+            vim.api.nvim_buf_set_lines(bufnr, line_count, line_count, false, lines)
+          else
+            -- Last line is empty or whitespace - append to it using buf_set_text
+            local last_col = #last_line
+            vim.api.nvim_buf_set_text(bufnr, line_count - 1, last_col, line_count - 1, last_col, lines)
+          end
+        else
+          -- Buffer is empty - set lines directly
+          vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+        end
     end)
     """
     nvim.exec_lua(lua_code, bufnr, text)
@@ -163,6 +181,37 @@ def ensure_blank_line_before_tool(nvim, bufnr):
         if last_line and last_line[0] != "":
             # Add blank line
             nvim.api.buf_set_lines(bufnr, line_count, line_count, False, [""])
+
+
+def cleanup_trailing_blanks(nvim, bufnr):
+    """Remove trailing blank lines from the buffer."""
+    if not nvim.api.buf_is_valid(bufnr):
+        return
+
+    lua_code = """
+    local bufnr = ...
+    vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(bufnr) then return end
+        vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+        local line_count = vim.api.nvim_buf_line_count(bufnr)
+        while line_count > 0 do
+            local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1] or ""
+            -- Match any whitespace-only line, including empty lines
+            if last_line:match("^%s*$") then
+                vim.api.nvim_buf_set_lines(bufnr, line_count - 1, line_count, false, {})
+                line_count = line_count - 1
+            else
+                -- Also strip trailing whitespace from the last non-empty line
+                local stripped = last_line:gsub("%s+$", "")
+                if stripped ~= last_line then
+                    vim.api.nvim_buf_set_lines(bufnr, line_count - 1, line_count, false, { stripped })
+                end
+                break
+            end
+        end
+    end)
+    """
+    nvim.exec_lua(lua_code, bufnr)
 
 
 def update_tool_header_line(nvim, bufnr, new_header: str):

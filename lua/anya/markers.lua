@@ -110,6 +110,79 @@ function M.make_message_marker(id)
   return "<!-- am: " .. id .. " -->"
 end
 
+--- Ensure all markers in the text are on their own lines
+--- @param text string The text to process
+--- @return string Text with markers isolated on separate lines
+function M.ensure_marker_line_isolation(text)
+  if not text or text == "" then
+    return text
+  end
+
+  if not text:find("<!%-%- [aa][tm]:") then
+    return text
+  end
+
+  local lines = vim.split(text, "\n", { plain = true })
+  local normalized_lines = {}
+
+  for _, line in ipairs(lines) do
+    local stripped = vim.trim(line)
+
+    -- Check if line contains a marker pattern
+    local contains_at_marker = line:find("<!%-%- at:") ~= nil
+    local contains_am_marker = line:find("<!%-%- am:") ~= nil
+    local contains_marker = contains_at_marker or contains_am_marker
+
+    if contains_marker then
+      -- Check if stripped line IS a marker (marker already isolated)
+      local is_marker_line = M.is_marker_line(stripped) or M.is_message_marker(stripped)
+
+      if is_marker_line then
+        table.insert(normalized_lines, stripped)
+      else
+        local start_marker = line:find("<!--", 1, true)
+        local end_marker = line:find("-->", start_marker or 1, true)
+
+        if start_marker and end_marker then
+          local before = line:sub(1, start_marker - 1)
+          local marker_text = line:sub(start_marker, end_marker + 2)
+          local after = line:sub(end_marker + 3)
+
+          if #before > 0 then
+            table.insert(normalized_lines, before)
+          end
+          table.insert(normalized_lines, vim.trim(marker_text))
+          if #after > 0 then
+            table.insert(normalized_lines, after)
+          end
+        else
+          table.insert(normalized_lines, line)
+        end
+      end
+    else
+      table.insert(normalized_lines, line)
+    end
+  end
+
+  local result = table.concat(normalized_lines, "\n")
+
+  -- Remove blank lines around markers (markers should be on their own line, but without extra blank lines)
+  -- This aligns with the Python spacing.py ensure_marker_isolation behavior
+  -- Remove blank lines before markers
+  result = result:gsub("\n%s*\n+(<!%-%- at: .+ %-%->)", "\n%1")
+  result = result:gsub("\n%s*\n+(<!%-%- am: .+ %-%->)", "\n%1")
+  -- Remove extra blank lines after markers (keep only one newline)
+  result = result:gsub("(<!%-%- at: .+ %-%->)%s*\n%s*\n+", "%1\n")
+  result = result:gsub("(<!%-%- am: .+ %-%->)%s*\n%s*\n+", "%1\n")
+  -- Ensure adjacent markers have only one newline between them
+  result = result:gsub("(<!%-%- a[mt]: .+ %-%->)%s*\n%s*(<!%-%- a[mt]: .+ %-%->)", "%1\n%2")
+
+  -- Final normalization: collapse multiple newlines (reduce 3+ to 2)
+  result = result:gsub("\n\n\n+", "\n\n")
+
+  return result
+end
+
 --- Convert ISO 8601 UTC timestamp to local time string (e.g., "2:30pm")
 --- @param iso_timestamp string ISO 8601 timestamp like "2024-06-27T14:30:00Z"
 --- @return string Local time formatted as "2:30pm"

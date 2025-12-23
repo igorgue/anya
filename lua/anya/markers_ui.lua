@@ -195,8 +195,11 @@ function M._apply_message_info(bufnr, line_num, meta, end_line_num)
             local line = all_lines[i]
             -- Skip marker lines and message markers
             if not markers.is_marker_line(line) and not markers.is_message_marker(line) then
-              last_visible_line = i
-              break
+              -- Also skip empty lines to avoid blank lines before duration
+              if line:match("%S") then
+                last_visible_line = i
+                break
+              end
             end
           end
         end

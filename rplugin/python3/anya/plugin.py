@@ -17,6 +17,7 @@ from . import fidget
 from . import ui
 from . import utils
 from . import daemon as daemon_mgmt
+from .spacing import SpacingManager, ContentType
 from .client import AnyaClient, StreamSubscriber, SystemSubscriber
 from .protocol import (
     NvimContext,
@@ -430,6 +431,7 @@ class AnyaPlugin:
 
         # Get buffer content and build history
         buffer_content = await ui.get_buffer_content_async(self.nvim, chat_bufnr)
+        is_chat_buf_empty = not buffer_content or not buffer_content.strip()
         records = history.parse_buffer_content(buffer_content or "")
         llm_history = history.build_llm_history(records)
 
@@ -446,8 +448,16 @@ class AnyaPlugin:
             now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         )
 
+        # Tracking state
+        spacing_manager = SpacingManager()
+
         # Output message header
-        header = markers.make_message_marker(msg_id) + "\n"
+        header = spacing_manager.format_content(
+            "",
+            ContentType.MESSAGE_BOUNDARY,
+            msg_id=msg_id,
+            is_first_in_buffer=is_chat_buf_empty,
+        )
         self.nvim.async_call(ui.append_to_chat_buffer, self.nvim, chat_bufnr, header)
 
         # Ensure DB has a placeholder message row
@@ -544,7 +554,6 @@ class AnyaPlugin:
         thinking_finalized = False
         tool_was_called = False
         tool_fold_opened = False  # Track if a tool fold was opened (needs closing)
-        needs_blank_before_text = False
 
         try:
             # Send request to daemon (non-blocking, response comes via stream)
@@ -579,24 +588,19 @@ class AnyaPlugin:
                 # Handle different event types
                 if chunk.event_type == StreamEventType.TEXT_DELTA:
                     delta = chunk.data.get("text", "")
-                    if chunk.data.get("needs_blank_before") and needs_blank_before_text:
-                        collected_content.append("\n")
-                        self.nvim.async_call(
-                            ui.stream_text_to_buffer, self.nvim, chat_bufnr, "\n"
-                        )
-                        needs_blank_before_text = False
+                    formatted = spacing_manager.format_delta(delta, ContentType.TEXT)
 
-                    collected_content.append(delta)
+                    collected_content.append(formatted)
                     if not self._request_cancelled:
                         self.nvim.async_call(
-                            ui.stream_text_to_buffer, self.nvim, chat_bufnr, delta
+                            ui.stream_text_to_buffer, self.nvim, chat_bufnr, formatted
                         )
 
                 elif chunk.event_type == StreamEventType.THINKING_START:
                     thinking_started = True
-                    thinking_header = "**thinking**\n"
-                    thinking_header += markers.make_marker("fold_start", "thinking")
-                    thinking_header += "\n"
+                    thinking_header = spacing_manager.format_content(
+                        "**thinking**", ContentType.THINKING, ["fold_start", "thinking"]
+                    )
                     collected_content.append(thinking_header)
                     if not self._request_cancelled:
                         self.nvim.async_call(
@@ -608,15 +612,20 @@ class AnyaPlugin:
 
                 elif chunk.event_type == StreamEventType.THINKING_DELTA:
                     delta = chunk.data.get("text", "")
-                    collected_content.append(delta)
+                    formatted = spacing_manager.format_delta(
+                        delta, ContentType.THINKING
+                    )
+                    collected_content.append(formatted)
                     if not self._request_cancelled:
                         self.nvim.async_call(
-                            ui.stream_text_to_buffer, self.nvim, chat_bufnr, delta
+                            ui.stream_text_to_buffer, self.nvim, chat_bufnr, formatted
                         )
 
                 elif chunk.event_type == StreamEventType.THINKING_END:
                     thinking_finalized = True
-                    thinking_footer = "\n" + markers.make_marker("fold_end") + "\n\n"
+                    thinking_footer = spacing_manager.format_content(
+                        "", ContentType.MARKER, ["fold_end"]
+                    )
                     collected_content.append(thinking_footer)
                     if not self._request_cancelled:
                         self.nvim.async_call(
@@ -654,12 +663,10 @@ class AnyaPlugin:
                         combined_header = " | ".join(tool_headers)
 
                         if is_first:
-                            pending_header = (
-                                "\n\n"
-                                + combined_header
-                                + "\n"
-                                + markers.make_marker("fold_start", status)
-                                + "\n"
+                            pending_header = spacing_manager.format_content(
+                                combined_header,
+                                ContentType.TOOL_HEADER,
+                                ["fold_start", status],
                             )
                             collected_content.append(pending_header)
                             tool_fold_opened = True  # Track that we opened a fold
@@ -710,7 +717,9 @@ class AnyaPlugin:
 
                     # Output tool result (skip marker processing - do it once at end)
                     if not is_edit_tool and not skip_output and output:
-                        wrapped_output = f"``````\n{output}\n``````"
+                        wrapped_output = spacing_manager.format_content(
+                            f"``````\n{output}\n``````", ContentType.TOOL_OUTPUT
+                        )
                         collected_content.append(wrapped_output)
                         if not self._request_cancelled:
                             self.nvim.async_call(
@@ -724,7 +733,9 @@ class AnyaPlugin:
                     # Close fold (skip marker processing - do it once at end)
                     # Write fold_end if a fold was opened (tracked by tool_fold_opened)
                     if tool_fold_opened:
-                        fold_end_marker = "\n" + markers.make_marker("fold_end") + "\n"
+                        fold_end_marker = spacing_manager.format_content(
+                            "", ContentType.MARKER, ["fold_end"]
+                        )
                         collected_content.append(fold_end_marker)
                         tool_fold_opened = False  # Reset fold tracking
                         if not self._request_cancelled:
@@ -754,9 +765,13 @@ class AnyaPlugin:
 
                     if not unclosed:
                         tool_was_called = False
-                    needs_blank_before_text = True
 
                 elif chunk.event_type == StreamEventType.MESSAGE_END:
+                    # Flush queue and clean up trailing blank lines in the buffer
+                    self.nvim.async_call(ui.flush_queue, self.nvim)
+                    self.nvim.async_call(
+                        ui.cleanup_trailing_blanks, self.nvim, chat_bufnr
+                    )
                     status = chunk.data.get("status", "success")
                     break
 
@@ -912,6 +927,15 @@ vim.ui.select({lua_options},
                         # Render edit blocks and setup callback
                         def render_and_setup():
                             try:
+                                # Add spacing before edit blocks
+                                spacing = spacing_manager.get_spacing_for_transition(
+                                    ContentType.EDIT_BLOCK
+                                )
+                                if spacing:
+                                    ui.append_to_chat_buffer(
+                                        self.nvim, _chat_bufnr, spacing
+                                    )
+
                                 # Render edit blocks
                                 self.nvim.call(
                                     "AnyaRenderEditBlocks", _chat_bufnr, _edit_blocks

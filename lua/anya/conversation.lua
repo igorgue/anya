@@ -170,6 +170,9 @@ function M.send_message()
     set_conversation_id(chat_buf, conv_id)
   end
 
+  -- Determine where to insert in the chat buffer
+  local chat_empty = is_chat_buffer_empty(chat_buf)
+
   -- Build the message content
   local output_lines = {}
 
@@ -182,33 +185,43 @@ function M.send_message()
     table.insert(output_lines, line)
   end
 
-  -- Add trailing empty line for spacing
-  table.insert(output_lines, "")
+  -- Ensure marker isolation
+  local final_text = table.concat(output_lines, "\n")
+  final_text = markers.ensure_marker_line_isolation(final_text)
 
-  -- Determine where to insert in the chat buffer
-  local chat_empty = is_chat_buffer_empty(chat_buf)
+  output_lines = vim.split(final_text, "\n", { plain = true })
+
   local insert_line
 
   if chat_empty then
     -- Replace the empty buffer content
     insert_line = 0
   else
-    -- Remove trailing blank lines before adding new message
+    -- Ensure NO blank lines before the new message marker
     local was_modifiable = vim.api.nvim_get_option_value("modifiable", { buf = chat_buf })
     vim.api.nvim_set_option_value("modifiable", true, { buf = chat_buf })
+
     local line_count = vim.api.nvim_buf_line_count(chat_buf)
+    -- Remove all trailing blank or whitespace-only lines
     while line_count > 0 do
       local last_line = vim.api.nvim_buf_get_lines(chat_buf, line_count - 1, line_count, false)[1] or ""
-      if last_line == "" then
+      if last_line:match("^%s*$") then
         vim.api.nvim_buf_set_lines(chat_buf, line_count - 1, line_count, false, {})
         line_count = line_count - 1
       else
+        -- Strip trailing whitespace from the last line with content
+        local stripped = last_line:gsub("%s+$", "")
+        if stripped ~= last_line then
+          vim.api.nvim_buf_set_lines(chat_buf, line_count - 1, line_count, false, { stripped })
+        end
         break
       end
     end
+
+    -- Just append on the next line
+    insert_line = line_count
+
     vim.api.nvim_set_option_value("modifiable", was_modifiable, { buf = chat_buf })
-    -- Append after existing content
-    insert_line = vim.api.nvim_buf_line_count(chat_buf)
   end
 
   -- Make buffer modifiable, insert lines, then restore

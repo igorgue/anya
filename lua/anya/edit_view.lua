@@ -412,30 +412,6 @@ end
 -- Render a SEARCH/REPLACE edit block in the buffer
 function M.render_edit(bufnr, filename, search_content, replace_content, raw_block)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
-
-  -- Collapse trailing blank lines to at most one so tools don't add extra spacing
-  while line_count > 1 do
-    local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1]
-    if last_line ~= "" then
-      break
-    end
-    local prev_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 2, line_count - 1, false)[1] or ""
-    if prev_line ~= "" then
-      break
-    end
-    vim.api.nvim_buf_set_lines(bufnr, line_count - 1, line_count, false, {})
-    line_count = line_count - 1
-  end
-
-  -- Check if we need to add a blank line before the edit block
-  -- We want a blank line between LLM text and tool output
-  local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1] or ""
-  if last_line ~= "" then
-    -- Last line has content, add a blank line
-    vim.api.nvim_buf_set_lines(bufnr, line_count, line_count, false, { "" })
-    line_count = line_count + 1
-  end
-
   local start_line = line_count
 
   -- Calculate stats

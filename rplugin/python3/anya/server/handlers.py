@@ -30,6 +30,7 @@ from ..agents.context import NvimPluginContext
 from .. import markers
 from .. import utils
 from .. import tools as tools_module
+from ..spacing import SpacingManager, ContentType
 from .agents import AgentManager
 
 
@@ -418,6 +419,7 @@ class RequestHandler:
         llm_history = payload.history
 
         # Tracking state
+        spacing_manager = SpacingManager()
         thinking_started = False
         thinking_finalized = False
         thinking_source = None
@@ -427,9 +429,6 @@ class RequestHandler:
         expected_outputs = 0
         tool_was_called = False
         in_anya_marker = False
-        needs_blank_before_text = False
-        last_output_was_marker = True
-        last_output_was_tool = False
 
         # Run the agent
         result = Runner.run_streamed(
@@ -502,8 +501,6 @@ class RequestHandler:
                             StreamEventType.THINKING_START,
                             {},
                         )
-                        last_output_was_marker = True
-                        last_output_was_tool = False
 
                     if reasoning_text:
                         await self._send_stream_chunk(
@@ -524,8 +521,6 @@ class RequestHandler:
                         StreamEventType.THINKING_END,
                         {},
                     )
-                    last_output_was_marker = True
-                    needs_blank_before_text = False
 
                 # Handle run item events
                 if event.type == "run_item_stream_event":
@@ -575,9 +570,6 @@ class RequestHandler:
                                 StreamEventType.THINKING_END,
                                 {},
                             )
-                            last_output_was_marker = True
-                            last_output_was_tool = False
-                            needs_blank_before_text = False
                         continue
 
                     # Handle tool calls
@@ -635,8 +627,6 @@ class RequestHandler:
                                         "skip_header": tool_name == "edit",
                                     },
                                 )
-                                last_output_was_marker = True
-                                last_output_was_tool = True
 
                     # Handle tool outputs
                     elif item_type == "tool_call_output_item":
@@ -680,8 +670,6 @@ class RequestHandler:
                             tool_was_called = False
                             parallel_tools = []
                             parallel_skip_tools = []
-                            needs_blank_before_text = True
-                            last_output_was_marker = True
 
                 # Handle text deltas
                 if hasattr(event, "data") and isinstance(
@@ -703,12 +691,8 @@ class RequestHandler:
                             StreamEventType.TEXT_DELTA,
                             {
                                 "text": delta,
-                                "needs_blank_before": needs_blank_before_text,
                             },
                         )
-                        needs_blank_before_text = False
-                        last_output_was_marker = False
-                        last_output_was_tool = False
 
         finally:
             # Ensure thinking is closed even on exception/cancellation

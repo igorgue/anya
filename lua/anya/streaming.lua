@@ -17,9 +17,21 @@ function M._append_to_buffer(bufnr, chunk)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   local last_line_idx = line_count - 1
   local last_line = vim.api.nvim_buf_get_lines(bufnr, last_line_idx, last_line_idx + 1, false)
-  local last_column = #(last_line[1] or "")
+  local last_line_content = last_line[1] or ""
 
-  local lines = vim.split(chunk, "\n", { plain = true })
+  -- If the chunk starts with a marker and the last line has content,
+  -- we need to add a newline first to ensure the marker is on its own line
+  local chunk_to_append = chunk
+  if chunk:match("^<!%-%- [am]t:") and last_line_content:match("%S") then
+    -- Last line has content and chunk starts with a marker - ensure newline separation
+    if not last_line_content:match("%s$") then
+      -- Last line doesn't end with whitespace, add a newline
+      chunk_to_append = "\n" .. chunk
+    end
+  end
+
+  local last_column = #last_line_content
+  local lines = vim.split(chunk_to_append, "\n", { plain = true })
   vim.api.nvim_buf_set_text(bufnr, last_line_idx, last_column, last_line_idx, last_column, lines)
 end
 
@@ -58,18 +70,8 @@ function M.output(bufnr, text, marker_list)
     final_text = markers_ui._inject_markers(text, marker_list)
   end
 
-  -- Check if text starts with a marker line
-  local first_line = final_text:match("^([^\n]*)")
-  local starts_with_marker = first_line and markers.is_marker_line(first_line)
-
-  -- If starting with marker, check if previous queue item ends with blank line
-  if starts_with_marker and #_G.anya_stream_queue > 0 then
-    local prev_item = _G.anya_stream_queue[#_G.anya_stream_queue]
-    if prev_item.bufnr == bufnr and prev_item.text:match("\n$") then
-      -- Remove trailing newline from previous item
-      prev_item.text = prev_item.text:gsub("\n$", "")
-    end
-  end
+  -- Ensure marker isolation
+  final_text = markers.ensure_marker_line_isolation(final_text)
 
   table.insert(_G.anya_stream_queue, {
     bufnr = bufnr,
@@ -164,6 +166,9 @@ function M.output_sync(bufnr, text, marker_list, skip_process_markers)
   if type(marker_list) == "table" and #marker_list > 0 then
     final_text = markers_ui._inject_markers(text, marker_list)
   end
+
+  -- Ensure marker isolation
+  final_text = markers.ensure_marker_line_isolation(final_text)
 
   -- Write all text at once
   M._append_to_buffer(bufnr, final_text)
