@@ -411,6 +411,9 @@ def new(
     _anya_state["chat_win"] = chat_win
     _anya_state["prompt_win"] = prompt_win
 
+    # Recalculate height based on actual display height (accounts for wrapped lines)
+    reposition_floats(nvim)
+
     # Focus the prompt window initially
     nvim.api.set_current_win(prompt_win)
 
@@ -479,7 +482,9 @@ def new(
     local function set_prompt_keys()
         local opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Insert blank line" }}
         vim.keymap.set("n", "<C-j>", "o<Esc>", opts)
-        vim.keymap.set("i", "<C-j>", "<CR>", opts)
+        vim.keymap.set("i", "<C-j>", "<C-o>o", opts)
+        vim.keymap.set("n", "<S-CR>", "o<Esc>", opts)
+        vim.keymap.set("i", "<S-CR>", "<C-o>o", opts)
 
         local move_start_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Start of line" }}
         vim.keymap.set("n", "<C-a>", "0", move_start_opts)
@@ -578,16 +583,28 @@ def reposition_floats(nvim: Nvim):
         layout_width = nvim.api.win_get_width(layout_win)
         layout_height = nvim.api.win_get_height(layout_win)
 
-        # Use the stored prompt height if available, otherwise fall back to buffer line count
-        stored_height = _anya_state.get("prompt_height")
-        if stored_height:
-            prompt_height = stored_height
-        else:
-            # Fallback to buffer line count for initial height
-            prompt_buf = nvim.api.win_get_buf(prompt_win)
-            line_count = nvim.api.buf_line_count(prompt_buf)
-            prompt_height = min(max(1, line_count), PROMPT_MAX_HEIGHT)
-            _anya_state["prompt_height"] = prompt_height
+        # Calculate prompt height based on actual display height (including wrapped lines)
+        prompt_buf = nvim.api.win_get_buf(prompt_win)
+        line_count = nvim.api.buf_line_count(prompt_buf)
+
+        # Use nvim_win_text_height to get the actual display height (accounts for wrapping)
+        try:
+            result = nvim.api.win_text_height(
+                prompt_win,
+                {
+                    "start_row": 0,
+                    "end_row": line_count - 1 if line_count > 0 else 0,
+                }
+            )
+            # win_text_height returns a dict with 'all' key
+            display_height = result.get("all", line_count) if isinstance(result, dict) else result
+        except Exception:
+            # Fallback to line count if win_text_height is not available
+            display_height = line_count
+
+        # Use content height directly - shrink when content is deleted
+        prompt_height = min(max(1, display_height), PROMPT_MAX_HEIGHT)
+        _anya_state["prompt_height"] = prompt_height
 
         # Calculate sizes (prompt border takes 2 lines)
         real_prompt_height = prompt_height + 2
