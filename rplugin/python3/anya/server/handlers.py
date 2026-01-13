@@ -23,6 +23,7 @@ from ..protocol import (
     SendMessagePayload,
     CancelRequestPayload,
     NvimContext,
+    AgentSettings,
     make_error_response,
     make_success_response,
 )
@@ -245,12 +246,21 @@ class RequestHandler:
         """Run the agent with streaming, sending events via PUB socket."""
         self.logger.info(f"Starting agent streaming for session {session_id}")
 
-        # Get or create agent for this session
-        agent = await self.agent_manager.get_agent_for_session(session_id)
-        self.logger.info(f"Got agent for session {session_id}")
-
         # Build context from payload
         nvim_context = NvimContext.from_dict(payload.nvim_context)
+
+        # Extract agent settings from context (client-side env vars override daemon's)
+        agent_settings = nvim_context.get_agent_settings()
+        self.logger.info(
+            f"Using agent settings: model={agent_settings.model}, "
+            f"api_base={agent_settings.api_base}, api_type={agent_settings.api_type}"
+        )
+
+        # Get or create agent for this session with the specified settings
+        agent = await self.agent_manager.get_agent_for_session(
+            session_id, settings=agent_settings
+        )
+        self.logger.info(f"Got agent for session {session_id}")
 
         # Update daemon's CWD to match client's CWD when a request comes in
         # This ensures tools that use os.getcwd() get the correct directory
@@ -433,9 +443,12 @@ class RequestHandler:
         in_anya_marker = False
 
         # Get custom run config for OpenRouter models (models with '/' or ':' in name)
-        run_config = get_run_config()
+        # Pass agent_settings so it uses client's settings, not daemon's environment
+        run_config = get_run_config(agent_settings)
         if run_config:
-            self.logger.info(f"Using custom run config for model provider")
+            self.logger.info(
+                f"Using custom run config for model provider (model={agent_settings.model})"
+            )
 
         # Run the agent
         result = Runner.run_streamed(
@@ -697,9 +710,9 @@ class RequestHandler:
                         if not delta:
                             continue
 
-                        # Suppress text deltas during thinking-to-tool transition
-                        # (model sometimes outputs continuation text that looks like reasoning)
-                        if tool_was_called and thinking_finalized:
+                        # Suppress text deltas while a tool is executing
+                        # This prevents tool output from being interleaved with LLM text
+                        if tool_was_called:
                             continue
 
                         # Send text delta

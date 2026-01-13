@@ -60,7 +60,7 @@ local function send_message()
   local ok, anya = pcall(require, "anya")
   if ok and anya.config and anya.config.start_in_insert then
     -- Start insert mode unless already in insert
-    if vim.fn.mode() ~= 'i' then
+    if vim.fn.mode() ~= "i" then
       vim.cmd("startinsert")
     end
   end
@@ -168,7 +168,6 @@ end, { buffer = true, desc = "Reduce prompt height" })
 vim.keymap.set("i", "<C-Down>", function()
   resize_prompt_height(-1)
 end, { buffer = true, desc = "Reduce prompt height" })
-
 
 -- Also try <C-k> and <C-l> as alternatives (since <C-j> is taken)
 vim.keymap.set("n", "<C-k>", function()

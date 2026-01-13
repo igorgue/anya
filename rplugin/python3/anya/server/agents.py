@@ -2,21 +2,22 @@
 
 Manages agent lifecycle:
 - MCP agent: Single instance, always running, shared across all sessions
-- Code agent: One instance per session, created on first request
+- Code agent: Cached by (session_id, settings_hash) to allow different clients
+              to use different settings
 """
 
 import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import zmq.asyncio
 from agents import Agent
 
 from ..mcp_loader import MCPManager, load_mcp_server_configs, create_mcp_servers
 from ..agents import CodeAgent, MCPAgent, MAIN_AGENT_NAME
-from ..protocol import StreamChunk, StreamEventType
+from ..protocol import StreamChunk, StreamEventType, AgentSettings
 
 
 @dataclass
@@ -24,7 +25,10 @@ class SessionState:
     """State for a single client session."""
 
     session_id: str
-    agent: Agent | None = None
+    # Agents are cached by settings_hash within a session
+    # This allows a session to use different models if settings change
+    agents: dict[str, Agent] = field(default_factory=dict)  # settings_hash -> Agent
+    current_settings_hash: str | None = None
     active_request_id: str | None = None
     cancelled: bool = False
     created_at: float = field(default_factory=lambda: asyncio.get_event_loop().time())
@@ -210,32 +214,81 @@ class AgentManager:
         session.last_activity = asyncio.get_event_loop().time()
         return session
 
-    async def get_agent_for_session(self, session_id: str) -> Agent:
-        """Get or create the Code agent for a session.
+    async def get_agent_for_session(
+        self,
+        session_id: str,
+        settings: AgentSettings | None = None,
+    ) -> Agent:
+        """Get or create the Code agent for a session with specific settings.
 
-        Each session gets its own Code agent instance that persists
-        for the lifetime of the session.
+        Agents are cached by (session_id, settings_hash). If a session uses
+        different settings (e.g., different model), a new agent is created
+        and cached for those settings.
+
+        Args:
+            session_id: The session ID
+            settings: Optional AgentSettings from client. If not provided,
+                      uses daemon's default environment settings.
+
+        Returns:
+            The Code agent for this session and settings combination.
         """
         session = await self.get_or_create_session(session_id)
 
-        if session.agent is None:
-            self.logger.info(f"Creating Code agent for session: {session_id}")
-            session.agent = await CodeAgent(
-                mcp_servers=self._mcp_servers if self._mcp_servers else None,
+        # Calculate settings hash for cache key
+        if settings is None:
+            # Use defaults - create a settings object from daemon's env
+            settings = AgentSettings(
+                model=os.environ.get("ANYA_MODEL", "gpt-4.1"),
+                api_key=os.environ.get("ANYA_API_KEY") or os.environ.get("OPENAI_API_KEY"),
+                api_base=os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE"),
+                api_type=os.environ.get("ANYA_API_TYPE", "responses"),
                 thinking_budget=self._thinking_budget,
-                nvim=None,  # No nvim in daemon context
+                disable_mcp=not self._mcp_enabled,
             )
-            self.logger.info(f"Code agent created for session: {session_id}")
 
-        return session.agent
+        settings_hash = settings.settings_hash()
+
+        # Check if we have a cached agent for these settings
+        if settings_hash in session.agents:
+            self.logger.debug(
+                f"Reusing cached agent for session {session_id}, settings_hash={settings_hash}"
+            )
+            session.current_settings_hash = settings_hash
+            return session.agents[settings_hash]
+
+        # Create new agent for these settings
+        self.logger.info(
+            f"Creating Code agent for session {session_id}, "
+            f"model={settings.model}, settings_hash={settings_hash}"
+        )
+
+        # Determine which MCP servers to use based on settings
+        mcp_servers_to_use = None if settings.disable_mcp else self._mcp_servers
+
+        agent = await CodeAgent(
+            mcp_servers=mcp_servers_to_use,
+            thinking_budget=settings.thinking_budget or self._thinking_budget,
+            nvim=None,  # No nvim in daemon context
+            settings=settings,
+        )
+
+        # Cache the agent
+        session.agents[settings_hash] = agent
+        session.current_settings_hash = settings_hash
+        self.logger.info(
+            f"Code agent created for session {session_id}, model={settings.model}"
+        )
+
+        return agent
 
     async def end_session(self, session_id: str):
-        """End a session and clean up its agent."""
+        """End a session and clean up its agents."""
         if session_id in self._sessions:
             self.logger.info(f"Ending session: {session_id}")
             session = self._sessions.pop(session_id)
-            # Agent cleanup if needed
-            session.agent = None
+            # Clear all cached agents
+            session.agents.clear()
 
     async def cancel_request(self, session_id: str, request_id: str) -> bool:
         """Cancel an active request for a session."""

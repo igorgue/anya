@@ -1,4 +1,5 @@
 import os
+from typing import TYPE_CHECKING
 
 from agents import Agent
 from agents.models.default_models import get_default_model_settings
@@ -12,6 +13,9 @@ from .dynamic_instructions import (
 
 from .utils import get_instructions
 from ..system_prompt import apply_system_prompt
+
+if TYPE_CHECKING:
+    from ..protocol import AgentSettings
 
 MAIN_AGENT_NAME = "Code"
 MAIN_ASSISTANT_NAME = "Anya"
@@ -28,7 +32,12 @@ def _parse_reasoning_effort(value: str | None) -> str | None:
     return v if v in allowed else None
 
 
-async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
+async def CodeAgent(
+    mcp_servers=None,
+    thinking_budget=None,
+    nvim=None,
+    settings: "AgentSettings | None" = None,
+) -> Agent:
     """Create a code agent with dynamically generated instructions based on MCP servers.
 
     This async version handles the generation of dynamic instructions that may
@@ -37,10 +46,12 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
     Args:
         mcp_servers: List of connected MCP server instances
         thinking_budget: Optional thinking budget for reasoning models.
-
             This should be a reasoning "effort" string supported by OpenAI (e.g.
             "minimal", "low", "medium", "high", "xhigh"). If not provided, reads
-            from ANYA_THINKING_BUDGET.
+            from settings or ANYA_THINKING_BUDGET.
+        nvim: Optional nvim instance (not used in daemon context)
+        settings: Optional AgentSettings from client. If provided, these override
+                  environment variables for model, API key, API base, etc.
 
     Returns:
         Configured Agent instance with dynamic instructions
@@ -62,21 +73,27 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
     instructions = apply_system_prompt(instructions, nvim=nvim)
 
     # ------
-    # Ergonomic Environment Variable Lookups
+    # Configuration from settings or environment
     # ------
-    def _get_env(key, *fallback_keys, default=None):
-        for k in (key, *fallback_keys):
+    def _get_setting(attr: str, env_key: str, *fallback_keys, default=None):
+        """Get setting from AgentSettings or environment variables."""
+        if settings:
+            val = getattr(settings, attr, None)
+            if val is not None:
+                return val
+        # Fall back to environment
+        for k in (env_key, *fallback_keys):
             v = os.environ.get(k)
             if v is not None:
                 return v
         return default
 
     # Model config
-    model_name = _get_env("ANYA_MODEL", default="gpt-4.1").strip()
-    model_settings = get_default_model_settings(model_name.lower())
+    model_name = (_get_setting("model", "ANYA_MODEL", default="gpt-4.1") or "gpt-4.1").strip()
+    model_settings_obj = get_default_model_settings(model_name.lower())
 
     # API type (for completions/chat/responses/etc)
-    api_type = _get_env("ANYA_API_TYPE", "ANYA_OPENAI_API_TYPE", default=None)
+    api_type = _get_setting("api_type", "ANYA_API_TYPE", "ANYA_OPENAI_API_TYPE", default="responses")
     if api_type:
         api_type = api_type.strip().lower()
         if api_type not in {"chat_completions", "responses"}:
@@ -84,35 +101,26 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
     else:
         api_type = "responses"
 
-    # API key and base url lookup (prefer ANYA_*, fallback to OPENAI_*)
-    api_key = _get_env("ANYA_API_KEY", "OPENAI_API_KEY", default=None)
-    api_base = _get_env("ANYA_API_BASE", "OPENAI_API_BASE", default=None)
+    # If the model_settings supports passing api_type, set it here
+    if hasattr(model_settings_obj, "api_type"):
+        model_settings_obj.api_type = api_type
 
-    # Add: Set API type from environment (ANYA_OPENAI_API_TYPE)
-    api_type = (os.environ.get("ANYA_OPENAI_API_TYPE") or "responses").strip().lower()
-    if api_type not in ("responses", "chat_completions"):
-        api_type = "responses"  # fallback default
-    # If the model_settings supports passing api_type, set it here; we also pass
-    # api_type through the Agent config below.
-    if hasattr(model_settings, 'api_type'):
-        model_settings.api_type = api_type
-
-    # Get thinking budget (if not explicitly passed).
+    # Get thinking budget (prefer explicit param, then settings, then env)
     if thinking_budget is None:
-        thinking_budget = os.environ.get("ANYA_THINKING_BUDGET")
+        thinking_budget = _get_setting("thinking_budget", "ANYA_THINKING_BUDGET")
 
-    # Configure reasoning if ANYA_THINKING_BUDGET is set
+    # Configure reasoning if thinking_budget is set
     if thinking_budget is not None:
         effort = _parse_reasoning_effort(thinking_budget) or "medium"
 
         # If model already has reasoning (like gpt-5), update the effort
-        if model_settings.reasoning is not None:
-            model_settings.reasoning.effort = effort
-            model_settings.reasoning.summary = "auto"
+        if model_settings_obj.reasoning is not None:
+            model_settings_obj.reasoning.effort = effort
+            model_settings_obj.reasoning.summary = "auto"
         else:
             # For models without native reasoning, set it anyway
             # This may or may not produce reasoning events depending on the model
-            model_settings.reasoning = Reasoning(
+            model_settings_obj.reasoning = Reasoning(
                 effort=effort,
                 summary="auto",
             )
@@ -140,7 +148,7 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
         "name": MAIN_AGENT_NAME,
         "instructions": instructions,
         "model": model_name,
-        "model_settings": model_settings,
+        "model_settings": model_settings_obj,
         "tools": [
             create_file,
             edit,

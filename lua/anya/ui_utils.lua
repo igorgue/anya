@@ -51,6 +51,12 @@ function M.setup_highlights()
   -- Thinking: gray for reasoning text (from Comment)
   M.set_hl_fg_only("AnyaThinking", "Comment")
 
+  -- Token bar highlights
+  M.set_hl_fg_only("AnyaTokenGreen", "DiagnosticOk")
+  M.set_hl_fg_only("AnyaTokenYellow", "WarningMsg")
+  M.set_hl_fg_only("AnyaTokenRed", "ErrorMsg")
+  M.set_hl_fg_only("AnyaTokenGray", "Comment")
+
   -- Edit tool highlight groups
   -- Diff indicators
   M.set_hl_fg_only("AnyaEditAdd", "OkMsg")
@@ -102,10 +108,39 @@ function M.handle_yolo_click(id, clicks, button, mods)
   require("anya.conversation").toggle_yolo_mode()
 end
 
--- Global wrapper for winbar click handler
--- This must be global for v:lua to work in winbar expressions
+-- Handle click on token progress bar
+-- @param id: Click region ID (unused)
+-- @param clicks: Number of clicks (unused)
+-- @param button: Mouse button (unused)
+-- @param mods: Modifier keys (unused)
+function M.handle_token_click(id, clicks, button, mods)
+  -- Toggle between compact and detailed views
+  if M._token_view_state == "compact" then
+    M._token_view_state = "detailed"
+  else
+    M._token_view_state = "compact"
+  end
+  -- Refresh winbar in all anya-chat windows by resetting the expression
+  -- This ensures the winbar stays dynamic and both toggles work independently
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
+    if ft == "anya-chat" then
+      -- Reset to empty first, then restore the expression to force re-evaluation
+      pcall(vim.api.nvim_win_set_option, win, "winbar", "")
+      pcall(vim.api.nvim_win_set_option, win, "winbar", "%{%v:lua.require('anya.ui_utils').get_winbar()%}")
+    end
+  end
+end
+
+-- Global wrapper for winbar click handlers
+-- These must be global for v:lua to work in winbar expressions
 _G.anya_handle_yolo_click = function(id, clicks, button, mods)
   M.handle_yolo_click(id, clicks, button, mods)
+end
+
+_G.anya_handle_token_click = function(id, clicks, button, mods)
+  M.handle_token_click(id, clicks, button, mods)
 end
 
 -- Token stats storage (updated by daemon via set_token_stats)
@@ -115,6 +150,9 @@ M._token_stats = {
   percentage = 0,
 }
 
+-- Token view state: "compact" or "detailed"
+M._token_view_state = "compact"
+
 -- Set token stats from Python plugin
 -- @param used: Total tokens used
 -- @param max: Context window size
@@ -123,12 +161,14 @@ function M.set_token_stats(used, max, percentage)
   M._token_stats.used = used or 0
   M._token_stats.max = max or 128000
   M._token_stats.percentage = percentage or 0
-  -- Refresh winbar in all anya-chat windows
+  -- Refresh winbar in all anya-chat windows by resetting the expression
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     local buf = vim.api.nvim_win_get_buf(win)
     local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
     if ft == "anya-chat" then
-      pcall(vim.api.nvim_win_set_option, win, "winbar", M.get_winbar())
+      -- Reset to empty first, then restore the expression to force re-evaluation
+      pcall(vim.api.nvim_win_set_option, win, "winbar", "")
+      pcall(vim.api.nvim_win_set_option, win, "winbar", "%{%v:lua.require('anya.ui_utils').get_winbar()%}")
     end
   end
 end
@@ -138,7 +178,18 @@ local function get_token_usage()
   return M._token_stats.used, M._token_stats.max, M._token_stats.percentage
 end
 
--- Colored progress bar generator: xx% ███
+-- Format a number (e.g., 128000 -> "128K")
+local function format_number(num)
+  if num >= 1000000 then
+    return string.format("%.1fM", num / 1000000)
+  elseif num >= 1000 then
+    return string.format("%.0fK", num / 1000)
+  else
+    return tostring(num)
+  end
+end
+
+-- Colored progress bar generator: xx% ███ (compact) or detailed (used/max)
 function M.token_progress_bar()
   local used, max, percentage = get_token_usage()
   -- Don't show bar if no tokens used yet
@@ -147,8 +198,12 @@ function M.token_progress_bar()
   end
   -- Use pre-calculated percentage, fallback to computing it
   local pct = percentage or (max > 0 and math.floor((used / max) * 100) or 0)
-  if pct < 0 then pct = 0 end
-  if pct > 100 then pct = 100 end
+  if pct < 0 then
+    pct = 0
+  end
+  if pct > 100 then
+    pct = 100
+  end
 
   -- Color based on percentage
   local color_group
@@ -160,36 +215,27 @@ function M.token_progress_bar()
     color_group = "AnyaTokenRed"
   end
 
-  -- 3-character bar with filled/unfilled (using black rectangle for centered look)
-  local filled = math.floor(pct / 100 * 3 + 0.5)
-  if filled < 1 and pct > 0 then filled = 1 end -- Show at least 1 if any usage
-  local unfilled = 3 - filled
-  local bar = string.format("%%#%s#%s%%*%%#AnyaTokenGray#%s%%*", 
-    color_group, string.rep("▬", filled), string.rep("▬", unfilled))
-  return string.format("%2d%%%% %s", pct, bar)
-end
-
--- Add token bar highlights to setup_highlights
-function M.setup_highlights()
-  -- Success: green (from OkMsg)
-  M.set_hl_fg_only("AnyaToolSuccess", "OkMsg")
-
-  -- Failure: red (from ErrorMsg)
-  M.set_hl_fg_only("AnyaToolFailure", "ErrorMsg")
-
-  -- Pending: subtle (from Comment)
-  M.set_hl_fg_only("AnyaToolPending", "Comment")
-
-  -- Thinking: gray for reasoning text (from Comment)
-  M.set_hl_fg_only("AnyaThinking", "Comment")
-
-  -- Token bar highlights
-  M.set_hl_fg_only("AnyaTokenGreen", "DiagnosticOk")
-  M.set_hl_fg_only("AnyaTokenYellow", "WarningMsg")
-  M.set_hl_fg_only("AnyaTokenRed", "ErrorMsg")
-  M.set_hl_fg_only("AnyaTokenGray", "Comment")
-
-  -- ...rest of original highlights ...
+  -- Return based on view state
+  if M._token_view_state == "compact" then
+    -- Compact view: xx% ███
+    local filled = math.floor(pct / 100 * 3 + 0.5)
+    if filled < 1 and pct > 0 then
+      filled = 1
+    end -- Show at least 1 if any usage
+    local unfilled = 3 - filled
+    local bar = string.format(
+      "%%#%s#%s%%*%%#AnyaTokenGray#%s%%*",
+      color_group,
+      string.rep("▬", filled),
+      string.rep("▬", unfilled)
+    )
+    return string.format("%2d%%%% %s", pct, bar)
+  else
+    -- Detailed view: used/max
+    local used_str = format_number(used)
+    local max_str = format_number(max)
+    return string.format("%%#%s#%s%%*/%s%%*", color_group, used_str, max_str)
+  end
 end
 
 function M.get_winbar()
@@ -200,8 +246,12 @@ function M.get_winbar()
     version_text = "Anya v" .. version
   end
 
-  -- Token progress bar
+  -- Token progress bar (clickable)
   local token_bar = M.token_progress_bar()
+  local token_click = ""
+  if token_bar ~= "" then
+    token_click = "%@v:lua.anya_handle_token_click@" .. token_bar .. "%T"
+  end
 
   -- Try to safely get YOLO mode status
   local is_yolo_on = false
@@ -217,9 +267,9 @@ function M.get_winbar()
   else
     yolo_text = "%#Comment#yolo%*"
   end
-  -- Clickable YOLO 
+  -- Clickable YOLO
   local yolo_click = "%@v:lua.anya_handle_yolo_click@" .. yolo_text .. "%T"
-  return string.format("%s%%=%s  %s", version_text, token_bar, yolo_click)
+  return string.format("%s%%=%s  %s", version_text, token_click, yolo_click)
 end
 
 return M

@@ -150,6 +150,11 @@ end
 
 -- Output text synchronously without streaming animation
 -- Text is written immediately to the buffer, bypassing the queue
+-- IMPORTANT: This function ensures ordering by:
+-- 1. Stopping the queue timer to prevent race conditions
+-- 2. Flushing all pending queue items first
+-- 3. Writing the sync content
+-- 4. Resuming the timer
 -- @param bufnr number: Buffer number to write to
 -- @param text string: Text to output (can contain newlines and marker lines)
 -- @param marker_list string[]|nil: List of markers to inject (e.g., {"fold", "tool_success"})
@@ -170,16 +175,27 @@ function M.output_sync(bufnr, text, marker_list, skip_process_markers)
   -- Ensure marker isolation
   final_text = markers.ensure_marker_line_isolation(final_text)
 
-  -- Use vim.schedule to avoid E565 textlock errors when called from certain contexts
-  vim.schedule(function()
-    -- Re-validate buffer after schedule
+  -- CRITICAL: Stop the timer IMMEDIATELY to prevent any race conditions
+  -- This ensures no timer callbacks can fire between flush and our write
+  local timer_was_running = _G.anya_stream_timer ~= nil
+  if _G.anya_stream_timer then
+    _G.anya_stream_timer:stop()
+    _G.anya_stream_timer = nil
+  end
+
+  -- Helper to do the actual write
+  local function do_write()
     if not vim.api.nvim_buf_is_valid(bufnr) then
+      -- Resume timer if needed before returning
+      if timer_was_running and #_G.anya_stream_queue > 0 then
+        M._ensure_timer_running()
+      end
       return
     end
 
-    -- Flush any pending async queue first to prevent interleaved content
-    -- (e.g., fold_end appearing in the middle of queued text)
-    M.flush_queue(false)  -- Don't process markers yet
+    -- Flush queue first to ensure proper ordering
+    -- (timer is already stopped, so this is safe)
+    M.flush_queue(false) -- Don't process markers yet
 
     -- Write all text at once
     M._append_to_buffer(bufnr, final_text)
@@ -191,7 +207,33 @@ function M.output_sync(bufnr, text, marker_list, skip_process_markers)
 
     -- Autoscroll to bottom
     M._autoscroll_to_bottom(bufnr)
-  end)
+
+    -- Resume timer if there are still items in queue (shouldn't be after flush, but be safe)
+    if #_G.anya_stream_queue > 0 then
+      M._ensure_timer_running()
+    end
+  end
+
+  -- Try to write synchronously first (preserves ordering)
+  -- Only fall back to vim.schedule if we get E565 textlock error
+  local ok, err = pcall(do_write)
+  if not ok then
+    -- Check if it's a textlock error (E565)
+    if err and (err:find("E565") or err:find("textlock")) then
+      -- If we need to schedule, we need to ensure the timer stays stopped
+      -- until after our scheduled write completes
+      vim.schedule(function()
+        do_write()
+      end)
+    else
+      -- Resume timer before re-raising
+      if timer_was_running and #_G.anya_stream_queue > 0 then
+        M._ensure_timer_running()
+      end
+      -- Re-raise other errors
+      error(err)
+    end
+  end
 end
 
 -- Pause the streaming queue (stop writing but keep items queued)

@@ -197,12 +197,6 @@ After modifying Python code:
 
 Then restart Neovim.
 
-> Why did the developer go broke? Because he used up all his cache!
-
-> Why do Python programmers have low self-esteem? Because they're constantly comparing their self to others.
-
-> Why do programmers always mix up Christmas and Halloween? Because Oct 31 equals Dec 25!
-
 ## License
 
 MIT

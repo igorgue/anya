@@ -671,8 +671,23 @@ function M._process_markers(bufnr)
       end_line = start_line
     end
 
-    -- Create fold spanning the message marker through the end of its content
-    M._create_fold_range(bufnr, start_line, end_line, true)
+    -- Check if this message contains any tool folds (fold_start markers)
+    -- If so, skip creating message fold to avoid double folding
+    local has_tool_fold = false
+    for j = start_line, end_line do
+      if j <= #lines then
+        local check_line = lines[j]
+        if markers.is_marker_line(check_line) and markers.has_marker(check_line, markers.fold_start) then
+          has_tool_fold = true
+          break
+        end
+      end
+    end
+
+    -- Only create message fold if there are no nested tool folds
+    if not has_tool_fold then
+      M._create_fold_range(bufnr, start_line, end_line, true)
+    end
 
     local meta = get_message_meta(msg_marker.id)
     if meta then

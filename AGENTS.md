@@ -209,9 +209,32 @@ plugin/anya.vim     # Vimscript bootstrap, sets load flags
 | `ANYA_MODEL`         | gpt-4.1    | Default LLM                  |
 | `ANYA_API_KEY`       | (unset)    | Override API key (for OpenRouter, etc.) |
 | `ANYA_API_BASE`      | (unset)    | Custom API endpoint (auto-detected for OpenRouter models) |
+| `ANYA_API_TYPE`      | responses  | API type: "responses" (default) or "chat_completions" |
 | `ANYA_THINKING_BUDGET`| (unset)   | Reasoning effort for model   |
 | `ANYA_DISABLE_MCP`   | "0"        | Disable MCP agent/tools      |
 | `ANYA_YOLO`          | ""         | Approve (auto-apply) all edits|
+
+### Client-Side Settings
+Anya supports **per-client settings** that override the daemon's environment. This means you can
+run multiple Neovim instances with different models/providers, all talking to the same daemon.
+
+When you set environment variables *before* starting Neovim, those settings are passed to the
+daemon and used for that specific session. The daemon caches agents by settings hash, so different
+clients can use different configurations without conflict.
+
+Example workflow:
+```bash
+# Terminal 1: Use OpenAI
+export ANYA_MODEL=gpt-4.1
+nvim +Anya
+
+# Terminal 2: Use OpenRouter Claude
+export ANYA_API_TYPE=chat_completions
+export ANYA_API_KEY="$OPENROUTER_API_KEY"
+export ANYA_API_BASE="https://openrouter.ai/api/v1"
+export ANYA_MODEL="anthropic/claude-opus-4.5"
+nvim +Anya
+```
 
 ### OpenRouter Support
 Anya supports OpenRouter models out of the box. When you set `ANYA_MODEL` to an OpenRouter model
@@ -223,9 +246,11 @@ Anya supports OpenRouter models out of the box. When you set `ANYA_MODEL` to an 
 To use OpenRouter:
 1. Set your OpenRouter API key: `export ANYA_API_KEY=sk-or-...` (or use `OPENROUTER_API_KEY`)
 2. Set your model: `export ANYA_MODEL=anthropic/claude-sonnet-4`
+3. Set API type for non-OpenAI providers: `export ANYA_API_TYPE=chat_completions`
 
 You can also use a custom API base for other OpenAI-compatible providers:
 ```bash
+export ANYA_API_TYPE=chat_completions
 export ANYA_API_BASE=https://your-custom-endpoint.com/v1
 export ANYA_API_KEY=your-api-key
 export ANYA_MODEL=your-model-name

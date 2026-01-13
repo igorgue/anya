@@ -322,6 +322,7 @@ def update_message(
     finally:
         conn.close()
 
+
 def save_memory(memory: dict) -> bool:
     """
     Insert a memory item into the memories table.
@@ -342,7 +343,7 @@ def save_memory(memory: dict) -> bool:
                 memory.get("timestamp"),
                 memory.get("deduplication_key"),
                 memory.get("conversation_id"),
-                memory.get("message_id")
+                memory.get("message_id"),
             ),
         )
         conn.commit()
@@ -353,15 +354,17 @@ def save_memory(memory: dict) -> bool:
         conn.close()
 
 
-def search_memories(query: str | None = None, category: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+def search_memories(
+    query: str | None = None, category: str | None = None, limit: int = 20
+) -> list[dict[str, Any]]:
     """
     Search memories by text query and/or category.
-    
+
     Args:
         query: Optional text to search for (case-insensitive LIKE match)
         category: Optional category filter (personal, skill, project, task)
         limit: Maximum number of results
-    
+
     Returns:
         List of memory dicts ordered by timestamp descending
     """
@@ -369,17 +372,17 @@ def search_memories(query: str | None = None, category: str | None = None, limit
     try:
         conditions = []
         params: list[Any] = []
-        
+
         if query:
             conditions.append("text LIKE ?")
             params.append(f"%{query}%")
-        
+
         if category:
             conditions.append("category = ?")
             params.append(category.lower())
-        
+
         where_clause = " AND ".join(conditions) if conditions else "1=1"
-        
+
         cursor = conn.execute(
             f"""SELECT id, text, category, source, timestamp 
                FROM memories 
@@ -391,6 +394,7 @@ def search_memories(query: str | None = None, category: str | None = None, limit
         return [dict(row) for row in cursor.fetchall()]
     finally:
         conn.close()
+
 
 def update_message_markers(id: str, markers_json: str) -> bool:
     """Update the markers JSON for a message.

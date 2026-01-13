@@ -120,7 +120,9 @@ def _find_anya_windows(nvim: Nvim) -> tuple[int | None, int | None, int | None, 
 def _close_anya_windows(nvim: Nvim):
     """Close Anya chat and prompt windows."""
     # Find windows dynamically in case state is stale
-    found_chat_win, found_prompt_win, found_layout_win, stray_wins = _find_anya_windows(nvim)
+    found_chat_win, found_prompt_win, found_layout_win, stray_wins = _find_anya_windows(
+        nvim
+    )
 
     # Use found windows or fall back to state
     chat_win = found_chat_win or _anya_state.get("chat_win")
@@ -167,7 +169,9 @@ def _close_anya_windows(nvim: Nvim):
             current_layout_buf = nvim.api.win_get_buf(layout_win)
             layout_buf_name = nvim.api.buf_get_name(current_layout_buf)
             # If layout window is somehow showing chat/prompt buffer, fix it
-            if layout_buf_name.endswith(CHAT_TITLE) or layout_buf_name.endswith(PROMPT_TITLE):
+            if layout_buf_name.endswith(CHAT_TITLE) or layout_buf_name.endswith(
+                PROMPT_TITLE
+            ):
                 nvim.api.win_set_buf(layout_win, container_buf)
         except Exception:
             pass
@@ -704,10 +708,12 @@ def reposition_floats(nvim: Nvim):
                 {
                     "start_row": 0,
                     "end_row": line_count - 1 if line_count > 0 else 0,
-                }
+                },
             )
             # win_text_height returns a dict with 'all' key
-            display_height = result.get("all", line_count) if isinstance(result, dict) else result
+            display_height = (
+                result.get("all", line_count) if isinstance(result, dict) else result
+            )
         except Exception:
             # Fallback to line count if win_text_height is not available
             display_height = line_count

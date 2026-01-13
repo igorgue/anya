@@ -124,7 +124,12 @@ class SpacingManager:
         # After a tool marker (from tool header or thinking), we need blank line before text/output
         if self._last_content_type == ContentType.TOOL_MARKER:
             self._last_content_type = next_type
-            if next_type in [ContentType.TOOL_OUTPUT, ContentType.TEXT, ContentType.TOOL_HEADER, ContentType.EDIT_BLOCK]:
+            if next_type in [
+                ContentType.TOOL_OUTPUT,
+                ContentType.TEXT,
+                ContentType.TOOL_HEADER,
+                ContentType.EDIT_BLOCK,
+            ]:
                 return "\n\n"
             # MARKER type is for fold_end and similar - no spacing needed, marker has its own newline
             if next_type == ContentType.MARKER:
@@ -230,7 +235,11 @@ class SpacingManager:
                 for marker in marker_list:
                     if marker == "fold_end":
                         is_fold_end = True
-                    if marker.startswith("fold_") or marker.startswith("tool_") or marker.startswith("edit_"):
+                    if (
+                        marker.startswith("fold_")
+                        or marker.startswith("tool_")
+                        or marker.startswith("edit_")
+                    ):
                         is_tool_marker = True
                         break
 

@@ -20,6 +20,7 @@ from . import daemon as daemon_mgmt
 from .spacing import SpacingManager, ContentType
 from .client import AnyaClient, StreamSubscriber, SystemSubscriber
 from .protocol import (
+    AgentSettings,
     NvimContext,
     RequestType,
     StreamEventType,
@@ -187,6 +188,21 @@ class AnyaPlugin:
         if not self._db_initialized:
             db.init_db()
             self._db_initialized = True
+
+    def _get_agent_settings(self) -> AgentSettings:
+        """Get agent settings from environment variables.
+
+        These settings are passed to the daemon so it uses the client's
+        configuration rather than its own environment.
+        """
+        return AgentSettings(
+            model=os.environ.get("ANYA_MODEL", "gpt-4.1"),
+            api_key=os.environ.get("ANYA_API_KEY") or os.environ.get("OPENAI_API_KEY"),
+            api_base=os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE"),
+            api_type=os.environ.get("ANYA_API_TYPE", "responses"),
+            thinking_budget=os.environ.get("ANYA_THINKING_BUDGET"),
+            disable_mcp=os.environ.get("ANYA_DISABLE_MCP", "0") == "1",
+        )
 
     def _set_tool_fold_open(self, is_open: bool):
         """Set the tool fold open state and expose it via vim global variable."""
@@ -419,13 +435,16 @@ class AnyaPlugin:
                 "Anya: Daemon started.\n",
             )
 
+        # Get agent settings from client-side environment (used for fidget and DB)
+        request_agent_settings = self._get_agent_settings()
+
         # Emit fidget start event
         fidget.emit_user_event(
             self.nvim,
             "AnyaRequestStarted",
             {
                 "id": request_id,
-                "model": DEFAULT_MODEL,
+                "model": request_agent_settings.model,
             },
         )
 
@@ -470,7 +489,7 @@ class AnyaPlugin:
                     role="assistant",
                     content="",
                     author="Code",
-                    model=DEFAULT_MODEL,
+                    model=request_agent_settings.model,
                     created_at=timestamp,
                     ended_at=None,
                     markers=None,
@@ -538,6 +557,7 @@ class AnyaPlugin:
             open_buffers=ctx_data["open_buffers"],
             yolo_mode=self._yolo_mode,
             allowed_commands=list(self.allowed_commands),
+            agent_settings=request_agent_settings.to_dict(),
         )
 
         # Subscribe to streaming events
@@ -961,7 +981,43 @@ vim.ui.select({lua_options},
 
                         edit_id = _confirmation_id[:8]  # Use confirmation_id as edit_id
 
+                        # Wait for streaming queue to empty before rendering edit UI
+                        # This ensures edit blocks appear after tool output is complete
+                        async def wait_for_queue_empty(max_wait: float = 5.0):
+                            start = asyncio.get_event_loop().time()
+                            while asyncio.get_event_loop().time() - start < max_wait:
+                                queue_future: concurrent.futures.Future = (
+                                    concurrent.futures.Future()
+                                )
+
+                                def check_queue():
+                                    try:
+                                        status = self.nvim.exec_lua(
+                                            "return require('anya.text').get_queue_status()"
+                                        )
+                                        queue_future.set_result(
+                                            status.get("queue_length", 0)
+                                        )
+                                    except Exception:
+                                        queue_future.set_result(0)
+
+                                self.nvim.async_call(check_queue)
+                                # Wait for result
+                                wait_count = 0
+                                while not queue_future.done() and wait_count < 10:
+                                    await asyncio.sleep(0.01)
+                                    wait_count += 1
+                                if queue_future.done() and queue_future.result() == 0:
+                                    return
+                                await asyncio.sleep(0.02)
+
+                        await wait_for_queue_empty()
+
                         # Render edit blocks and setup callback
+                        render_future: concurrent.futures.Future = (
+                            concurrent.futures.Future()
+                        )
+
                         def render_and_setup():
                             try:
                                 # Add spacing before edit blocks
@@ -991,16 +1047,24 @@ vim.ui.select({lua_options},
                                     end)
                                     """
                                 )
+                                render_future.set_result(True)
                             except Exception as e:
                                 self.nvim.err_write(
                                     f"Anya: Error rendering edit blocks: {e}\n"
                                 )
+                                render_future.set_result(False)
 
                         self.nvim.async_call(render_and_setup)
-                        await asyncio.sleep(0.2)  # Give time to render
+
+                        # Wait for render to complete
+                        wait_count = 0
+                        while not render_future.done() and wait_count < 50:
+                            await asyncio.sleep(0.01)
+                            wait_count += 1
 
                         # If YOLO mode, auto-apply
                         if _edit_yolo_mode:
+                            await asyncio.sleep(0.1)  # Small delay for UI to settle
 
                             def auto_apply():
                                 try:
@@ -1011,24 +1075,36 @@ vim.ui.select({lua_options},
                                         """
                                     )
                                 except Exception as e:
-                                    self.nvim.exec_lua(
-                                        f"""
-                                        vim.g.anya_edit_result_{edit_id} = {{
-                                            action = "failed",
-                                            success = false,
-                                            message = "Error: {str(e)}"
-                                        }}
-                                        """
+                                    # Escape the error message for Lua string
+                                    escaped_msg = (
+                                        str(e)
+                                        .replace("\\", "\\\\")
+                                        .replace('"', '\\"')
+                                        .replace("\n", "\\n")
                                     )
+                                    try:
+                                        self.nvim.exec_lua(
+                                            f"""
+                                            vim.g.anya_edit_result_{edit_id} = {{
+                                                action = "failed",
+                                                success = false,
+                                                message = "Error: {escaped_msg}"
+                                            }}
+                                            """
+                                        )
+                                    except Exception:
+                                        pass  # Silently fail if we can't set the result
 
                             self.nvim.async_call(auto_apply)
                             await asyncio.sleep(0.1)
 
-                        # Poll for result
+                        # Poll for result using Future for proper synchronization
                         var_name = f"anya_edit_result_{edit_id}"
                         start_time = asyncio.get_event_loop().time()
                         while asyncio.get_event_loop().time() - start_time < 300.0:
-                            result = [None]
+                            result_future: concurrent.futures.Future = (
+                                concurrent.futures.Future()
+                            )
 
                             def get_result():
                                 try:
@@ -1036,46 +1112,58 @@ vim.ui.select({lua_options},
                                         f"get(g:, '{var_name}', v:null)"
                                     )
                                     if val is not None and val != "v:null":
-                                        result[0] = val
+                                        result_future.set_result(val)
+                                    else:
+                                        result_future.set_result(None)
                                 except Exception:
-                                    pass
+                                    result_future.set_result(None)
 
                             self.nvim.async_call(get_result)
-                            await asyncio.sleep(0.1)
 
-                            if result[0] is not None:
-                                # Clean up
-                                def cleanup():
+                            # Wait for async_call to complete
+                            wait_count = 0
+                            while not result_future.done() and wait_count < 20:
+                                await asyncio.sleep(0.01)
+                                wait_count += 1
+
+                            if result_future.done():
+                                result = result_future.result()
+                                if result is not None:
+                                    # Clean up
+                                    def cleanup():
+                                        try:
+                                            self.nvim.command(f"unlet g:{var_name}")
+                                        except Exception:
+                                            pass
+
+                                    self.nvim.async_call(cleanup)
+
+                                    # Send result back to daemon
                                     try:
-                                        self.nvim.command(f"unlet g:{var_name}")
-                                    except Exception:
-                                        pass
+                                        loop = asyncio.get_event_loop()
+                                        await loop.run_in_executor(
+                                            None,
+                                            functools.partial(
+                                                self._confirmation_client.send_request,
+                                                RequestType.TOOL_CONFIRMATION_RESPONSE,
+                                                self.session_id,
+                                                _confirmation_id,
+                                                {
+                                                    "confirmation_id": _confirmation_id,
+                                                    "choice": json.dumps(result),
+                                                },
+                                                5.0,
+                                            ),
+                                        )
+                                    except Exception as e:
+                                        self.nvim.async_call(
+                                            self.nvim.err_write,
+                                            f"Anya: Error sending edit response: {e}\n",
+                                        )
+                                    return
 
-                                self.nvim.async_call(cleanup)
-
-                                # Send result back to daemon
-                                try:
-                                    loop = asyncio.get_event_loop()
-                                    await loop.run_in_executor(
-                                        None,
-                                        functools.partial(
-                                            self._confirmation_client.send_request,
-                                            RequestType.TOOL_CONFIRMATION_RESPONSE,
-                                            self.session_id,
-                                            _confirmation_id,
-                                            {
-                                                "confirmation_id": _confirmation_id,
-                                                "choice": json.dumps(result[0]),
-                                            },
-                                            5.0,
-                                        ),
-                                    )
-                                except Exception as e:
-                                    self.nvim.async_call(
-                                        self.nvim.err_write,
-                                        f"Anya: Error sending edit response: {e}\n",
-                                    )
-                                return
+                            # Small delay before next poll
+                            await asyncio.sleep(0.05)
 
                         # Timeout
                         try:

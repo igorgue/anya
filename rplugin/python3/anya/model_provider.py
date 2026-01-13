@@ -6,6 +6,10 @@ which contain '/' or ':' characters that the OpenAI Agents SDK doesn't handle di
 
 import os
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .protocol import AgentSettings
 
 logger = logging.getLogger("anya.model_provider")
 
@@ -21,15 +25,27 @@ def needs_custom_provider(model: str, base_url: str | None = None) -> bool:
     return "/" in model or ":" in model or base_url is not None
 
 
-def get_custom_model_provider():
+def get_custom_model_provider(
+    settings: "AgentSettings | None" = None,
+):
     """Get a custom ModelProvider for OpenRouter or other custom API endpoints.
+
+    Args:
+        settings: Optional AgentSettings from client. If provided, these override
+                  environment variables.
 
     Returns:
         A ModelProvider instance, or None if not needed.
     """
-    model = os.environ.get("ANYA_MODEL", "gpt-4.1")
-    base_url = os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE")
-    api_key = os.environ.get("ANYA_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    # Use settings if provided, otherwise fall back to environment
+    if settings:
+        model = settings.model or "gpt-4.1"
+        base_url = settings.api_base
+        api_key = settings.api_key
+    else:
+        model = os.environ.get("ANYA_MODEL", "gpt-4.1")
+        base_url = os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE")
+        api_key = os.environ.get("ANYA_API_KEY") or os.environ.get("OPENAI_API_KEY")
 
     if not needs_custom_provider(model, base_url):
         return None
@@ -67,19 +83,30 @@ def get_custom_model_provider():
     return CustomModelProvider()
 
 
-def get_run_config():
+def get_run_config(settings: "AgentSettings | None" = None):
     """Get RunConfig with custom model provider if needed.
+
+    Args:
+        settings: Optional AgentSettings from client. If provided, these override
+                  environment variables.
 
     Returns:
         RunConfig with custom model provider, or None if not needed.
     """
-    model = os.environ.get("ANYA_MODEL", "gpt-4.1")
-    base_url = os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE")
+    # Use settings if provided, otherwise fall back to environment
+    if settings:
+        model = settings.model or "gpt-4.1"
+        base_url = settings.api_base
+        api_type = settings.api_type or "responses"
+    else:
+        model = os.environ.get("ANYA_MODEL", "gpt-4.1")
+        base_url = os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE")
+        api_type = os.environ.get("ANYA_API_TYPE", "responses")
 
     if not needs_custom_provider(model, base_url):
         return None
 
-    provider = get_custom_model_provider()
+    provider = get_custom_model_provider(settings)
     if not provider:
         return None
 
@@ -94,7 +121,6 @@ def get_run_config():
 
     # For chat_completions API, disable nested handoff history as non-OpenAI
     # providers don't support the nested message format
-    api_type = os.environ.get("ANYA_API_TYPE", "responses")
     nest_handoff = api_type != "chat_completions"
 
     return RunConfig(model_provider=provider, nest_handoff_history=nest_handoff)

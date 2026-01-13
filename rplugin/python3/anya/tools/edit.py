@@ -13,9 +13,11 @@ async def _wait_for_tool_folds_to_close(nvim, timeout: float = 300.0) -> None:
     their folds have been closed, AND the streaming animation has finished writing
     all text to the buffer.
     """
+    import concurrent.futures
+
     start_time = asyncio.get_event_loop().time()
     while asyncio.get_event_loop().time() - start_time < timeout:
-        state = [{"fold_open": False, "queue_length": 0}]
+        state_future: concurrent.futures.Future = concurrent.futures.Future()
 
         def get_state():
             try:
@@ -24,19 +26,31 @@ async def _wait_for_tool_folds_to_close(nvim, timeout: float = 300.0) -> None:
                 queue_status = nvim.exec_lua(
                     "return require('anya.text').get_queue_status()"
                 )
-                state[0] = {
-                    "fold_open": bool(fold_open),
-                    "queue_length": queue_status.get("queue_length", 0),
-                }
+                state_future.set_result(
+                    {
+                        "fold_open": bool(fold_open),
+                        "queue_length": queue_status.get("queue_length", 0),
+                    }
+                )
             except Exception:
-                state[0] = {"fold_open": False, "queue_length": 0}
+                state_future.set_result({"fold_open": False, "queue_length": 0})
 
         nvim.async_call(get_state)
-        await asyncio.sleep(0.05)
 
-        # Wait until fold is closed AND queue is empty
-        if not state[0]["fold_open"] and state[0]["queue_length"] == 0:
-            return
+        # Wait for the async_call to complete (with mini timeout)
+        wait_count = 0
+        while not state_future.done() and wait_count < 10:
+            await asyncio.sleep(0.01)
+            wait_count += 1
+
+        if state_future.done():
+            state = state_future.result()
+            # Wait until fold is closed AND queue is empty
+            if not state["fold_open"] and state["queue_length"] == 0:
+                return
+
+        # Small delay before next poll
+        await asyncio.sleep(0.02)
 
     # If we time out, just continue; better to show UI than hang
     return
@@ -50,31 +64,44 @@ async def _wait_for_edit_decision(nvim, edit_id: str, timeout: float = 300.0) ->
     Returns:
         dict with {action: str, success: bool, message: str}
     """
+    import concurrent.futures
+
     var_name = f"anya_edit_result_{edit_id}"
 
     start_time = asyncio.get_event_loop().time()
     while asyncio.get_event_loop().time() - start_time < timeout:
-        result = [None]
+        result_future: concurrent.futures.Future = concurrent.futures.Future()
 
         def get_result():
             try:
-                result[0] = nvim.eval(f"get(g:, '{var_name}', v:null)")
+                val = nvim.eval(f"get(g:, '{var_name}', v:null)")
+                result_future.set_result(val)
             except Exception:
-                pass
+                result_future.set_result(None)
 
         nvim.async_call(get_result)
-        await asyncio.sleep(0.1)
 
-        if result[0] is not None:
-            # Clean up the global variable
-            def cleanup():
-                try:
-                    nvim.command(f"unlet g:{var_name}")
-                except Exception:
-                    pass
+        # Wait for the async_call to complete
+        wait_count = 0
+        while not result_future.done() and wait_count < 20:
+            await asyncio.sleep(0.01)
+            wait_count += 1
 
-            nvim.async_call(cleanup)
-            return result[0]
+        if result_future.done():
+            result = result_future.result()
+            if result is not None:
+                # Clean up the global variable
+                def cleanup():
+                    try:
+                        nvim.command(f"unlet g:{var_name}")
+                    except Exception:
+                        pass
+
+                nvim.async_call(cleanup)
+                return result
+
+        # Small delay before next poll
+        await asyncio.sleep(0.05)
 
     return {"action": "timeout", "success": False, "message": "Edit timed out"}
 
@@ -84,20 +111,47 @@ async def edit(
     ctx: RunContextWrapper[NvimPluginContext],
     edit_blocks: str,
 ) -> str:
-    """Propose code edits using SEARCH/REPLACE blocks.
+    """Make precise, reviewable code changes using SEARCH/REPLACE blocks.
 
-    Use this tool to make precise code modifications. Each edit block specifies:
-    - The file path
-    - A SEARCH section with the exact code to find
-    - A REPLACE section with the new code
+    This tool is ideal for small, focused edits where you want the user to see
+    exactly what changes before applying them. It requires exact matching and is
+    best for surgical modifications.
 
-    The tool will display the edit to the user and wait for them to approve (1)
-    or reject (2) it. You will receive one of these responses:
-    - EDIT_APPLIED: The patch was successfully applied - continue with next steps
-    - EDIT_REJECTED: The user rejected - ask what they want changed
-    - EDIT_FAILED: The patch could not be applied - re-read the file and try again
+    **ALTERNATIVE:** You can always use the write_file tool instead to replace
+    the entire file content. Use write_file when:
+    - Completely rewriting a file
+    - Making many scattered changes across a large file
+    - The code structure is unrecognizable or heavily changing
+    - You prefer a simpler approach (write_file requires no exact matching)
 
-    Example:
+    **When to use THIS tool (edit):**
+    - Show the user exactly what will change before applying it
+    - Make small, focused changes (fix a bug, add a line, update a variable)
+    - Apply multiple specific edits in different locations within files
+    - Make surgical changes while preserving the rest of the file intact
+
+    **How it works:**
+    Each edit block contains:
+    - File path (on the line before <<<<<<<)
+    - SEARCH section: the exact existing code to find
+    - REPLACE section: the new code to insert
+
+    The edit is displayed to the user and requires approval. You'll receive:
+    - EDIT_APPLIED: Changes were accepted - continue with next steps
+    - EDIT_REJECTED: User declined - ask what they want changed
+    - EDIT_FAILED: Could not apply (match not found) - re-read the file and try again
+
+    **Format:**
+    ```
+    path/to/file.py
+    <<<<<<< SEARCH
+    [exact existing code to replace]
+    =======
+    [new code to insert]
+    >>>>>>> REPLACE
+    ```
+
+    **Example:**
     ```
     src/utils.py
     <<<<<<< SEARCH
@@ -115,12 +169,12 @@ async def edit(
     >>>>>>> REPLACE
     ```
 
-    Rules:
-    - The SEARCH section must EXACTLY match existing code (including whitespace)
+    **Important rules:**
+    - SEARCH must EXACTLY match existing code (including whitespace)
     - Include enough context lines to uniquely identify the location
     - Keep blocks small and focused on specific changes
-    - Use multiple blocks for multiple changes
-    - For new files: use empty SEARCH section
+    - Use multiple blocks for multiple independent changes
+    - For creating new files: use write_file instead (or empty SEARCH section)
 
     Args:
         edit_blocks: String containing one or more SEARCH/REPLACE blocks

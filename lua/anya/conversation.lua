@@ -359,35 +359,21 @@ function M.toggle_yolo_mode()
   local level = new_state and vim.log.levels.WARN or vim.log.levels.INFO
 
   -- Refresh winbar to show updated YOLO state
-  -- Find the chat window and force winbar expression to re-evaluate
+  -- Force winbar expression to re-evaluate in all anya-chat windows
   vim.schedule(function()
-    -- Find chat window
-    local chat_win = nil
     for _, win in ipairs(vim.api.nvim_list_wins()) do
       if vim.api.nvim_win_is_valid(win) then
         local buf = vim.api.nvim_win_get_buf(win)
         local ft = vim.api.nvim_buf_get_option(buf, "filetype")
         if ft == "anya-chat" then
-          chat_win = win
-          break
+          -- Reset to empty first, then restore the expression to force re-evaluation
+          pcall(vim.api.nvim_win_set_option, win, "winbar", "")
+          pcall(vim.api.nvim_win_set_option, win, "winbar", "%{%v:lua.require('anya.ui_utils').get_winbar()%}")
         end
       end
     end
-
-    if chat_win then
-      -- Force winbar to re-evaluate by resetting it
-      local current_winbar = vim.api.nvim_win_get_option(chat_win, "winbar")
-      if current_winbar then
-        -- Reset the winbar to force expression re-evaluation
-        vim.api.nvim_win_set_option(chat_win, "winbar", "")
-        vim.api.nvim_win_set_option(chat_win, "winbar", current_winbar)
-      end
-      -- Also force redraw
-      vim.cmd("redrawstatus")
-    else
-      -- Fallback: just redraw if we can't find the window
-      vim.cmd("redrawstatus")
-    end
+    -- Force redraw
+    vim.cmd("redrawstatus")
   end)
 
   return new_state

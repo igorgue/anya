@@ -156,7 +156,12 @@ local function update_edit_header(bufnr, extmark_id)
   end
 
   local new_marker = markers.make_marker(markers.fold_start, new_marker_name)
-  vim.api.nvim_buf_set_lines(bufnr, marker_row, marker_row + 1, false, { new_marker })
+  -- Schedule buffer modification to avoid E565 when called from RPC context
+  vim.schedule(function()
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      vim.api.nvim_buf_set_lines(bufnr, marker_row, marker_row + 1, false, { new_marker })
+    end
+  end)
 end
 
 -- Handle keypress for apply/reject (with toggle support)

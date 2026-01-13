@@ -199,6 +199,52 @@ class CancelRequestPayload:
 
 
 @dataclass
+class AgentSettings:
+    """Agent configuration settings passed from client to daemon.
+
+    These settings override daemon-side environment variables, allowing
+    each Neovim client to use different models/providers.
+    """
+
+    model: str = "gpt-4.1"
+    api_key: str | None = None
+    api_base: str | None = None
+    api_type: str = "responses"  # "responses" or "chat_completions"
+    thinking_budget: str | None = None
+    disable_mcp: bool = False
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AgentSettings":
+        return cls(
+            model=data.get("model", "gpt-4.1"),
+            api_key=data.get("api_key"),
+            api_base=data.get("api_base"),
+            api_type=data.get("api_type", "responses"),
+            thinking_budget=data.get("thinking_budget"),
+            disable_mcp=data.get("disable_mcp", False),
+        )
+
+    def settings_hash(self) -> str:
+        """Generate a hash for caching agents by settings.
+
+        Only includes settings that affect agent creation (not api_key for security).
+        """
+        import hashlib
+
+        key_parts = [
+            self.model or "",
+            self.api_base or "",
+            self.api_type or "",
+            self.thinking_budget or "",
+            str(self.disable_mcp),
+        ]
+        return hashlib.md5("|".join(key_parts).encode()).hexdigest()[:12]
+
+
+@dataclass
 class NvimContext:
     """Neovim context passed to tools via protocol.
 
@@ -212,6 +258,7 @@ class NvimContext:
     open_buffers: list[dict] = field(default_factory=list)
     yolo_mode: bool = False
     allowed_commands: list[str] = field(default_factory=list)
+    agent_settings: dict = field(default_factory=dict)  # AgentSettings as dict
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -226,7 +273,12 @@ class NvimContext:
             open_buffers=data.get("open_buffers", []),
             yolo_mode=data.get("yolo_mode", False),
             allowed_commands=data.get("allowed_commands", []),
+            agent_settings=data.get("agent_settings", {}),
         )
+
+    def get_agent_settings(self) -> AgentSettings:
+        """Get AgentSettings from the embedded dict."""
+        return AgentSettings.from_dict(self.agent_settings)
 
 
 def make_error_response(request_id: str, error: str) -> Response:
