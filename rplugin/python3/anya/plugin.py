@@ -574,13 +574,14 @@ class AnyaPlugin:
             # returns immediately after starting the background task. We rely on
             # MESSAGE_END event to know when streaming is complete.
             while True:
+                # Check cancellation flag before waiting for events
                 if self._request_cancelled:
                     raise asyncio.CancelledError()
 
-                chunk = await subscriber.receive(timeout=1.0)
+                # Use shorter timeout (0.2s) for responsive cancellation
+                chunk = await subscriber.receive(timeout=0.2)
                 if chunk is None:
-                    # Timeout - continue waiting for events
-                    # Don't break on send_task.done() since daemon returns immediately
+                    # Timeout - check cancellation and continue waiting
                     continue
 
                 self._streaming_started = True
@@ -1427,15 +1428,19 @@ vim.ui.select({lua_options},
         self._cancel_in_progress = True
         self._request_cancelled = True  # Signal async handler to abort
 
-        # Cancel the task
+        # Send cancel request to daemon first (so daemon stops the agent)
+        if self._current_request_id:
+            try:
+                self._client.cancel_request(self.session_id, self._current_request_id)
+            except Exception as e:
+                self.nvim.err_write(f"Anya: Failed to send cancel to daemon: {e}\n")
+
+        # Cancel the concurrent.futures.Future (this doesn't cancel the coroutine,
+        # but we've already set _request_cancelled which the coroutine checks)
         try:
             self._current_task.cancel()
-        except Exception as e:
-            self.nvim.err_write(f"Anya: Failed to cancel task: {e}\n")
-
-        # Send cancel request to daemon
-        if self._current_request_id:
-            self._client.cancel_request(self.session_id, self._current_request_id)
+        except Exception:
+            pass  # Ignore - the flag is what matters
 
         # Flush the streaming queue to finish outputting pending text
         ui.flush_queue(self.nvim)
