@@ -1,5 +1,4 @@
 from agents import function_tool
-from ..db import save_memory as db_save_memory
 import datetime
 import hashlib
 import json
@@ -46,6 +45,7 @@ async def store_memory(memory: MemoryFragment) -> str:
     }
     
     try:
+        from ..db import save_memory as db_save_memory
         db_save_memory(memory_dict)
         return f"Stored: {text[:30]}..."
     except Exception as e:

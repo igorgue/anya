@@ -27,6 +27,7 @@ from ..protocol import (
     make_success_response,
 )
 from ..agents import MAIN_AGENT_NAME
+from ..token_tracker import calculate_usage_percentage, format_context_window
 from ..agents.context import NvimPluginContext
 from .. import markers
 from .. import utils
@@ -500,6 +501,11 @@ class RequestHandler:
 
                 # Handle reasoning events
                 if is_reasoning_event:
+                    # Don't send reasoning events after thinking has been finalized
+                    # (e.g., when a tool call has started)
+                    if thinking_finalized:
+                        continue
+
                     if not thinking_started:
                         thinking_started = True
                         await self._send_stream_chunk(
@@ -691,6 +697,11 @@ class RequestHandler:
                         if not delta:
                             continue
 
+                        # Suppress text deltas during thinking-to-tool transition
+                        # (model sometimes outputs continuation text that looks like reasoning)
+                        if tool_was_called and thinking_finalized:
+                            continue
+
                         # Send text delta
                         await self._send_stream_chunk(
                             session_id,
@@ -700,6 +711,39 @@ class RequestHandler:
                                 "text": delta,
                             },
                         )
+
+            # Send token usage after streaming completes
+            try:
+                if hasattr(result, "context_wrapper") and result.context_wrapper:
+                    usage = result.context_wrapper.usage
+                    if usage and hasattr(usage, "total_tokens"):
+                        total_tokens = usage.total_tokens
+                        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+
+                        # Get model from env
+                        model = os.environ.get("ANYA_MODEL", DEFAULT_MODEL)
+                        percentage, context_window = calculate_usage_percentage(
+                            total_tokens, model
+                        )
+
+                        await self._send_stream_chunk(
+                            session_id,
+                            request_id,
+                            StreamEventType.TOKEN_USAGE,
+                            {
+                                "total_tokens": total_tokens,
+                                "prompt_tokens": prompt_tokens,
+                                "completion_tokens": completion_tokens,
+                                "percentage": percentage,
+                                "context_window": context_window,
+                            },
+                        )
+                        self.logger.info(
+                            f"Token usage: {total_tokens}/{format_context_window(context_window)} ({percentage:.1f}%)"
+                        )
+            except Exception as e:
+                self.logger.debug(f"Error sending token usage: {e}")
 
         finally:
             # Ensure thinking is closed even on exception/cancellation

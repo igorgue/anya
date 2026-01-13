@@ -108,7 +108,90 @@ _G.anya_handle_yolo_click = function(id, clicks, button, mods)
   M.handle_yolo_click(id, clicks, button, mods)
 end
 
--- Get winbar text for chat buffer
+-- Token stats storage (updated by daemon via set_token_stats)
+M._token_stats = {
+  used = 0,
+  max = 128000,
+  percentage = 0,
+}
+
+-- Set token stats from Python plugin
+-- @param used: Total tokens used
+-- @param max: Context window size
+-- @param percentage: Pre-calculated percentage
+function M.set_token_stats(used, max, percentage)
+  M._token_stats.used = used or 0
+  M._token_stats.max = max or 128000
+  M._token_stats.percentage = percentage or 0
+  -- Refresh winbar in all anya-chat windows
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
+    if ft == "anya-chat" then
+      pcall(vim.api.nvim_win_set_option, win, "winbar", M.get_winbar())
+    end
+  end
+end
+
+-- Helper for getting token usage from stored stats
+local function get_token_usage()
+  return M._token_stats.used, M._token_stats.max, M._token_stats.percentage
+end
+
+-- Colored progress bar generator: xx% ███
+function M.token_progress_bar()
+  local used, max, percentage = get_token_usage()
+  -- Don't show bar if no tokens used yet
+  if not used or used == 0 then
+    return ""
+  end
+  -- Use pre-calculated percentage, fallback to computing it
+  local pct = percentage or (max > 0 and math.floor((used / max) * 100) or 0)
+  if pct < 0 then pct = 0 end
+  if pct > 100 then pct = 100 end
+
+  -- Color based on percentage
+  local color_group
+  if pct <= 50 then
+    color_group = "AnyaTokenGreen"
+  elseif pct <= 80 then
+    color_group = "AnyaTokenYellow"
+  else
+    color_group = "AnyaTokenRed"
+  end
+
+  -- 3-character bar with filled/unfilled (using black rectangle for centered look)
+  local filled = math.floor(pct / 100 * 3 + 0.5)
+  if filled < 1 and pct > 0 then filled = 1 end -- Show at least 1 if any usage
+  local unfilled = 3 - filled
+  local bar = string.format("%%#%s#%s%%*%%#AnyaTokenGray#%s%%*", 
+    color_group, string.rep("▬", filled), string.rep("▬", unfilled))
+  return string.format("%2d%%%% %s", pct, bar)
+end
+
+-- Add token bar highlights to setup_highlights
+function M.setup_highlights()
+  -- Success: green (from OkMsg)
+  M.set_hl_fg_only("AnyaToolSuccess", "OkMsg")
+
+  -- Failure: red (from ErrorMsg)
+  M.set_hl_fg_only("AnyaToolFailure", "ErrorMsg")
+
+  -- Pending: subtle (from Comment)
+  M.set_hl_fg_only("AnyaToolPending", "Comment")
+
+  -- Thinking: gray for reasoning text (from Comment)
+  M.set_hl_fg_only("AnyaThinking", "Comment")
+
+  -- Token bar highlights
+  M.set_hl_fg_only("AnyaTokenGreen", "DiagnosticOk")
+  M.set_hl_fg_only("AnyaTokenYellow", "WarningMsg")
+  M.set_hl_fg_only("AnyaTokenRed", "ErrorMsg")
+  M.set_hl_fg_only("AnyaTokenGray", "Comment")
+
+  -- ...rest of original highlights ...
+end
+
 function M.get_winbar()
   -- Safely get version
   local ok, version = pcall(vim.fn.AnyaVersion)
@@ -117,6 +200,9 @@ function M.get_winbar()
     version_text = "Anya v" .. version
   end
 
+  -- Token progress bar
+  local token_bar = M.token_progress_bar()
+
   -- Try to safely get YOLO mode status
   local is_yolo_on = false
   local yolo_ok, yolo_mode = pcall(vim.fn.AnyaGetYoloMode)
@@ -124,23 +210,16 @@ function M.get_winbar()
     is_yolo_on = yolo_mode
   end
 
-  -- Build winbar: left side (version), right side (YOLO status)
-  -- %= pushes content to the right
-  -- %{id}@function@text%T makes text clickable with click handler
-  -- %#Group#text%* applies highlight group
+  -- Build winbar: left=version, right=token bar + YOLO
   local yolo_text
   if is_yolo_on then
-    -- When ON: "yolo" with Type highlight
     yolo_text = "%#Type#yolo%*"
   else
-    -- When OFF: "yolo" with Comment highlight
     yolo_text = "%#Comment#yolo%*"
   end
-
-  -- Make the entire YOLO section clickable
-  -- Format: %@click_handler@clickable_text%T
-  -- Use global function for v:lua to work properly in winbar expressions
-  return version_text .. "%=%@v:lua.anya_handle_yolo_click@" .. yolo_text .. "%T"
+  -- Clickable YOLO 
+  local yolo_click = "%@v:lua.anya_handle_yolo_click@" .. yolo_text .. "%T"
+  return string.format("%s%%=%s  %s", version_text, token_bar, yolo_click)
 end
 
 return M

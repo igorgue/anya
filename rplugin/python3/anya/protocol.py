@@ -54,6 +54,8 @@ class StreamEventType(Enum):
     MCP_INIT_COMPLETE = "mcp_init_complete"
     # Memory events
     MEMORY_STORED = "memory_stored"
+    # Token usage update
+    TOKEN_USAGE = "token_usage"
 
 
 @dataclass

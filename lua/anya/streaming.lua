@@ -170,16 +170,28 @@ function M.output_sync(bufnr, text, marker_list, skip_process_markers)
   -- Ensure marker isolation
   final_text = markers.ensure_marker_line_isolation(final_text)
 
-  -- Write all text at once
-  M._append_to_buffer(bufnr, final_text)
+  -- Use vim.schedule to avoid E565 textlock errors when called from certain contexts
+  vim.schedule(function()
+    -- Re-validate buffer after schedule
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
 
-  -- Process markers and create folds (unless caller will do it)
-  if not skip_process_markers then
-    markers_ui._process_markers(bufnr)
-  end
+    -- Flush any pending async queue first to prevent interleaved content
+    -- (e.g., fold_end appearing in the middle of queued text)
+    M.flush_queue(false)  -- Don't process markers yet
 
-  -- Autoscroll to bottom
-  M._autoscroll_to_bottom(bufnr)
+    -- Write all text at once
+    M._append_to_buffer(bufnr, final_text)
+
+    -- Process markers and create folds (unless caller will do it)
+    if not skip_process_markers then
+      markers_ui._process_markers(bufnr)
+    end
+
+    -- Autoscroll to bottom
+    M._autoscroll_to_bottom(bufnr)
+  end)
 end
 
 -- Pause the streaming queue (stop writing but keep items queued)

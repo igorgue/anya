@@ -219,20 +219,32 @@ def update_tool_header_line(nvim, bufnr, new_header: str):
 
     Finds the last line containing a tool header (starting with **) and
     replaces it with the new combined header.
+
+    Uses vim.schedule() to defer buffer modifications to avoid E565 errors.
     """
     if not nvim.api.buf_is_valid(bufnr):
         return
 
-    # Flush queue without processing markers - we'll process after update
-    nvim.exec_lua("require('anya.text').flush_queue(...)", False)
-
-    lines = nvim.api.buf_get_lines(bufnr, 0, -1, False)
-    # Scan backwards
-    for i in range(len(lines) - 1, -1, -1):
-        if lines[i].startswith("**") and lines[i].endswith("**"):
-            nvim.api.buf_set_lines(bufnr, i, i + 1, False, [new_header])
-            process_markers(nvim, bufnr)
-            break
+    lua_code = """
+    local bufnr, new_header = ...
+    -- Flush queue first
+    require('anya.text').flush_queue(false)
+    
+    vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(bufnr) then return end
+        
+        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        for i = #lines, 1, -1 do
+            local line = lines[i]
+            if line:match("^%*%*.*%*%*$") then
+                vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, {new_header})
+                require('anya.text')._process_markers(bufnr)
+                break
+            end
+        end
+    end)
+    """
+    nvim.exec_lua(lua_code, bufnr, new_header)
 
 
 def process_markers(nvim, bufnr):

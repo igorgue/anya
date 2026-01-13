@@ -12,23 +12,6 @@ from .dynamic_instructions import (
 
 from .utils import get_instructions
 from ..system_prompt import apply_system_prompt
-from ..tools import (
-    create_file,
-    edit,
-    exec,
-    exec_lua,
-    gh,
-    list_files,
-    read_file,
-    read_many_files,
-    write_file,
-    search_code,
-    parrot,
-    buffer_name,
-    store_memory,
-    extract_memories,
-    recall_memories,
-)
 
 MAIN_AGENT_NAME = "Code"
 MAIN_ASSISTANT_NAME = "Anya"
@@ -133,6 +116,25 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
                 effort=effort,
                 summary="auto",
             )
+
+    # Import tools here to avoid circular import
+    from ..tools import (
+        create_file,
+        edit,
+        exec,
+        exec_lua,
+        gh,
+        list_files,
+        read_file,
+        read_many_files,
+        write_file,
+        search_code,
+        parrot,
+        buffer_name,
+        store_memory,
+        extract_memories,
+        recall_memories,
+    )
 
     config = {
         "name": MAIN_AGENT_NAME,

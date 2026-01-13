@@ -252,7 +252,8 @@ class SpacingManager:
         if is_fold_end:
             # For fold_end, save the current state and don't transition yet
             previous_content_type = self._last_content_type
-            prefix = ""
+            # Ensure fold_end starts on its own line
+            prefix = "\n"
         else:
             previous_content_type = None
             prefix = self.get_spacing_for_transition(content_type, content)

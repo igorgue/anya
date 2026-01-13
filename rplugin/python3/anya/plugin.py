@@ -629,8 +629,9 @@ class AnyaPlugin:
                     )
                     collected_content.append(thinking_footer)
                     if not self._request_cancelled:
+                        # Use sync to ensure fold_end is written before any tool fold_start
                         self.nvim.async_call(
-                            ui.stream_text_to_buffer,
+                            ui.stream_text_to_buffer_sync,
                             self.nvim,
                             chat_bufnr,
                             thinking_footer,
@@ -790,6 +791,17 @@ class AnyaPlugin:
                             "count": memory_count,
                         },
                     )
+
+                elif chunk.event_type == StreamEventType.TOKEN_USAGE:
+                    # Update token usage display in winbar
+                    total_tokens = chunk.data.get("total_tokens", 0)
+                    percentage = chunk.data.get("percentage", 0)
+                    context_window = chunk.data.get("context_window", 128000)
+                    if not self._request_cancelled:
+                        self.nvim.async_call(
+                            self.nvim.exec_lua,
+                            f"require('anya.ui_utils').set_token_stats({total_tokens}, {context_window}, {percentage})",
+                        )
 
                 elif chunk.event_type == StreamEventType.MESSAGE_END:
                     # Flush queue and clean up trailing blank lines in the buffer
