@@ -12,6 +12,7 @@ import zmq.asyncio
 from agents import Runner
 from openai.types.responses import ResponseTextDeltaEvent
 
+from ..model_provider import get_run_config
 from ..protocol import (
     Request,
     RequestType,
@@ -430,12 +431,18 @@ class RequestHandler:
         tool_was_called = False
         in_anya_marker = False
 
+        # Get custom run config for OpenRouter models (models with '/' or ':' in name)
+        run_config = get_run_config()
+        if run_config:
+            self.logger.info(f"Using custom run config for model provider")
+
         # Run the agent
         result = Runner.run_streamed(
             starting_agent=agent,
             input=llm_history,
             context=context,
             max_turns=1000,
+            run_config=run_config,
         )
 
         try:

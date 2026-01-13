@@ -207,9 +207,29 @@ plugin/anya.vim     # Vimscript bootstrap, sets load flags
 |----------------------|------------|------------------------------|
 | `OPENAI_API_KEY`     | (required) | LLM access                   |
 | `ANYA_MODEL`         | gpt-4.1    | Default LLM                  |
+| `ANYA_API_KEY`       | (unset)    | Override API key (for OpenRouter, etc.) |
+| `ANYA_API_BASE`      | (unset)    | Custom API endpoint (auto-detected for OpenRouter models) |
 | `ANYA_THINKING_BUDGET`| (unset)   | Reasoning effort for model   |
 | `ANYA_DISABLE_MCP`   | "0"        | Disable MCP agent/tools      |
 | `ANYA_YOLO`          | ""         | Approve (auto-apply) all edits|
+
+### OpenRouter Support
+Anya supports OpenRouter models out of the box. When you set `ANYA_MODEL` to an OpenRouter model
+(e.g., `anthropic/claude-sonnet-4`, `openai/gpt-4o`, `deepseek/deepseek-r1`), Anya automatically:
+- Detects the model uses `/` or `:` in the name (OpenRouter convention)
+- Creates a custom model provider with the OpenRouter API endpoint
+- Routes requests through `https://openrouter.ai/api/v1`
+
+To use OpenRouter:
+1. Set your OpenRouter API key: `export ANYA_API_KEY=sk-or-...` (or use `OPENROUTER_API_KEY`)
+2. Set your model: `export ANYA_MODEL=anthropic/claude-sonnet-4`
+
+You can also use a custom API base for other OpenAI-compatible providers:
+```bash
+export ANYA_API_BASE=https://your-custom-endpoint.com/v1
+export ANYA_API_KEY=your-api-key
+export ANYA_MODEL=your-model-name
+```
 
 ---
 

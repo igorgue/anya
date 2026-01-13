@@ -17,6 +17,20 @@ vim.opt_local.modifiable = true
 vim.opt.winbar = ""
 vim.opt.showbreak = " "
 
+-- Read config
+local anya_config = (function()
+  local ok, mod = pcall(require, "anya")
+  return ok and mod.config or { start_in_insert = false }
+end)()
+-- Enter insert mode on load if start_in_insert is set
+if anya_config.start_in_insert then
+  vim.schedule(function()
+    if vim.api.nvim_get_current_buf() == bufnr and vim.api.nvim_get_mode().mode ~= "i" then
+      vim.cmd("startinsert")
+    end
+  end)
+end
+
 -- Modules
 local history = require("anya.history")
 
@@ -42,6 +56,14 @@ local function send_message()
   end
 
   conversation.send_message()
+  -- If config.start_in_insert, return to insert mode after send
+  local ok, anya = pcall(require, "anya")
+  if ok and anya.config and anya.config.start_in_insert then
+    -- Start insert mode unless already in insert
+    if vim.fn.mode() ~= 'i' then
+      vim.cmd("startinsert")
+    end
+  end
 end
 
 -- Navigate to previous (older) prompt in history
@@ -269,8 +291,15 @@ vim.api.nvim_create_autocmd("WinEnter", {
   buffer = bufnr,
   callback = function()
     vim.g.anya_left_anya_win = false
+    if anya_config.start_in_insert and vim.api.nvim_get_mode().mode ~= "i" then
+      vim.schedule(function()
+        if vim.api.nvim_get_current_buf() == bufnr then
+          vim.cmd("startinsert")
+        end
+      end)
+    end
   end,
-  desc = "Track entering Anya prompt window",
+  desc = "Track entering Anya prompt window (and optionally auto-enter insert)",
 })
 
 -- Navigation from prompt float: <C-w>k goes to chat, <C-w>h goes to code
