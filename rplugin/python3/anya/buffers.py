@@ -69,36 +69,125 @@ def _valid_win(nvim: Nvim, winid: int | None) -> bool:
     return bool(winid) and nvim.api.win_is_valid(winid)
 
 
+def _find_anya_windows(nvim: Nvim) -> tuple[int | None, int | None, int | None, list]:
+    """Find Anya windows by scanning all windows for Anya buffers.
+
+    Chat and Prompt windows are expected to be floating windows (relative to the layout window).
+    Layout window is a regular split window containing the Anya Container buffer.
+    Also tracks any stray windows showing Chat/Prompt buffers (e.g., from buffer leakage).
+
+    Returns:
+        Tuple of (chat_win, prompt_win, layout_win, stray_wins) - any may be None if not found
+    """
+    chat_win = None
+    prompt_win = None
+    layout_win = None
+    stray_wins = []  # Windows showing Chat/Prompt buffers that aren't the expected floats
+
+    for win in nvim.api.list_wins():
+        try:
+            if not nvim.api.win_is_valid(win):
+                continue
+            buf = nvim.api.win_get_buf(win)
+            if not nvim.api.buf_is_valid(buf):
+                continue
+            buf_name = nvim.api.buf_get_name(buf)
+
+            # Check if this is a floating window
+            win_config = nvim.api.win_get_config(win)
+            is_floating = win_config.get("relative", "") != ""
+
+            if buf_name.endswith(CHAT_TITLE):
+                if is_floating:
+                    chat_win = win
+                else:
+                    # Non-floating window showing Chat buffer - this is a leak
+                    stray_wins.append(win)
+            elif buf_name.endswith(PROMPT_TITLE):
+                if is_floating:
+                    prompt_win = win
+                else:
+                    # Non-floating window showing Prompt buffer - this is a leak
+                    stray_wins.append(win)
+            elif buf_name.endswith("Anya Container") and not is_floating:
+                layout_win = win
+        except Exception:
+            continue
+
+    return (chat_win, prompt_win, layout_win, stray_wins)
+
+
 def _close_anya_windows(nvim: Nvim):
     """Close Anya chat and prompt windows."""
+    # Find windows dynamically in case state is stale
+    found_chat_win, found_prompt_win, found_layout_win, stray_wins = _find_anya_windows(nvim)
+
+    # Use found windows or fall back to state
+    chat_win = found_chat_win or _anya_state.get("chat_win")
+    prompt_win = found_prompt_win or _anya_state.get("prompt_win")
+    layout_win = found_layout_win or _anya_state.get("layout_win")
+
+    # Handle stray windows showing Chat/Prompt buffers (buffer leakage)
+    # Switch them to a different buffer before proceeding
+    for stray_win in stray_wins:
+        try:
+            if nvim.api.win_is_valid(stray_win):
+                # Try to switch to the previous buffer, or just close if it's the only buffer
+                nvim.api.win_call(stray_win, lambda: nvim.command("bprevious"))
+        except Exception:
+            pass
+
     # Capture the current prompt height (if open) so it can be restored on reopen.
-    if _valid_win(nvim, _anya_state.get("prompt_win")):
+    if _valid_win(nvim, prompt_win):
         try:
             _anya_state["prompt_height"] = max(
                 1,
                 min(
-                    nvim.api.win_get_height(_anya_state["prompt_win"]),
+                    nvim.api.win_get_height(prompt_win),
                     PROMPT_MAX_HEIGHT,
                 ),
             )
         except Exception:
             pass
 
-    if _valid_win(nvim, _anya_state.get("prompt_win")):
+    # Find the container buffer to ensure layout window doesn't inherit chat/prompt buffer
+    container_buf = None
+    for buf in nvim.buffers:
         try:
-            nvim.api.win_close(_anya_state["prompt_win"], True)
+            if nvim.api.buf_get_name(buf).endswith("Anya Container"):
+                container_buf = buf
+                break
+        except Exception:
+            continue
+
+    # If layout window exists and might inherit a floating buffer when closed,
+    # ensure it shows the container buffer first
+    if _valid_win(nvim, layout_win) and container_buf:
+        try:
+            current_layout_buf = nvim.api.win_get_buf(layout_win)
+            layout_buf_name = nvim.api.buf_get_name(current_layout_buf)
+            # If layout window is somehow showing chat/prompt buffer, fix it
+            if layout_buf_name.endswith(CHAT_TITLE) or layout_buf_name.endswith(PROMPT_TITLE):
+                nvim.api.win_set_buf(layout_win, container_buf)
         except Exception:
             pass
-    if _valid_win(nvim, _anya_state.get("chat_win")):
+
+    # Close floating windows first, then the layout window
+    if _valid_win(nvim, prompt_win):
         try:
-            nvim.api.win_close(_anya_state["chat_win"], True)
+            nvim.api.win_close(prompt_win, True)
         except Exception:
             pass
-    if _valid_win(nvim, _anya_state.get("layout_win")):
+    if _valid_win(nvim, chat_win):
+        try:
+            nvim.api.win_close(chat_win, True)
+        except Exception:
+            pass
+    if _valid_win(nvim, layout_win):
         try:
             # Check if layout window is still valid and not the only window
             if len(nvim.api.list_wins()) > 1:
-                nvim.api.win_close(_anya_state["layout_win"], True)
+                nvim.api.win_close(layout_win, True)
         except Exception:
             pass
 
@@ -162,19 +251,27 @@ def new(
             prompt_buf = buf
 
     if not chat_buf or not chat_buf.valid:
-        chat_buf = nvim.api.create_buf(True, False)
+        chat_buf = nvim.api.create_buf(False, True)  # unlisted, scratch
         nvim.api.buf_set_name(chat_buf, CHAT_TITLE)
         nvim.api.buf_set_option(chat_buf, "filetype", "anya-chat")
         nvim.api.buf_set_option(chat_buf, "buftype", "nofile")
+        nvim.api.buf_set_option(chat_buf, "bufhidden", "hide")
         nvim.api.buf_set_option(chat_buf, "swapfile", False)
+    else:
+        # Ensure bufhidden is set on existing buffer
+        nvim.api.buf_set_option(chat_buf, "bufhidden", "hide")
 
     if not prompt_buf or not prompt_buf.valid:
-        prompt_buf = nvim.api.create_buf(True, False)
+        prompt_buf = nvim.api.create_buf(False, True)  # unlisted, scratch
         nvim.api.buf_set_name(prompt_buf, PROMPT_TITLE)
         nvim.api.buf_set_option(prompt_buf, "filetype", "anya-prompt")
         nvim.api.buf_set_option(prompt_buf, "buftype", "nofile")
+        nvim.api.buf_set_option(prompt_buf, "bufhidden", "hide")
         nvim.api.buf_set_option(prompt_buf, "swapfile", False)
         set_prompt_buffer_options(nvim, prompt_buf)
+    else:
+        # Ensure bufhidden is set on existing buffer
+        nvim.api.buf_set_option(prompt_buf, "bufhidden", "hide")
 
     # Create or identify layout buffer (container)
     layout_buf = None
@@ -194,9 +291,22 @@ def new(
 
     # Toggle: close if already open
     current_win = nvim.api.get_current_win()
-    chat_win = _anya_state["chat_win"]
-    prompt_win = _anya_state["prompt_win"]
-    layout_win = _anya_state.get("layout_win")
+
+    # First, try to find existing Anya windows dynamically (handles state out-of-sync)
+    found_chat_win, found_prompt_win, found_layout_win, _ = _find_anya_windows(nvim)
+
+    # Use found windows if state is stale, otherwise use cached state
+    chat_win = found_chat_win if found_chat_win else _anya_state["chat_win"]
+    prompt_win = found_prompt_win if found_prompt_win else _anya_state["prompt_win"]
+    layout_win = found_layout_win if found_layout_win else _anya_state.get("layout_win")
+
+    # Sync state with what we found
+    if found_chat_win:
+        _anya_state["chat_win"] = found_chat_win
+    if found_prompt_win:
+        _anya_state["prompt_win"] = found_prompt_win
+    if found_layout_win:
+        _anya_state["layout_win"] = found_layout_win
 
     # If windows exist and are valid...
     if _valid_win(nvim, chat_win) or _valid_win(nvim, prompt_win):
