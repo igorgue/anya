@@ -61,8 +61,24 @@ def init_db() -> None:
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS memories (
+                id TEXT PRIMARY KEY,
+                text TEXT NOT NULL,
+                category TEXT NOT NULL,
+                source TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                deduplication_key TEXT,
+                conversation_id TEXT,
+                message_id TEXT,
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE SET NULL,
+                FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
             CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
+            CREATE INDEX IF NOT EXISTS idx_memories_timestamp ON memories(timestamp DESC);
+            CREATE INDEX IF NOT EXISTS idx_memories_dedup ON memories(deduplication_key);
         """)
         conn.commit()
 
@@ -306,6 +322,75 @@ def update_message(
     finally:
         conn.close()
 
+def save_memory(memory: dict) -> bool:
+    """
+    Insert a memory item into the memories table.
+    Fields: id, text, category, source, timestamp, deduplication_key, conversation_id, message_id
+    """
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO memories (id, text, category, source, timestamp, deduplication_key, conversation_id, message_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                memory.get("id"),
+                memory.get("text"),
+                memory.get("category"),
+                memory.get("source"),
+                memory.get("timestamp"),
+                memory.get("deduplication_key"),
+                memory.get("conversation_id"),
+                memory.get("message_id")
+            ),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+
+def search_memories(query: str | None = None, category: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    """
+    Search memories by text query and/or category.
+    
+    Args:
+        query: Optional text to search for (case-insensitive LIKE match)
+        category: Optional category filter (personal, skill, project, task)
+        limit: Maximum number of results
+    
+    Returns:
+        List of memory dicts ordered by timestamp descending
+    """
+    conn = get_connection()
+    try:
+        conditions = []
+        params: list[Any] = []
+        
+        if query:
+            conditions.append("text LIKE ?")
+            params.append(f"%{query}%")
+        
+        if category:
+            conditions.append("category = ?")
+            params.append(category.lower())
+        
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        
+        cursor = conn.execute(
+            f"""SELECT id, text, category, source, timestamp 
+               FROM memories 
+               WHERE {where_clause}
+               ORDER BY timestamp DESC
+               LIMIT ?""",
+            params + [limit],
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
 
 def update_message_markers(id: str, markers_json: str) -> bool:
     """Update the markers JSON for a message.

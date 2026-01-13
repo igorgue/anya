@@ -25,6 +25,9 @@ from ..tools import (
     search_code,
     parrot,
     buffer_name,
+    store_memory,
+    extract_memories,
+    recall_memories,
 )
 
 MAIN_AGENT_NAME = "Code"
@@ -149,6 +152,9 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
             search_code,
             parrot,
             buffer_name,
+            store_memory,
+            extract_memories,
+            recall_memories,
         ],
     }
 

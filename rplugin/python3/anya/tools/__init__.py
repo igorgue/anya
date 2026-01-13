@@ -10,6 +10,7 @@ from .write_file import write_file
 from .search_code import search_code
 from .parrot import parrot
 from .buffer_name import buffer_name
+from .memory import store_memory, extract_memories, recall_memories
 
 _ = (
     create_file,
@@ -24,11 +25,14 @@ _ = (
     search_code,
     parrot,
     buffer_name,
+    store_memory,
+    extract_memories,
+    recall_memories,
 )
 _ = None
 
 __all__ = [
-    "create",
+    "create_file",
     "edit",
     "exec",
     "exec_lua",
@@ -37,7 +41,10 @@ __all__ = [
     "read_file",
     "read_many_files",
     "write_file",
-    "search",
+    "search_code",
     "parrot",
     "buffer_name",
+    "store_memory",
+    "extract_memories",
+    "recall_memories",
 ]

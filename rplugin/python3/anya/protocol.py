@@ -52,6 +52,8 @@ class StreamEventType(Enum):
     # System events (daemon-wide, not tied to a specific request)
     MCP_INIT_START = "mcp_init_start"
     MCP_INIT_COMPLETE = "mcp_init_complete"
+    # Memory events
+    MEMORY_STORED = "memory_stored"
 
 
 @dataclass

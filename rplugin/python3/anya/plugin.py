@@ -325,7 +325,7 @@ class AnyaPlugin:
             )
             self.nvim.async_call(self._open_interface, "pane", direction)
         elif subcommand == "history":
-            self.nvim.exec_lua("require('anya.picker').open()")
+            self.nvim.command("lua require('anya.picker').open()")
         elif subcommand == "cancel":
             self.cancel_agent()
         elif subcommand == "daemon":
@@ -696,6 +696,14 @@ class AnyaPlugin:
                     skip_output = chunk.data.get("skip_output", False)
                     unclosed = chunk.data.get("unclosed", False)
 
+                    # For skip_output tools, add a space before next text
+                    if skip_output:
+                        collected_content.append(" ")
+                        if not self._request_cancelled:
+                            self.nvim.async_call(
+                                ui.stream_text_to_buffer, self.nvim, chat_bufnr, " "
+                            )
+
                     # Update markers (don't process yet - wait until fold_end is written)
                     # Note: These markers are already written by fold_start, just update them
                     if (
@@ -766,6 +774,22 @@ class AnyaPlugin:
 
                     if not unclosed:
                         tool_was_called = False
+
+                elif chunk.event_type == StreamEventType.MEMORY_STORED:
+                    # Emit memory stored event for fidget notification
+                    memory_text = chunk.data.get("text", "")
+                    memory_category = chunk.data.get("category", "")
+                    memory_count = chunk.data.get("count", 1)
+                    fidget.emit_user_event(
+                        self.nvim,
+                        "AnyaMemoryStored",
+                        {
+                            "request_id": request_id,
+                            "text": memory_text,
+                            "category": memory_category,
+                            "count": memory_count,
+                        },
+                    )
 
                 elif chunk.event_type == StreamEventType.MESSAGE_END:
                     # Flush queue and clean up trailing blank lines in the buffer

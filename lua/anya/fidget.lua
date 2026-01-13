@@ -120,6 +120,33 @@ function M:init()
 
   -- MCP initialization events (daemon-wide, not tied to a specific request)
   vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AnyaMemoryStored",
+    group = group,
+    callback = function(event)
+      local handle = M:get_progress_handle(event.data.request_id)
+      if handle then
+        -- Show memory stored notification for 2 seconds
+        local text = event.data.text or ""
+        local preview = text:sub(1, 20)
+        if #text > 20 then
+          preview = preview .. "..."
+        end
+        handle:report({
+          message = string.format("💾 %s", preview),
+        })
+        -- Store that we're showing a memory notification
+        M.memory_notification_active = event.data.request_id
+        -- Clear after 2 seconds
+        vim.defer_fn(function()
+          if M.memory_notification_active == event.data.request_id then
+            M.memory_notification_active = nil
+          end
+        end, 2000)
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ "User" }, {
     pattern = "AnyaMcpInitStarted",
     group = group,
     callback = function(event)
@@ -197,12 +224,25 @@ function M:get_model_name(data)
 end
 
 function M:report_exit_status(handle, event)
-  if event.data.status == "success" then
-    handle.message = "done"
-  elseif event.data.status == "error" then
-    handle.message = "error"
+  -- If a memory notification is active, show it briefly before final status
+  if M.memory_notification_active == event.data.id then
+    vim.defer_fn(function()
+      if event.data.status == "success" then
+        handle.message = "done"
+      elseif event.data.status == "error" then
+        handle.message = "error"
+      else
+        handle.message = "cancelled"
+      end
+    end, 2000)
   else
-    handle.message = "cancelled"
+    if event.data.status == "success" then
+      handle.message = "done"
+    elseif event.data.status == "error" then
+      handle.message = "error"
+    else
+      handle.message = "cancelled"
+    end
   end
 end
 

@@ -389,5 +389,9 @@ vim.keymap.set("n", "<localleader><localleader>", function()
   require("anya.float_focus").toggle_focus()
 end, { buffer = true, desc = "Toggle between chat and prompt" })
 
+vim.keymap.set("n", "<localleader>h", function()
+  vim.cmd("Anya history")
+end, { buffer = true, desc = "Open history picker" })
+
 -- Initial highlight
 highlight_refs()

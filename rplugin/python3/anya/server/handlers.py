@@ -682,11 +682,11 @@ class RequestHandler:
                 if hasattr(event, "data") and isinstance(
                     event.data, ResponseTextDeltaEvent
                 ):
-                    delta = event.data.delta
-                    if delta:
-                        # Filter anya markers
+                    raw_delta = event.data.delta
+                    if raw_delta:
+                        # Filter anya markers for display
                         delta, in_anya_marker = utils.filter_anya_markers(
-                            delta, in_anya_marker
+                            raw_delta, in_anya_marker
                         )
                         if not delta:
                             continue
