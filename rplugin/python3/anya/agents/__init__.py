@@ -75,9 +75,41 @@ async def CodeAgent(mcp_servers=None, thinking_budget=None, nvim=None) -> Agent:
     # Expand placeholders and append environment context at the end.
     instructions = apply_system_prompt(instructions, nvim=nvim)
 
-    # Resolve model + settings.
-    model_name = (os.environ.get("ANYA_MODEL") or "gpt-4.1").strip()
+    # ------
+    # Ergonomic Environment Variable Lookups
+    # ------
+    def _get_env(key, *fallback_keys, default=None):
+        for k in (key, *fallback_keys):
+            v = os.environ.get(k)
+            if v is not None:
+                return v
+        return default
+
+    # Model config
+    model_name = _get_env("ANYA_MODEL", default="gpt-4.1").strip()
     model_settings = get_default_model_settings(model_name.lower())
+
+    # API type (for completions/chat/responses/etc)
+    api_type = _get_env("ANYA_API_TYPE", "ANYA_OPENAI_API_TYPE", default=None)
+    if api_type:
+        api_type = api_type.strip().lower()
+        if api_type not in {"chat_completions", "responses"}:
+            api_type = "responses"
+    else:
+        api_type = "responses"
+
+    # API key and base url lookup (prefer ANYA_*, fallback to OPENAI_*)
+    api_key = _get_env("ANYA_API_KEY", "OPENAI_API_KEY", default=None)
+    api_base = _get_env("ANYA_API_BASE", "OPENAI_API_BASE", default=None)
+
+    # Add: Set API type from environment (ANYA_OPENAI_API_TYPE)
+    api_type = (os.environ.get("ANYA_OPENAI_API_TYPE") or "responses").strip().lower()
+    if api_type not in ("responses", "chat_completions"):
+        api_type = "responses"  # fallback default
+    # If the model_settings supports passing api_type, set it here; we also pass
+    # api_type through the Agent config below.
+    if hasattr(model_settings, 'api_type'):
+        model_settings.api_type = api_type
 
     # Get thinking budget (if not explicitly passed).
     if thinking_budget is None:
