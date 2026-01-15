@@ -995,11 +995,11 @@ vim.ui.select({lua_options},
                                         status = self.nvim.exec_lua(
                                             "return require('anya.text').get_queue_status()"
                                         )
-                                        queue_future.set_result(
-                                            status.get("queue_length", 0)
-                                        )
+                                        queue_future.set_result(status)
                                     except Exception:
-                                        queue_future.set_result(0)
+                                        queue_future.set_result(
+                                            {"queue_length": 0, "timer_running": False}
+                                        )
 
                                 self.nvim.async_call(check_queue)
                                 # Wait for result
@@ -1007,8 +1007,21 @@ vim.ui.select({lua_options},
                                 while not queue_future.done() and wait_count < 10:
                                     await asyncio.sleep(0.01)
                                     wait_count += 1
-                                if queue_future.done() and queue_future.result() == 0:
-                                    return
+                                if queue_future.done():
+                                    status = queue_future.result()
+                                    queue_length = status.get("queue_length", 0)
+                                    timer_running = status.get("timer_running", False)
+                                    # Queue is empty and not running
+                                    if queue_length == 0:
+                                        return
+                                    # Queue is stalled (has items but timer not running)
+                                    # This can happen if timer was paused or stopped
+                                    # Force flush and continue instead of waiting for timeout
+                                    if not timer_running and queue_length > 0:
+                                        self.nvim.exec_lua(
+                                            "require('anya.text').flush_queue(false)"
+                                        )
+                                        return
                                 await asyncio.sleep(0.02)
 
                         await wait_for_queue_empty()
@@ -1910,14 +1923,14 @@ Usage:
 
         try:
             delta = int(args[0])
-            # Get current prompt height from the buffers module state
+            # Get current manual override height (or current prompt height as base)
             current_height = buffers._anya_state.get(
-                "prompt_height", buffers.PROMPT_HEIGHT
-            )
+                "manual_prompt_height"
+            ) or buffers._anya_state.get("prompt_height", buffers.PROMPT_HEIGHT)
             new_height = max(1, min(current_height + delta, buffers.PROMPT_MAX_HEIGHT))
 
-            # Update the stored height
-            buffers._anya_state["prompt_height"] = new_height
+            # Update the manual override height
+            buffers._anya_state["manual_prompt_height"] = new_height
 
             # Reposition the floats to apply the new height
             buffers.reposition_floats(self.nvim)

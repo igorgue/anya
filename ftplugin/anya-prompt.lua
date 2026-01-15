@@ -1,5 +1,6 @@
 -- Filetype plugin for anya-prompt buffer
 -- Configures the prompt input buffer
+-- NOTE: Keymaps are defined in buffers.py to ensure they override other plugins
 
 -- Disable treesitter for prompt buffer to improve typing performance
 -- vim.treesitter.language.register("markdown", "anya-prompt")
@@ -22,6 +23,9 @@ local anya_config = (function()
   local ok, mod = pcall(require, "anya")
   return ok and mod.config or { start_in_insert = false }
 end)()
+
+local bufnr = vim.api.nvim_get_current_buf()
+
 -- Enter insert mode on load if start_in_insert is set
 if anya_config.start_in_insert then
   vim.schedule(function()
@@ -31,82 +35,31 @@ if anya_config.start_in_insert then
   end)
 end
 
--- Modules
-local history = require("anya.history")
-
--- Get current buffer content as string
-local function get_buffer_content()
-  local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  return table.concat(lines, "\n")
-end
-
--- Set buffer content from string
-local function set_buffer_content(content)
-  local lines = vim.split(content, "\n", { plain = true })
-  vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
-end
-
--- Send message function
-local function send_message()
-  local conversation = require("anya.conversation")
-
-  -- Stop navigation if active
-  if history.is_navigating() then
-    history.stop_navigation()
-  end
-
-  conversation.send_message()
-  -- If config.start_in_insert, return to insert mode after send
-  local ok, anya = pcall(require, "anya")
-  if ok and anya.config and anya.config.start_in_insert then
-    -- Start insert mode unless already in insert
-    if vim.fn.mode() ~= "i" then
-      vim.cmd("startinsert")
-    end
-  end
-end
-
--- Navigate to previous (older) prompt in history
-local function history_previous()
-  local current_content = get_buffer_content()
-
-  -- Start navigation if not already navigating
-  if not history.is_navigating() then
-    history.start_navigation(current_content)
-  end
-
-  local prev_prompt = history.navigate_previous()
-  if prev_prompt then
-    set_buffer_content(prev_prompt)
-  end
-end
-
--- Navigate to next (newer) prompt in history
-local function history_next()
-  if not history.is_navigating() then
-    return
-  end
-
-  local next_prompt = history.navigate_next()
-  if next_prompt then
-    set_buffer_content(next_prompt)
-  end
-end
-
--- Stop history navigation when entering insert mode
-local function on_insert_enter()
-  if history.is_navigating() then
-    history.stop_navigation()
-  end
-end
-
 -- Set up autocommands
 local augroup = vim.api.nvim_create_augroup("AnyaPromptHistory", { clear = true })
 vim.api.nvim_create_autocmd("InsertEnter", {
   group = augroup,
   buffer = 0,
-  callback = on_insert_enter,
+  callback = function()
+    local history = require("anya.history")
+    if history.is_navigating() then
+      history.stop_navigation()
+    end
+  end,
   desc = "Stop history navigation when entering insert mode",
+})
+
+-- Stop history navigation when buffer is modified (user starts typing)
+vim.api.nvim_create_autocmd("TextChangedI", {
+  group = augroup,
+  buffer = 0,
+  callback = function()
+    local history = require("anya.history")
+    if history.is_navigating() then
+      history.stop_navigation()
+    end
+  end,
+  desc = "Stop history navigation when buffer is modified",
 })
 
 -- Dynamically adjust prompt window height based on content
@@ -120,94 +73,11 @@ vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP" }, {
   desc = "Adjust prompt height based on content",
 })
 
--- Resize prompt height with delta
-local function resize_prompt_height(delta)
-  vim.fn.AnyaResizePromptHeight(delta)
-end
-
--- Map <S-CR> and <C-j> to insert a newline instead of sending
--- Must be defined BEFORE <CR> mapping
-vim.keymap.set("i", "<S-CR>", "<C-o>o", { buffer = true, desc = "Insert newline" })
-vim.keymap.set("n", "<S-CR>", "o", { buffer = true, desc = "Insert newline" })
-vim.keymap.set("i", "<C-j>", "<C-o>o", { buffer = true, desc = "Insert newline" })
-vim.keymap.set("n", "<C-j>", "o", { buffer = true, desc = "Insert newline" })
-
--- Send message on Enter
-vim.keymap.set("n", "<CR>", send_message, { buffer = true, desc = "Send message" })
-vim.keymap.set("i", "<CR>", function()
-  vim.cmd("stopinsert")
-  send_message()
-end, { buffer = true, desc = "Send message" })
-
--- History navigation keymaps (normal mode only to avoid conflicts)
-vim.keymap.set("n", "<C-p>", history_previous, { buffer = true, desc = "Previous prompt in history" })
-vim.keymap.set("n", "<C-n>", history_next, { buffer = true, desc = "Next prompt in history" })
-
--- Cancel agent response with Ctrl+C
-vim.keymap.set("n", "<C-c>", function()
-  vim.cmd("Anya cancel")
-end, { buffer = true, desc = "Cancel agent response" })
-
-vim.keymap.set("i", "<C-c>", function()
-  vim.cmd("Anya cancel")
-end, { buffer = true, desc = "Cancel agent response" })
-
--- Note: <C-j> and <S-CR> mappings are set up in buffers.py to insert newlines
-
--- Add the requested keymaps for Ctrl+Up and Ctrl+Down
--- In terminals, these might be sent as different escape sequences
-vim.keymap.set("n", "<C-Up>", function()
-  resize_prompt_height(1)
-end, { buffer = true, desc = "Grow prompt height" })
-vim.keymap.set("i", "<C-Up>", function()
-  resize_prompt_height(1)
-end, { buffer = true, desc = "Grow prompt height" })
-vim.keymap.set("n", "<C-Down>", function()
-  resize_prompt_height(-1)
-end, { buffer = true, desc = "Reduce prompt height" })
-vim.keymap.set("i", "<C-Down>", function()
-  resize_prompt_height(-1)
-end, { buffer = true, desc = "Reduce prompt height" })
-
--- Also try <C-k> and <C-l> as alternatives (since <C-j> is taken)
-vim.keymap.set("n", "<C-k>", function()
-  resize_prompt_height(1)
-end, { buffer = true, desc = "Grow prompt height" })
-vim.keymap.set("i", "<C-k>", function()
-  resize_prompt_height(1)
-end, { buffer = true, desc = "Grow prompt height" })
-vim.keymap.set("n", "<C-l>", function()
-  resize_prompt_height(-1)
-end, { buffer = true, desc = "Reduce prompt height" })
-vim.keymap.set("i", "<C-l>", function()
-  resize_prompt_height(-1)
-end, { buffer = true, desc = "Reduce prompt height" })
-
--- Handle 1 and 2 key presses for edit responses
--- If there's a pending edit, respond to it
--- Otherwise, allow normal vim behavior (no-op for numbers)
-vim.keymap.set("n", "1", function()
-  local edit_view = require("anya.edit_view")
-  if not edit_view.handle_keypress_any_edit("1") then
-    -- No pending edit to respond to, allow normal behavior
-    -- (1 key does nothing in prompt buffer)
-  end
-end, { buffer = true, desc = "Apply pending edit" })
-
-vim.keymap.set("n", "2", function()
-  local edit_view = require("anya.edit_view")
-  if not edit_view.handle_keypress_any_edit("2") then
-    -- No pending edit to respond to, allow normal behavior
-    -- (2 key does nothing in prompt buffer)
-  end
-end, { buffer = true, desc = "Reject pending edit" })
-
 -- Highlight @filepath references and /commands using extmarks (works with treesitter)
 vim.api.nvim_set_hl(0, "AnyaFileRef", { link = "Constant", default = true })
 vim.api.nvim_set_hl(0, "AnyaSlashCommand", { link = "Special", default = true })
 
 local highlight_ns = vim.api.nvim_create_namespace("anya_highlights")
-local bufnr = vim.api.nvim_get_current_buf()
 
 local highlight_timer = nil
 local highlight_pending = false
@@ -298,99 +168,193 @@ vim.api.nvim_create_autocmd("WinEnter", {
       end)
     end
   end,
-  desc = "Track entering Anya prompt window (and optionally auto-enter insert)",
+  desc = "Track entering Anya prompt window",
 })
 
--- Navigation from prompt float: <C-w>k goes to chat, <C-w>h goes to code
-vim.keymap.set("n", "<C-w>k", function()
-  require("anya.float_focus").focus_chat()
-end, { buffer = true, desc = "Focus chat window" })
+-- Focus management: trap focus within Anya windows
+-- This prevents accidentally navigating to the layout container window
+vim.keymap.set({ "n", "i" }, "<C-w>h", function()
+  require("anya.float_focus").check_and_redirect()
+end, { buffer = true, desc = "Navigate left (trapped)" })
 
-vim.keymap.set("n", "<C-w><C-k>", function()
-  require("anya.float_focus").focus_chat()
-end, { buffer = true, desc = "Focus chat window" })
+vim.keymap.set({ "n", "i" }, "<C-w>j", function()
+  require("anya.float_focus").check_and_redirect()
+end, { buffer = true, desc = "Navigate down (trapped)" })
 
-vim.keymap.set("n", "<C-w>h", function()
-  -- Find chat window and use it to navigate left
-  local chat_win = nil
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_is_valid(win) then
-      local buf = vim.api.nvim_win_get_buf(win)
-      local ft = vim.api.nvim_buf_get_option(buf, "filetype")
-      if ft == "anya-chat" then
-        chat_win = win
-        break
-      end
+vim.keymap.set({ "n", "i" }, "<C-w>k", function()
+  -- Allow navigating up to the chat window
+  local wins = vim.api.nvim_tabpage_list_wins(0)
+  for _, win in ipairs(wins) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
+    if ft == "anya-chat" then
+      vim.api.nvim_set_current_win(win)
+      return
     end
   end
+end, { buffer = true, desc = "Navigate to chat window" })
 
-  if chat_win then
-    vim.api.nvim_set_current_win(chat_win)
-    pcall(vim.cmd, "wincmd h")
-  end
-end, { buffer = true, desc = "Navigate left to code window" })
+vim.keymap.set({ "n", "i" }, "<C-w>l", function()
+  require("anya.float_focus").check_and_redirect()
+end, { buffer = true, desc = "Navigate right (trapped)" })
 
-vim.keymap.set("n", "<C-w><C-h>", function()
-  -- Find chat window and use it to navigate left
-  local chat_win = nil
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_is_valid(win) then
-      local buf = vim.api.nvim_win_get_buf(win)
-      local ft = vim.api.nvim_buf_get_option(buf, "filetype")
-      if ft == "anya-chat" then
-        chat_win = win
-        break
-      end
+-- Also handle arrow variants
+vim.keymap.set({ "n", "i" }, "<C-w><Left>", function()
+  require("anya.float_focus").check_and_redirect()
+end, { buffer = true, desc = "Navigate left (trapped)" })
+
+vim.keymap.set({ "n", "i" }, "<C-w><Down>", function()
+  require("anya.float_focus").check_and_redirect()
+end, { buffer = true, desc = "Navigate down (trapped)" })
+
+vim.keymap.set({ "n", "i" }, "<C-w><Up>", function()
+  -- Allow navigating up to the chat window
+  local wins = vim.api.nvim_tabpage_list_wins(0)
+  for _, win in ipairs(wins) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
+    if ft == "anya-chat" then
+      vim.api.nvim_set_current_win(win)
+      return
     end
   end
+end, { buffer = true, desc = "Navigate to chat window" })
 
-  if chat_win then
-    vim.api.nvim_set_current_win(chat_win)
-    pcall(vim.cmd, "wincmd h")
+vim.keymap.set({ "n", "i" }, "<C-w><Right>", function()
+  require("anya.float_focus").check_and_redirect()
+end, { buffer = true, desc = "Navigate right (trapped)" })
+
+-- Close Anya with q in normal mode
+vim.keymap.set("n", "q", function()
+  vim.cmd("Anya close")
+end, { buffer = true, desc = "Close Anya" })
+
+-- Movement keymaps
+vim.keymap.set("n", "<C-a>", "0", { buffer = true, nowait = true, desc = "Start of line" })
+vim.keymap.set("i", "<C-a>", "<C-o>0", { buffer = true, nowait = true, desc = "Start of line" })
+vim.keymap.set("n", "<C-e>", "$", { buffer = true, nowait = true, desc = "End of line" })
+vim.keymap.set("i", "<C-e>", "<C-o>$", { buffer = true, nowait = true, desc = "End of line" })
+vim.keymap.set("n", "<C-u>", "S", { buffer = true, nowait = true, desc = "Delete whole line" })
+vim.keymap.set("i", "<C-u>", "<C-o>S", { buffer = true, nowait = true, desc = "Delete whole line" })
+
+-- Resize prompt height
+vim.keymap.set({ "n", "i" }, "<C-Up>", "<cmd>call AnyaResizePromptHeight(1)<cr>", { buffer = true, nowait = true, desc = "Increase prompt height" })
+vim.keymap.set({ "n", "i" }, "<C-Down>", "<cmd>call AnyaResizePromptHeight(-1)<cr>", { buffer = true, nowait = true, desc = "Decrease prompt height" })
+
+-- Resize side pane width
+local function resize_pane(delta)
+  local win = vim.api.nvim_get_current_win()
+  local config = vim.api.nvim_win_get_config(win)
+  -- Check if we are in a floating window attached to a parent
+  if config.relative == "win" and config.win then
+    local parent_win = config.win
+    -- Verify parent window is valid
+    if vim.api.nvim_win_is_valid(parent_win) then
+      vim.api.nvim_win_call(parent_win, function()
+        vim.cmd("vertical resize " .. (delta > 0 and "+" or "") .. delta)
+      end)
+    end
+  else
+    -- Fallback for non-floating setup
+    vim.cmd("vertical resize " .. (delta > 0 and "+" or "") .. delta)
   end
-end, { buffer = true, desc = "Navigate left to code window" })
+end
 
--- Also map bare <C-h>, <C-j>, <C-k>, <C-l> for users who have those mapped
-vim.keymap.set("n", "<C-h>", function()
-  -- Find chat window and use it to navigate left
-  local chat_win = nil
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_is_valid(win) then
-      local buf = vim.api.nvim_win_get_buf(win)
-      local ft = vim.api.nvim_buf_get_option(buf, "filetype")
-      if ft == "anya-chat" then
-        chat_win = win
-        break
-      end
+vim.keymap.set({ "n", "i" }, "<C-Left>", function() resize_pane(2) end, { buffer = true, nowait = true, desc = "Shrink side pane" })
+vim.keymap.set({ "n", "i" }, "<C-Right>", function() resize_pane(-2) end, { buffer = true, nowait = true, desc = "Grow side pane" })
+
+-- Focus toggle between chat and prompt with Tab
+vim.keymap.set("n", "<Tab>", function()
+  local wins = vim.api.nvim_tabpage_list_wins(0)
+  for _, win in ipairs(wins) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
+    if ft == "anya-chat" then
+      vim.api.nvim_set_current_win(win)
+      return
     end
   end
-
-  if chat_win then
-    vim.api.nvim_set_current_win(chat_win)
-    pcall(vim.cmd, "wincmd h")
-  end
-end, { buffer = true, desc = "Navigate left to code window" })
-
-vim.keymap.set("n", "<C-k>", function()
-  require("anya.float_focus").focus_chat()
-end, { buffer = true, desc = "Focus chat window" })
-
-vim.keymap.set("n", "<C-w>k", function()
-  require("anya.float_focus").focus_chat()
-end, { buffer = true, desc = "Focus chat window" })
-
--- Toggle YOLO mode
-vim.keymap.set("n", "<localleader>y", function()
-  require("anya.conversation").toggle_yolo_mode()
-end, { buffer = true, desc = "Toggle YOLO mode" })
-
-vim.keymap.set("n", "<localleader><localleader>", function()
-  require("anya.float_focus").toggle_focus()
-end, { buffer = true, desc = "Toggle between chat and prompt" })
-
-vim.keymap.set("n", "<localleader>h", function()
-  vim.cmd("Anya history")
-end, { buffer = true, desc = "Open history picker" })
+end, { buffer = true, desc = "Switch to chat window" })
 
 -- Initial highlight
-highlight_refs()
+vim.schedule(highlight_refs)
+
+-- Trigger completions with @ for file mentions
+-- This integrates with blink.cmp or other completion engines
+-- The actual completion source is defined in lua/anya/blink/files.lua
+
+-- Set up completion trigger characters
+vim.opt_local.completeopt = "menu,menuone,noselect"
+
+-- Prompt history navigation with <C-p> and <C-n>
+local function cycle_history(direction)
+  local history = require("anya.history")
+  local bufnr = vim.api.nvim_get_current_buf()
+
+  -- Get current buffer content
+  local current_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local current_content = table.concat(current_lines, "\n")
+
+  if not history.is_navigating() then
+    -- Start navigation mode
+    history.start_navigation(current_content)
+  end
+
+  -- Navigate in the specified direction
+  local prompt
+  if direction == "previous" then
+    prompt = history.navigate_previous()
+  elseif direction == "next" then
+    prompt = history.navigate_next()
+  end
+
+  -- Update buffer if we got a prompt
+  if prompt then
+    vim.api.nvim_set_option_value("modifiable", true, { buf = bufnr })
+    local lines = vim.split(prompt, "\n", { plain = true })
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
+  end
+end
+
+-- Navigate to previous (older) prompt with <C-p>
+vim.keymap.set("i", "<C-p>", function()
+  cycle_history("previous")
+end, { buffer = true, desc = "Previous prompt in history" })
+
+vim.keymap.set("n", "<C-p>", function()
+  cycle_history("previous")
+end, { buffer = true, desc = "Previous prompt in history" })
+
+-- Navigate to next (newer) prompt with <C-n>
+vim.keymap.set("i", "<C-n>", function()
+  cycle_history("next")
+end, { buffer = true, desc = "Next prompt in history" })
+
+vim.keymap.set("n", "<C-n>", function()
+  cycle_history("next")
+end, { buffer = true, desc = "Next prompt in history" })
+
+-- Paste image with <C-v> in normal and insert mode
+vim.keymap.set({ "n", "i" }, "<C-v>", function()
+  -- Check if we have an image in clipboard
+  local has_image = vim.fn.system("wl-paste --list-types 2>/dev/null | grep -q image && echo yes || echo no")
+  if has_image:match("yes") then
+    -- Use img-clip to paste the image
+    local ok, img_clip = pcall(require, "img-clip")
+    if ok then
+      img_clip.paste_image()
+    else
+      vim.notify("img-clip.nvim not installed", vim.log.levels.WARN)
+    end
+  else
+    -- Normal paste
+    if vim.fn.mode() == "i" then
+      -- In insert mode, use <C-r>+ to paste from clipboard
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-r>+", true, false, true), "n", false)
+    else
+      -- In normal mode, use "+p
+      vim.api.nvim_feedkeys('"+p', "n", false)
+    end
+  end
+end, { buffer = true, desc = "Paste (image-aware)" })

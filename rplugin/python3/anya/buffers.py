@@ -590,7 +590,7 @@ def new(
     # We use an autocmd on InsertEnter/BufEnter to ensure our mapping overrides
     # any completion plugins (like blink.cmp) that might try to take over Ctrl+j.
     # We also apply it immediately to catch the current state (since we just entered/focused).
-    prompt_keys_cmd = f"""
+    prompt_keys_cmd = f'''
     local group = vim.api.nvim_create_augroup("AnyaPromptKeys_{prompt_buf_id}", {{ clear = true }})
 
     local function set_prompt_keys()
@@ -600,42 +600,28 @@ def new(
         vim.keymap.set("n", "<S-CR>", "o<Esc>", opts)
         vim.keymap.set("i", "<S-CR>", "<C-o>o", opts)
 
-        local move_start_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Start of line" }}
-        vim.keymap.set("n", "<C-a>", "0", move_start_opts)
-        vim.keymap.set("i", "<C-a>", "<C-o>0", move_start_opts)
-
-        local move_end_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "End of line" }}
-        vim.keymap.set("n", "<C-e>", "$", move_end_opts)
-        vim.keymap.set("i", "<C-e>", "<C-o>$", move_end_opts)
-
-        local delete_line_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Delete whole line" }}
-        vim.keymap.set("n", "<C-u>", "S", delete_line_opts)
-        vim.keymap.set("i", "<C-u>", "<C-o>S", delete_line_opts)
-
-        -- Resize handlers
-        local function resize_pane(delta)
-            local win = vim.api.nvim_get_current_win()
-            local config = vim.api.nvim_win_get_config(win)
-            -- Check if we are in a floating window attached to a parent
-            if config.relative == 'win' and config.win then
-                local parent_win = config.win
-                -- Verify parent window is valid
-                if vim.api.nvim_win_is_valid(parent_win) then
-                    vim.api.nvim_win_call(parent_win, function()
-                        vim.cmd('vertical resize ' .. (delta > 0 and '+' or '') .. delta)
-                    end)
+        -- Focus chat window with Ctrl+k
+        local focus_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Focus chat window" }}
+        vim.keymap.set("n", "<C-k>", function()
+            for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+                local buf = vim.api.nvim_win_get_buf(win)
+                local ft = vim.api.nvim_get_option_value("filetype", {{ buf = buf }})
+                if ft == "anya-chat" then
+                    vim.api.nvim_set_current_win(win)
+                    return
                 end
-            else
-                -- Fallback for non-floating setup (though Anya prompt is usually floating)
-                vim.cmd('vertical resize ' .. (delta > 0 and '+' or '') .. delta)
             end
-        end
-
-        local resize_left_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Resize split left" }}
-        vim.keymap.set({{"n", "i"}}, "<C-Left>", function() resize_pane(-2) end, resize_left_opts)
-
-        local resize_right_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Resize split right" }}
-        vim.keymap.set({{"n", "i"}}, "<C-Right>", function() resize_pane(2) end, resize_right_opts)
+        end, focus_opts)
+        vim.keymap.set("i", "<C-k>", function()
+            for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+                local buf = vim.api.nvim_win_get_buf(win)
+                local ft = vim.api.nvim_get_option_value("filetype", {{ buf = buf }})
+                if ft == "anya-chat" then
+                    vim.api.nvim_set_current_win(win)
+                    return
+                end
+            end
+        end, focus_opts)
     end
 
     -- Apply immediately
@@ -646,14 +632,14 @@ def new(
         group = group,
         callback = set_prompt_keys
     }})
-    """
+    '''
     nvim.exec_lua(prompt_keys_cmd, [])
 
     # Set up focus trap for the layout container
     # Redirect calls to the container buffer back to the prompt window
     nvim.api.buf_set_var(layout_buf, "anya_prompt_win", _win_id(prompt_win))
 
-    trap_cmd = f"""
+    trap_cmd = f'''
     local group = vim.api.nvim_create_augroup("AnyaLayoutFocusTrap_{layout_buf_id}", {{ clear = true }})
     vim.api.nvim_create_autocmd("WinEnter", {{
         buffer = {layout_buf_id},
@@ -669,7 +655,7 @@ def new(
             end)
         end
     }})
-    """
+    '''
     nvim.exec_lua(trap_cmd, [])
 
     return (chat_buf, prompt_buf)
@@ -718,8 +704,13 @@ def reposition_floats(nvim: Nvim):
             # Fallback to line count if win_text_height is not available
             display_height = line_count
 
-        # Use content height directly - shrink when content is deleted
-        prompt_height = min(max(1, display_height), PROMPT_MAX_HEIGHT)
+        # Use content height, but respect manual height override if set (C-Up/C-Down)
+        # Manual override allows expanding beyond content; shrinks when content is deleted
+        manual_override = _anya_state.get("manual_prompt_height")
+        if manual_override is not None:
+            prompt_height = min(max(1, max(display_height, manual_override)), PROMPT_MAX_HEIGHT)
+        else:
+            prompt_height = min(max(1, display_height), PROMPT_MAX_HEIGHT)
         _anya_state["prompt_height"] = prompt_height
 
         # Calculate sizes (prompt border takes 2 lines)

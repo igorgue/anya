@@ -209,6 +209,53 @@ vim.keymap.set("n", "<localleader>y", function()
   require("anya.conversation").toggle_yolo_mode()
 end, { buffer = true, desc = "Toggle YOLO mode" })
 
+-- toggle history
+vim.keymap.set("n", "<localleader>h", function()
+  vim.cmd("Anya history")
+end, { buffer = true, desc = "Open history" })
+
+-- <C-k> in chat does nothing special (stay in chat, no window above)
+-- But we map it to prevent accidental navigation out of Anya
+vim.keymap.set("n", "<C-k>", function()
+  -- No-op: already at top window
+end, { buffer = true, nowait = true, desc = "Stay in chat (top window)" })
+
+-- Focus toggle between chat and prompt with Tab
+vim.keymap.set("n", "<Tab>", function()
+  require("anya.float_focus").focus_prompt()
+end, { buffer = true, desc = "Switch to prompt window" })
+
+-- Close Anya with q in normal mode
+vim.keymap.set("n", "q", function()
+  vim.cmd("Anya close")
+end, { buffer = true, desc = "Close Anya" })
+
+-- Resize prompt height from chat window too
+local function resize_prompt_height(delta)
+  vim.fn.AnyaResizePromptHeight(delta)
+end
+
+vim.keymap.set("n", "<C-Up>", function()
+  resize_prompt_height(1)
+end, { buffer = true, nowait = true, desc = "Grow prompt height" })
+vim.keymap.set("n", "<C-Down>", function()
+  resize_prompt_height(-1)
+end, { buffer = true, nowait = true, desc = "Reduce prompt height" })
+
+-- Terminal escape sequence variants for Ctrl+Up/Down
+vim.keymap.set("n", "<Esc>[1;5A", function()
+  resize_prompt_height(1)
+end, { buffer = true, desc = "Grow prompt height (CSI)" })
+vim.keymap.set("n", "<Esc>[1;5B", function()
+  resize_prompt_height(-1)
+end, { buffer = true, desc = "Reduce prompt height (CSI)" })
+vim.keymap.set("n", "<Esc>Oa", function()
+  resize_prompt_height(1)
+end, { buffer = true, desc = "Grow prompt height (Alt CSI)" })
+vim.keymap.set("n", "<Esc>Ob", function()
+  resize_prompt_height(-1)
+end, { buffer = true, desc = "Reduce prompt height (Alt CSI)" })
+
 -- Expose globally so streaming can call it
 _G.anya_highlight_chat_file_refs = highlight_refs
 

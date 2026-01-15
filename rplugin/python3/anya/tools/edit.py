@@ -30,10 +30,13 @@ async def _wait_for_tool_folds_to_close(nvim, timeout: float = 300.0) -> None:
                     {
                         "fold_open": bool(fold_open),
                         "queue_length": queue_status.get("queue_length", 0),
+                        "timer_running": queue_status.get("timer_running", False),
                     }
                 )
             except Exception:
-                state_future.set_result({"fold_open": False, "queue_length": 0})
+                state_future.set_result(
+                    {"fold_open": False, "queue_length": 0, "timer_running": False}
+                )
 
         nvim.async_call(get_state)
 
@@ -47,6 +50,15 @@ async def _wait_for_tool_folds_to_close(nvim, timeout: float = 300.0) -> None:
             state = state_future.result()
             # Wait until fold is closed AND queue is empty
             if not state["fold_open"] and state["queue_length"] == 0:
+                return
+            # Queue is stalled (has items but timer not running)
+            # Force flush and continue instead of waiting for timeout
+            if (
+                not state["fold_open"]
+                and not state["timer_running"]
+                and state["queue_length"] > 0
+            ):
+                nvim.exec_lua("require('anya.text').flush_queue(false)")
                 return
 
         # Small delay before next poll

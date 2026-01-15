@@ -1,87 +1,70 @@
 # Anya
 
-An AI-powered Neovim plugin built on the OpenAI Agents SDK.
-
-> Why don't programmers like nature? It has too many bugs!
-
-> Why do programmers prefer dark mode? Because light attracts bugs!
+A persistent Neovim AI assistant with multi-conversation support, built on OpenAI's Agents SDK.
 
 ## Features
 
-- **Chat Interface**: Split-window layout with streaming responses
-- **Conversation Persistence**: SQLite database stores conversation history
+- **Persistent Conversations**: Conversations survive Neovim restarts via SQLite storage
+- **Multi-Layout Support**: Toggle between replace, pane, tab, and split layouts
+- **Streaming Output**: Real-time LLM responses with animated text rendering
+- **Prompt History**: Cycle through previous prompts with `<C-p>` and `<C-n>`
+- **Context Awareness**: Automatic inclusion of selected code and file references
 - **Conversation Browser**: Browse and load previous conversations with `:Anya history`
-- **Context Awareness**: Conversation history is automatically included in agent context
-- **Streaming Animation**: Smooth character-by-character text animation
-- **Marker System**: Hidden markers track message boundaries and metadata
-- **Tool Support**: Extensible tool system using OpenAI Agents SDK
+- **Intelligent Code Awareness**: File editing, searching, and execution tools
+- **Modular Architecture**: Extensible agent and tool system in both Python and Lua
 
 ## Installation
 
-### Prerequisites
-
-- Neovim >= 0.9.0
-- Python >= 3.13
-- `pynvim` (installed globally or in your Neovim provider environment)
-- `snacks.nvim` (optional, for conversation picker)
-
-### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
-
-```lua
-{
-    "igor/anya",
-    build = ":UpdateRemotePlugins",
-    cmd = "Anya",
-}
+```vim
+Plug 'igorkav/anya'  " using vim-plug
 ```
 
-### Post-Installation
+### Requirements
 
-1. Start Neovim.
-2. Run `:UpdateRemotePlugins`.
-3. Restart Neovim.
+**Python:** 3.13+
 
-### Dependencies
+**Required packages:**
+- `pynvim`
+- `openai`
+- `openai-agents`
+- `hashids`
+- `pyzmq`
+- `cbor2`
+
+**Optional for advanced features:**
+- `snacks.nvim`
+- `img-clip.nvim`
+- `blink.cmp`
 
 Install Python dependencies:
-
-```bash
-pip install pynvim openai openai-agents hashids
-```
-
-Or use the provided requirements file:
-
 ```bash
 pip install -r requirements.txt
 ```
 
-## Configuration
-
-Set your OpenAI API key in your environment:
-
-```bash
-export OPENAI_API_KEY="sk-..."
-```
-
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENAI_API_KEY` | (required) | OpenAI API key |
-| `ANYA_MODEL` | `gpt-4.1` | Model to use for the agent |
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OPENAI_API_KEY` | (required) | LLM access |
+| `ANYA_MODEL` | gpt-4.1 | Default LLM |
+| `ANYA_API_KEY` | (unset) | Override API key (for OpenRouter, etc.) |
+| `ANYA_API_BASE` | (unset) | Custom API endpoint |
+| `ANYA_API_TYPE` | responses | API type: "responses" or "chat_completions" |
+| `ANYA_THINKING_BUDGET` | (unset) | Reasoning effort for model |
+| `ANYA_DISABLE_MCP` | "0" | Disable MCP agent/tools |
+| `ANYA_YOLO` | "" | Approve all edits automatically |
 
 ## Usage
 
 ### Commands
 
-> Why do Java developers wear glasses? Because they don't C#!
-
 | Command | Description |
 |---------|-------------|
-| `:Anya` | Open the Anya interface |
-| `:Anya open` | Open the Anya interface |
-| `:Anya help` | Show help message |
-| `:Anya send <text>` | Send a prompt directly |
+| `:Anya` | Toggle Anya UI |
+| `:Anya open` | Open Anya UI |
+| `:Anya pane` | Open in side pane layout |
+| `:Anya tab` | Open in tab layout |
+| `:Anya send <text>` | Send text without opening UI |
 | `:Anya history` | Open conversation history picker |
 
 ### Basic Workflow
@@ -96,12 +79,30 @@ export OPENAI_API_KEY="sk-..."
 |-----|------|--------|
 | `<CR>` | Normal | Send message |
 | `<CR>` | Insert | Exit insert mode and send message |
+| `<C-p>` | Normal/Insert | Navigate to previous (older) prompt in history |
+| `<C-n>` | Normal/Insert | Navigate to next (newer) prompt in history |
+| `<C-j>` | Normal/Insert | Insert blank line |
+| `<C-k>` | Normal/Insert | Focus chat window |
+| `<C-Up>` / `<C-Down>` | Normal/Insert | Increase/decrease prompt height |
+| `<C-Left>` / `<C-Right>` | Normal/Insert | Resize side pane (pane layout) |
+| `<Tab>` | Normal | Toggle focus between chat and prompt |
+| `q` | Normal | Close Anya |
 
 ### Conversation History
 
 Conversations are automatically saved to a SQLite database at `~/.local/share/anya/conversations.db`.
 
 Use `:Anya history` to browse and load previous conversations (requires `snacks.nvim`).
+
+### Prompt History
+
+Previously sent prompts are automatically saved and can be cycled through using:
+
+- `<C-p>` (Previous) - Go to older prompts
+- `<C-n>` (Next) - Go to newer prompts
+- Pressing `<CR>` or typing stops navigation and starts a new prompt
+
+History is stored at `~/.local/share/anya/prompt_history.txt`.
 
 ## Architecture
 
@@ -110,93 +111,92 @@ Use `:Anya history` to browse and load previous conversations (requires `snacks.
 ### Buffer Types
 
 - **anya-chat**: Main chat buffer displaying conversation history
-- **anya-prompt**: Input buffer for composing messages
+- **anya-prompt**: Input buffer for typing messages
 
-### Data Storage
+### Data Flow
 
-| Data | Location |
-|------|----------|
-| Conversations database | `~/.local/share/anya/conversations.db` |
-| ID generation salt | `~/.local/share/anya/salt.txt` |
-| ID state | `~/.local/share/anya/ids.json` |
+1. User types message → Prompt buffer
+2. Press `<CR>` → Message sent via ZeroMQ to daemon
+3. Daemon processes with agent (OpenAI) → Streams response back
+4. Lua handles streaming → Animated rendering in chat buffer
+5. All events persisted to SQLite database
 
-### Available Tools
+### Tool System
 
-The agent currently has access to:
+Anya includes intelligent tools for code interaction:
 
-- `buffer_name` - Get the name of the current buffer
-- `parrot` - Test tool that echoes messages in uppercase
+- `read_file`, `edit`, `replace_file` - File operations
+- `search_code` - Search codebase with ripgrep
+- `exec`, `exec_lua` - Run shell/Lua commands
+- `gh` - GitHub CLI integration
+- And more (MCP tools for external APIs)
 
-## Project Instructions
+## Configuration
 
-Create an `AGENTS.md` file in your project root to provide custom instructions to the agent. These instructions are prepended to the agent's system prompt.
-
-## MCP Server Support
-
-Anya supports MCP (Model Context Protocol) servers for extended tool capabilities.
-
-### Configuration
-
-Create `~/.config/anya/mcp/servers.json`:
-
-```json
+```lua
+-- Lazy.nvim example
 {
-  "servers": [
-    {
-      "name": "filesystem",
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"],
-      "timeout": 30
-    }
-  ]
+  'igorkav/anya',
+  config = function()
+    require('anya').setup({
+      start_in_insert = true,  -- Enter insert mode when opening prompt
+    })
+  end
 }
 ```
-
-### Performance Tips
-
-MCP server startup can be slow, especially with `npx`. To improve performance:
-
-**1. Use `bunx` instead of `npx`** (much faster, no download check):
-```json
-{
-  "command": "bunx",
-  "args": ["--bun", "@modelcontextprotocol/server-filesystem", "/path"]
-}
-```
-
-**2. Install servers globally** and use the binary directly:
-```bash
-npm install -g @anthropics/mcp-server-fetch
-```
-```json
-{
-  "command": "mcp-server-fetch"
-}
-```
-
-**3. Only enable servers you use** - each server adds startup time.
-
-**4. Use HTTP/SSE servers** when available - no subprocess spawn overhead.
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ANYA_DISABLE_MCP` | `0` | Set to `1` to disable MCP servers |
 
 ## Development
 
-### Updating Remote Plugins
+See [AGENTS.md](AGENTS.md) for detailed documentation on the agent system, marker format, and architecture.
 
-After modifying Python code:
+### Project Structure
 
-```vim
-:UpdateRemotePlugins
+```
+anya/
+├── rplugin/python3/anya/
+│   ├── plugin.py          # Main Neovim plugin
+│   ├── server/            # Daemon process
+│   ├── db.py              # SQLite database
+│   ├── buffers.py         # Window/buffer management
+│   ├── history.py         # Python history integration
+│   └── tools/             # Modular tool system
+├── lua/anya/
+│   ├── init.lua           # Public API
+│   ├── history.lua        # Prompt history management
+│   ├── conversation.lua    # Message sending logic
+│   ├── text.lua           # Streaming animation
+│   └── markers.lua        # Marker handling
+└── prompts/               # System prompt templates
 ```
 
-Then restart Neovim.
+### Testing History Navigation
+
+After installation, you can test the prompt history:
+
+1. Open Anya with `:Anya`
+2. Type a message and press `<CR>` to send it
+3. Send another different message
+4. In the prompt buffer, press `<C-p>` to cycle back to previous prompts
+5. Press `<C-n>` to cycle forward
+6. Start typing to exit navigation mode and compose a new message
+
+## Troubleshooting
+
+**Daemon not running?**
+```bash
+python -m anya.server.main -f  # Start daemon in foreground
+```
+
+**Streaming issues?**
+Check logs at `~/.local/share/anya/daemon.log`
+
+**Missing prompts after restart?**
+Prompts are saved to `~/.local/share/anya/prompt_history.txt`
 
 ## License
 
 MIT
+
+---
+
+Made with love by the Anya community

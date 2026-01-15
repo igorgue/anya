@@ -242,6 +242,10 @@ function M.send_message()
   -- Scroll chat buffer to bottom
   text._autoscroll_to_bottom(chat_buf)
 
+  -- Save prompt to history
+  local history = require("anya.history")
+  history.add(prompt_text)
+
   -- Handoff: clear sending lock, set request lock
   M._sending_in_progress = false
   M._request_in_progress = true
