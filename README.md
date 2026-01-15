@@ -131,6 +131,29 @@ Anya includes intelligent tools for code interaction:
 - `gh` - GitHub CLI integration
 - And more (MCP tools for external APIs)
 
+### Edit Tool Workflow
+
+The `edit` tool provides interactive, confirmation-based file editing:
+
+1. **Agent proposes changes**: When the agent needs to edit a file, it generates SEARCH/REPLACE blocks
+2. **Marker creation**: Edit markers are embedded in the chat buffer as hidden HTML comments, tracking:
+   - Pending edits (waiting for your approval)
+   - Applied edits (changes successfully written)
+   - Rejected edits (changes you declined)
+   - Failed edits (errors occurred during application)
+3. **Folded preview**: Proposed edits appear as folded blocks in the chat buffer
+4. **User confirmation**: You're prompted to:
+   - **Apply** the changes to the file
+   - **Reject** the changes entirely
+5. **State persistence**: All edit states (pending/applied/rejected) persist across restarts via markers
+
+This approach ensures:
+- **Safety**: No changes without explicit approval
+- **Replayability**: Complete history of proposed and actual changes
+- **Crash recovery**: Edit state can be recovered from buffer markers alone
+
+**Auto-approval**: Set `ANYA_YOLO` environment variable to automatically apply all edits without confirmation.
+
 ## Configuration
 
 ```lua

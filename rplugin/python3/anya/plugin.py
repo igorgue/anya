@@ -340,6 +340,9 @@ class AnyaPlugin:
                 args[1] if len(args) > 1 and args[1] in ["right", "left"] else "right"
             )
             self.nvim.async_call(self._open_interface, "pane", direction)
+        elif subcommand == "close" or subcommand == "toggle":
+            # Explicitly close or toggle the Anya pane
+            self.nvim.async_call(buffers.close_pane, self.nvim)
         elif subcommand == "history":
             self.nvim.command("lua require('anya.picker').open()")
         elif subcommand == "cancel":
@@ -814,13 +817,16 @@ class AnyaPlugin:
 
                 elif chunk.event_type == StreamEventType.TOKEN_USAGE:
                     # Update token usage display in winbar
+                    # Use usable_context (context - max_output) for accurate percentage
                     total_tokens = chunk.data.get("total_tokens", 0)
                     percentage = chunk.data.get("percentage", 0)
-                    context_window = chunk.data.get("context_window", 128000)
+                    usable_context = chunk.data.get(
+                        "usable_context", chunk.data.get("context_window", 128000)
+                    )
                     if not self._request_cancelled:
                         self.nvim.async_call(
                             self.nvim.exec_lua,
-                            f"require('anya.ui_utils').set_token_stats({total_tokens}, {context_window}, {percentage})",
+                            f"require('anya.ui_utils').set_token_stats({total_tokens}, {usable_context}, {percentage})",
                         )
 
                 elif chunk.event_type == StreamEventType.MESSAGE_END:

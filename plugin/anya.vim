@@ -18,7 +18,7 @@ function! AnyaComplete(ArgLead, CmdLine, CursorPos)
 
   " Split into parts
   let parts = split(cmdline)
-  let subcommands = ['help', 'open', 'send', 'tab', 'pane', 'history']
+  let subcommands = ['help', 'open', 'close', 'toggle', 'send', 'tab', 'pane', 'history']
 
   " If no arguments yet or we're completing the first subcommand
   if len(parts) <= 1 || (len(parts) == 1 && a:ArgLead != '')

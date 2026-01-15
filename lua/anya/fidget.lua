@@ -220,7 +220,7 @@ end
 
 function M:get_model_name(data)
   local model = data.model or os.getenv("ANYA_MODEL") or "gpt-4.1"
-  return string.format(" Anya (%s)", model)
+  return string.format(" %s", model)
 end
 
 function M:report_exit_status(handle, event)

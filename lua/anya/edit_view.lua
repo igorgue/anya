@@ -139,6 +139,7 @@ local function update_edit_header(bufnr, extmark_id)
     virt_text = virt_text,
     virt_text_pos = "right_align",
     hl_mode = "combine",
+    virt_text_hide = true,
     end_row = edit_data.end_row,
   })
 
@@ -502,6 +503,7 @@ function M.render_edit(bufnr, filename, search_content, replace_content, raw_blo
     virt_text = virt_text,
     virt_text_pos = "right_align",
     hl_mode = "combine",
+    virt_text_hide = true,
     end_row = end_row,
   })
 

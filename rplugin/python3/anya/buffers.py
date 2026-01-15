@@ -129,13 +129,38 @@ def _close_anya_windows(nvim: Nvim):
     prompt_win = found_prompt_win or _anya_state.get("prompt_win")
     layout_win = found_layout_win or _anya_state.get("layout_win")
 
+    # Collect all Anya window IDs for exclusion
+    anya_wins = set()
+    if chat_win:
+        anya_wins.add(_win_id(chat_win))
+    if prompt_win:
+        anya_wins.add(_win_id(prompt_win))
+    if layout_win:
+        anya_wins.add(_win_id(layout_win))
+    for sw in stray_wins:
+        anya_wins.add(_win_id(sw))
+
+    # Switch focus to a non-Anya window first to prevent buffer leakage
+    # When we close a focused window, Neovim may move its buffer to the next window
+    current_win = nvim.api.get_current_win()
+    if _win_id(current_win) in anya_wins:
+        # Find a non-Anya window to switch to
+        for win in nvim.api.list_wins():
+            if _win_id(win) not in anya_wins and nvim.api.win_is_valid(win):
+                try:
+                    nvim.api.set_current_win(win)
+                    break
+                except Exception:
+                    pass
+
     # Handle stray windows showing Chat/Prompt buffers (buffer leakage)
-    # Switch them to a different buffer before proceeding
+    # Close them instead of switching to previous buffer to fully clean up
     for stray_win in stray_wins:
         try:
             if nvim.api.win_is_valid(stray_win):
-                # Try to switch to the previous buffer, or just close if it's the only buffer
-                nvim.api.win_call(stray_win, lambda: nvim.command("bprevious"))
+                # Close the stray window if there's more than one window
+                if len(nvim.api.list_wins()) > 1:
+                    nvim.api.win_close(stray_win, True)
         except Exception:
             pass
 
@@ -176,6 +201,20 @@ def _close_anya_windows(nvim: Nvim):
         except Exception:
             pass
 
+    # Clear the WinClosed autocmd group to prevent recursive close calls
+    try:
+        nvim.api.create_augroup("AnyaWindowClose", {"clear": True})
+    except Exception:
+        pass
+
+    # Before closing floating windows, ensure the layout window shows the container buffer
+    # This prevents the chat/prompt buffers from "escaping" to the layout window
+    if _valid_win(nvim, layout_win) and container_buf:
+        try:
+            nvim.api.win_set_buf(layout_win, container_buf)
+        except Exception:
+            pass
+
     # Close floating windows first, then the layout window
     if _valid_win(nvim, prompt_win):
         try:
@@ -192,6 +231,15 @@ def _close_anya_windows(nvim: Nvim):
             # Check if layout window is still valid and not the only window
             if len(nvim.api.list_wins()) > 1:
                 nvim.api.win_close(layout_win, True)
+        except Exception:
+            pass
+
+    # Final cleanup: close any remaining stray windows that might have the chat/prompt buffers
+    _, _, _, remaining_strays = _find_anya_windows(nvim)
+    for stray_win in remaining_strays:
+        try:
+            if nvim.api.win_is_valid(stray_win) and len(nvim.api.list_wins()) > 1:
+                nvim.api.win_close(stray_win, True)
         except Exception:
             pass
 
@@ -297,7 +345,16 @@ def new(
     current_win = nvim.api.get_current_win()
 
     # First, try to find existing Anya windows dynamically (handles state out-of-sync)
-    found_chat_win, found_prompt_win, found_layout_win, _ = _find_anya_windows(nvim)
+    found_chat_win, found_prompt_win, found_layout_win, stray_wins = _find_anya_windows(nvim)
+
+    # Clean up any stray windows immediately (buffer leaked to non-floating windows)
+    for stray_win in stray_wins:
+        try:
+            if nvim.api.win_is_valid(stray_win):
+                if len(nvim.api.list_wins()) > 1:
+                    nvim.api.win_close(stray_win, True)
+        except Exception:
+            pass
 
     # Use found windows if state is stale, otherwise use cached state
     chat_win = found_chat_win if found_chat_win else _anya_state["chat_win"]
@@ -568,6 +625,34 @@ def new(
             "group": group,
             "command": "silent! call AnyaRepositionFloats()",
         },
+    )
+
+    # Set up autocmd to close all Anya windows when chat or prompt window is closed
+    # This ensures consistent behavior when user closes either window
+    chat_win_id = _win_id(chat_win)
+    prompt_win_id = _win_id(prompt_win)
+    nvim.exec_lua(
+        f"""
+    local group = vim.api.nvim_create_augroup("AnyaWindowClose", {{ clear = true }})
+    vim.api.nvim_create_autocmd("WinClosed", {{
+        group = group,
+        pattern = "{chat_win_id},{prompt_win_id}",
+        callback = function(ev)
+            -- Schedule to run after the window is actually closed
+            vim.schedule(function()
+                -- Check if the other Anya windows are still valid
+                local chat_valid = vim.api.nvim_win_is_valid({chat_win_id})
+                local prompt_valid = vim.api.nvim_win_is_valid({prompt_win_id})
+                -- If one is closed but not through :Anya close, close the other
+                if not chat_valid or not prompt_valid then
+                    vim.cmd("silent! Anya close")
+                end
+            end)
+        end,
+        desc = "Close all Anya windows when chat or prompt is closed",
+    }})
+    """,
+        [],
     )
 
     # Set up keymaps for the prompt buffer

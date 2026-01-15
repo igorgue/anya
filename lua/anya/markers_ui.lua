@@ -177,6 +177,7 @@ function M._apply_message_info(bufnr, line_num, meta, end_line_num)
     virt_text = { { display_text, "AnyaToolSuccess" } },
     virt_text_pos = "right_align",
     hl_mode = "combine",
+    virt_text_hide = true,
   })
 
   -- For agent messages, add duration at the end of the last line
@@ -264,6 +265,7 @@ function M._hide_line_with_duration(bufnr, line_num, duration)
     virt_text = { { duration .. " 󰾩  ", "Comment" } },
     virt_text_pos = "right_align",
     hl_mode = "combine",
+    virt_text_hide = true,
   })
 end
 
@@ -403,6 +405,7 @@ function M._apply_header_highlight(bufnr, line_num, hl_group, icon)
     opts.virt_text = { { " " .. icon .. " ", hl_group } }
     opts.virt_text_pos = "right_align"
     opts.hl_mode = "combine" -- Combine with underlying highlights (e.g., fold background)
+    opts.virt_text_hide = true -- Hide when line is inside a closed fold (prevents duplicate icons)
   end
 
   vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, line_idx, 0, opts)
@@ -517,6 +520,7 @@ function M._apply_edit_header(bufnr, line_num, state, diff_info)
     virt_text = virt_text,
     virt_text_pos = "right_align",
     hl_mode = "combine",
+    virt_text_hide = true,
   }
 
   local extmark_id = vim.api.nvim_buf_set_extmark(bufnr, ui_utils.edit_view_ns_id, line_idx, 0, opts)
@@ -730,6 +734,7 @@ function M.update_edit_state(extmark_id, new_state)
     virt_text = virt_text,
     virt_text_pos = "right_align",
     hl_mode = "combine",
+    virt_text_hide = true,
   })
 
   -- Update stored state

@@ -28,7 +28,11 @@ from ..protocol import (
     make_success_response,
 )
 from ..agents import MAIN_AGENT_NAME
-from ..token_tracker import calculate_usage_percentage, format_context_window
+from ..token_tracker import (
+    calculate_context_usage,
+    format_context_window,
+    parse_usage,
+)
 from ..agents.context import NvimPluginContext
 from .. import markers
 from .. import utils
@@ -774,32 +778,43 @@ class RequestHandler:
             # Send token usage after streaming completes
             try:
                 if hasattr(result, "context_wrapper") and result.context_wrapper:
-                    usage = result.context_wrapper.usage
-                    if usage and hasattr(usage, "total_tokens"):
-                        total_tokens = usage.total_tokens
-                        prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
-                        completion_tokens = getattr(usage, "completion_tokens", 0) or 0
-
-                        # Get model from env
+                    raw_usage = result.context_wrapper.usage
+                    if raw_usage:
+                        # Get model from env to detect provider
                         model = os.environ.get("ANYA_MODEL", DEFAULT_MODEL)
-                        percentage, context_window = calculate_usage_percentage(
-                            total_tokens, model
+
+                        # Parse usage with detailed breakdown (opencode approach)
+                        usage = parse_usage(raw_usage, provider=model)
+
+                        # Calculate context usage with usable context consideration
+                        percentage, context_window, usable_context, is_overflow = (
+                            calculate_context_usage(usage, model)
                         )
+
+                        # Use context_tokens for the "used" display
+                        # This is input + cache.read + output (what actually fills context)
+                        context_tokens = usage.context_tokens
 
                         await self._send_stream_chunk(
                             session_id,
                             request_id,
                             StreamEventType.TOKEN_USAGE,
                             {
-                                "total_tokens": total_tokens,
-                                "prompt_tokens": prompt_tokens,
-                                "completion_tokens": completion_tokens,
+                                "total_tokens": context_tokens,
+                                "prompt_tokens": usage.input,
+                                "completion_tokens": usage.output,
+                                "reasoning_tokens": usage.reasoning,
+                                "cache_read": usage.cache_read,
+                                "cache_write": usage.cache_write,
                                 "percentage": percentage,
                                 "context_window": context_window,
+                                "usable_context": usable_context,
+                                "is_overflow": is_overflow,
                             },
                         )
                         self.logger.info(
-                            f"Token usage: {total_tokens}/{format_context_window(context_window)} ({percentage:.1f}%)"
+                            f"Token usage: {context_tokens}/{format_context_window(usable_context)} ({percentage:.1f}%) "
+                            f"[in:{usage.input} out:{usage.output} cache:{usage.cache_read}]"
                         )
             except Exception as e:
                 self.logger.debug(f"Error sending token usage: {e}")
