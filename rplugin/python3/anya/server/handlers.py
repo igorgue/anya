@@ -58,6 +58,9 @@ class RequestHandler:
         self.pending_confirmation_responses: dict[str, str] = {}
         # Lock to serialize edit confirmations - only one edit at a time
         self._edit_lock = asyncio.Lock()
+        # Track active tool state per session for proper cleanup on cancellation
+        # Maps: session_id -> {"tools": list, "is_edit": bool, "was_called": bool}
+        self._active_tools: dict[str, dict] = {}
 
     async def handle(self, request: Request) -> Response:
         """Handle an incoming request."""
@@ -136,6 +139,22 @@ class RequestHandler:
             )
 
         except asyncio.CancelledError:
+            # Send TOOL_CALL_END if there's an active tool (e.g., pending edit)
+            if session_id in self._active_tools:
+                active_tools = self._active_tools.pop(session_id)
+                await self._send_stream_chunk(
+                    session_id,
+                    request_id,
+                    StreamEventType.TOOL_CALL_END,
+                    {
+                        "tools": active_tools.get("tools", []),
+                        "output": "",
+                        "has_failure": False,
+                        "is_edit_tool": active_tools.get("is_edit", False),
+                        "skip_output": False,
+                        "unclosed": True,
+                    },
+                )
             await self._send_stream_chunk(
                 session_id,
                 request_id,
@@ -145,6 +164,22 @@ class RequestHandler:
 
         except Exception as e:
             self.logger.exception(f"Error in agent execution: {e}")
+            # Send TOOL_CALL_END if there's an active tool (e.g., pending edit)
+            if session_id in self._active_tools:
+                active_tools = self._active_tools.pop(session_id)
+                await self._send_stream_chunk(
+                    session_id,
+                    request_id,
+                    StreamEventType.TOOL_CALL_END,
+                    {
+                        "tools": active_tools.get("tools", []),
+                        "output": "",
+                        "has_failure": False,
+                        "is_edit_tool": active_tools.get("is_edit", False),
+                        "skip_output": False,
+                        "unclosed": True,
+                    },
+                )
             await self._send_stream_chunk(
                 session_id,
                 request_id,
@@ -160,6 +195,7 @@ class RequestHandler:
 
         finally:
             self.agent_manager.clear_active_request(session_id)
+            self._active_tools.pop(session_id, None)
 
     async def _handle_cancel_request(self, request: Request) -> Response:
         """Handle a CANCEL_REQUEST request."""
@@ -653,6 +689,13 @@ class RequestHandler:
                                         "skip_header": tool_name == "edit",
                                     },
                                 )
+                                # Track active tool state for proper cleanup on cancellation
+                                is_edit = tool_name == "edit"
+                                self._active_tools[session_id] = {
+                                    "tools": parallel_tools + parallel_skip_tools,
+                                    "is_edit": is_edit,
+                                    "was_called": tool_was_called,
+                                }
 
                     # Handle tool outputs
                     elif item_type == "tool_call_output_item":
@@ -690,6 +733,9 @@ class RequestHandler:
                                     and not parallel_tools,
                                 },
                             )
+
+                            # Clear active tools state since the tool completed
+                            self._active_tools.pop(session_id, None)
 
                             pending_tool_outputs = []
                             expected_outputs = 0

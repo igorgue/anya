@@ -144,6 +144,8 @@ function M.send_message()
   local existing_conv_id = get_conversation_id(chat_buf)
 
   -- Clear the prompt buffer immediately for responsiveness
+  -- Ensure buffer is modifiable (might be set to non-modifiable by history navigation)
+  vim.api.nvim_set_option_value("modifiable", true, { buf = prompt_buf })
   vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, { "" })
 
   -- Single RPC call: send text, get back IDs, schedules agent task
