@@ -26,6 +26,7 @@ class SpacingManager:
 
     def __init__(self):
         self._last_content_type = None
+        self._last_was_fold_end = False
 
     def ensure_marker_isolation(self, text: str) -> str:
         """Ensure all markers in the text are on their own lines.
@@ -161,7 +162,12 @@ class SpacingManager:
 
         # Rules for transitions between non-marker blocks
         if next_type in [ContentType.TOOL_HEADER, ContentType.EDIT_BLOCK]:
-            spacing = "\n\n"
+            # After fold_end, we already have a trailing newline from the marker
+            # so only add one more newline (not two) for consecutive tool calls
+            if self._last_was_fold_end:
+                spacing = "\n"
+            else:
+                spacing = "\n\n"
         elif next_type == ContentType.TEXT:
             if self._last_content_type in [
                 ContentType.TOOL_OUTPUT,
@@ -170,6 +176,7 @@ class SpacingManager:
                 spacing = "\n\n"
 
         self._last_content_type = next_type
+        self._last_was_fold_end = False  # Reset after using
         return spacing
 
     def format_delta(self, delta: str, content_type: ContentType) -> str:
@@ -287,6 +294,9 @@ class SpacingManager:
             if is_fold_end:
                 # Restore the previous state (TOOL_OUTPUT or THINKING)
                 self._last_content_type = previous_content_type
+                # Track that we just wrote fold_end so consecutive tool calls
+                # don't add an extra blank line
+                self._last_was_fold_end = True
             elif is_tool_marker:
                 self._last_content_type = ContentType.TOOL_MARKER
             else:

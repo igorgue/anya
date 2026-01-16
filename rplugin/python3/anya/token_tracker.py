@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 # Import comprehensive model list for partial matching
-from .openrouter_models import OPENROUTER_CONTEXT_WINDOWS
+from .openrouter_models import OPENROUTER_CONTEXT_WINDOWS as ALL_OPENROUTER_MODELS
 
 # Default context window fallback
 DEFAULT_CONTEXT_WINDOW = 128000
@@ -170,24 +170,78 @@ def get_output_limit(model: str | None) -> int:
     if not model:
         return DEFAULT_MAX_OUTPUT
 
-    # Exact match
-    if model in MODEL_OUTPUT_LIMITS:
-        return MODEL_OUTPUT_LIMITS[model]
+    # Exact match (case-insensitive)
+    model_lower = model.lower()
+    for full_model_name, output_limit in MODEL_OUTPUT_LIMITS.items():
+        if full_model_name.lower() == model_lower:
+            return output_limit
 
     # Try with common provider prefixes
     prefixes = ["openai", "anthropic", "google", "deepseek"]
     for prefix in prefixes:
-        prefixed = f"{prefix}/{model}"
-        if prefixed in MODEL_OUTPUT_LIMITS:
+        prefixed = f"{prefix}/{model_lower}"
+        if prefixed.lower() in {k.lower(): v for k, v in MODEL_OUTPUT_LIMITS.items()}:
             return MODEL_OUTPUT_LIMITS[prefixed]
 
     # Partial match: check if the base model name matches any entry
-    base_model = model.split("/")[-1]
+    base_model = model_lower.split("/")[-1]
     for full_model_name, output_limit in MODEL_OUTPUT_LIMITS.items():
-        if full_model_name.endswith(base_model):
+        if full_model_name.lower().endswith(base_model):
             return output_limit
 
     return DEFAULT_MAX_OUTPUT
+
+
+# Curated subset of common models (for faster lookup)
+OPENROUTER_CONTEXT_WINDOWS = {
+    # 2M context
+    "x-ai/grok-4-fast": 2000000,
+    # 1M context
+    "google/gemini-2.0-flash-001": 1048576,
+    "google/gemini-2.5-flash": 1048576,
+    "google/gemini-2.5-pro": 1048576,
+    "google/gemini-3-pro-preview": 1048576,
+    "openai/gpt-4.1": 1047576,
+    "openai/gpt-4.1-mini": 1047576,
+    "openai/gpt-4.1-nano": 1047576,
+    "anthropic/claude-sonnet-4": 1000000,
+    "anthropic/claude-sonnet-4.5": 1000000,
+    # 400K context
+    "openai/gpt-5": 400000,
+    "openai/gpt-5-mini": 400000,
+    "openai/gpt-5.1": 400000,
+    # 256K context
+    "qwen/qwen3-coder": 262144,
+    "x-ai/grok-4": 256000,
+    # 200K context
+    "anthropic/claude-3.5-sonnet": 200000,
+    "anthropic/claude-3.7-sonnet": 200000,
+    "anthropic/claude-3.7-sonnet:thinking": 200000,
+    "anthropic/claude-haiku-4.5": 200000,
+    "anthropic/claude-opus-4": 200000,
+    "anthropic/claude-opus-4.5": 200000,
+    "openai/o1": 200000,
+    "openai/o3": 200000,
+    "openai/o3-mini": 200000,
+    "openai/o4-mini": 200000,
+    # 160K context
+    "deepseek/deepseek-chat": 163840,
+    "deepseek/deepseek-r1": 163840,
+    # 128K context
+    "meta-llama/llama-3.3-70b-instruct": 131072,
+    "x-ai/grok-3": 131072,
+    "openai/gpt-4o": 128000,
+    "openai/gpt-4o-mini": 128000,
+    "openai/chatgpt-4o-latest": 128000,
+    # Non-prefixed versions (for direct OpenAI API)
+    "gpt-4.1": 1047576,
+    "gpt-4.1-mini": 1047576,
+    "gpt-4o": 128000,
+    "gpt-4o-mini": 128000,
+    "o1": 200000,
+    "o3": 200000,
+    "o3-mini": 200000,
+}
 
 
 def get_context_window(model: str | None) -> int:
@@ -211,17 +265,37 @@ def get_context_window(model: str | None) -> int:
     if not model:
         return DEFAULT_CONTEXT_WINDOW
 
-    # Exact match in the curated list
-    if model in OPENROUTER_CONTEXT_WINDOWS:
-        return OPENROUTER_CONTEXT_WINDOWS[model]
+    # Normalize to lowercase for case-insensitive matching
+    model_lower = model.lower()
 
-    model = model.lower()
-
-    # Partial match: check if the base model name matches any entry
-    # This handles cases like "glm-4.7" when the full name is "z-ai/glm-4.7"
-    base_model = model.split("/")[-1]  # Get the part after last slash
+    # Exact match in the curated list (case-insensitive)
     for full_model_name, context_size in OPENROUTER_CONTEXT_WINDOWS.items():
-        if full_model_name.split("/")[-1] == base_model:
+        if full_model_name.lower() == model_lower:
+            return context_size
+
+    # Try with common provider prefixes (e.g., "gpt-4.1" -> "openai/gpt-4.1")
+    prefixes = [
+        "openai",
+        "anthropic",
+        "google",
+        "meta-llama",
+        "mistralai",
+        "x-ai",
+        "deepseek",
+        "qwen",
+        "z-ai",
+    ]
+    for prefix in prefixes:
+        prefixed = f"{prefix}/{model_lower}"
+        for full_model_name, context_size in OPENROUTER_CONTEXT_WINDOWS.items():
+            if full_model_name.lower() == prefixed:
+                return context_size
+
+    # Partial match: check if the base model name matches any entry in the full model list
+    # This handles cases like "glm-4.7" when the full name is "z-ai/glm-4.7"
+    base_model = model_lower.split("/")[-1]  # Get the part after last slash
+    for full_model_name, context_size in ALL_OPENROUTER_MODELS.items():
+        if full_model_name.lower().split("/")[-1] == base_model:
             return context_size
 
     # Unknown model, use default

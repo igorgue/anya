@@ -224,11 +224,6 @@ vim.keymap.set({ "n", "i" }, "<C-w><Right>", function()
   require("anya.float_focus").check_and_redirect()
 end, { buffer = true, desc = "Navigate right (trapped)" })
 
--- Close Anya with q in normal mode
-vim.keymap.set("n", "q", function()
-  vim.cmd("Anya close")
-end, { buffer = true, desc = "Close Anya" })
-
 -- Movement keymaps
 vim.keymap.set("n", "<C-a>", "0", { buffer = true, nowait = true, desc = "Start of line" })
 vim.keymap.set("i", "<C-a>", "<C-o>0", { buffer = true, nowait = true, desc = "Start of line" })
@@ -238,8 +233,18 @@ vim.keymap.set("n", "<C-u>", "S", { buffer = true, nowait = true, desc = "Delete
 vim.keymap.set("i", "<C-u>", "<C-o>S", { buffer = true, nowait = true, desc = "Delete whole line" })
 
 -- Resize prompt height
-vim.keymap.set({ "n", "i" }, "<C-Up>", "<cmd>call AnyaResizePromptHeight(1)<cr>", { buffer = true, nowait = true, desc = "Increase prompt height" })
-vim.keymap.set({ "n", "i" }, "<C-Down>", "<cmd>call AnyaResizePromptHeight(-1)<cr>", { buffer = true, nowait = true, desc = "Decrease prompt height" })
+vim.keymap.set(
+  { "n", "i" },
+  "<C-Up>",
+  "<cmd>call AnyaResizePromptHeight(1)<cr>",
+  { buffer = true, nowait = true, desc = "Increase prompt height" }
+)
+vim.keymap.set(
+  { "n", "i" },
+  "<C-Down>",
+  "<cmd>call AnyaResizePromptHeight(-1)<cr>",
+  { buffer = true, nowait = true, desc = "Decrease prompt height" }
+)
 
 -- Resize side pane width
 local function resize_pane(delta)
@@ -260,8 +265,12 @@ local function resize_pane(delta)
   end
 end
 
-vim.keymap.set({ "n", "i" }, "<C-Left>", function() resize_pane(2) end, { buffer = true, nowait = true, desc = "Shrink side pane" })
-vim.keymap.set({ "n", "i" }, "<C-Right>", function() resize_pane(-2) end, { buffer = true, nowait = true, desc = "Grow side pane" })
+vim.keymap.set({ "n", "i" }, "<C-Left>", function()
+  resize_pane(2)
+end, { buffer = true, nowait = true, desc = "Shrink side pane" })
+vim.keymap.set({ "n", "i" }, "<C-Right>", function()
+  resize_pane(-2)
+end, { buffer = true, nowait = true, desc = "Grow side pane" })
 
 -- Focus toggle between chat and prompt with Tab
 vim.keymap.set("n", "<Tab>", function()
@@ -326,10 +335,8 @@ local function cycle_history(direction)
 
   -- Update buffer if we got a prompt
   if prompt then
-    vim.api.nvim_set_option_value("modifiable", true, { buf = bufnr })
     local lines = vim.split(prompt, "\n", { plain = true })
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-    vim.api.nvim_set_option_value("modifiable", false, { buf = bufnr })
   end
 end
 

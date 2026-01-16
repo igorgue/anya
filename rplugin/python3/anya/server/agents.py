@@ -240,8 +240,10 @@ class AgentManager:
             # Use defaults - create a settings object from daemon's env
             settings = AgentSettings(
                 model=os.environ.get("ANYA_MODEL", "gpt-4.1"),
-                api_key=os.environ.get("ANYA_API_KEY") or os.environ.get("OPENAI_API_KEY"),
-                api_base=os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE"),
+                api_key=os.environ.get("ANYA_API_KEY")
+                or os.environ.get("OPENAI_API_KEY"),
+                api_base=os.environ.get("ANYA_API_BASE")
+                or os.environ.get("OPENAI_API_BASE"),
                 api_type=os.environ.get("ANYA_API_TYPE", "responses"),
                 thinking_budget=self._thinking_budget,
                 disable_mcp=not self._mcp_enabled,

@@ -11,6 +11,7 @@ from .search_code import search_code
 from .parrot import parrot
 from .buffer_name import buffer_name
 from .memory import store_memory, extract_memories, recall_memories
+from .ui_select import ui_select
 
 _ = (
     create_file,
@@ -28,6 +29,7 @@ _ = (
     store_memory,
     extract_memories,
     recall_memories,
+    ui_select,
 )
 _ = None
 
@@ -47,4 +49,5 @@ __all__ = [
     "store_memory",
     "extract_memories",
     "recall_memories",
+    "ui_select",
 ]

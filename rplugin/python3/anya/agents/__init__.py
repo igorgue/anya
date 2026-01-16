@@ -89,11 +89,15 @@ async def CodeAgent(
         return default
 
     # Model config
-    model_name = (_get_setting("model", "ANYA_MODEL", default="gpt-4.1") or "gpt-4.1").strip()
+    model_name = (
+        _get_setting("model", "ANYA_MODEL", default="gpt-4.1") or "gpt-4.1"
+    ).strip()
     model_settings_obj = get_default_model_settings(model_name.lower())
 
     # API type (for completions/chat/responses/etc)
-    api_type = _get_setting("api_type", "ANYA_API_TYPE", "ANYA_OPENAI_API_TYPE", default="responses")
+    api_type = _get_setting(
+        "api_type", "ANYA_API_TYPE", "ANYA_OPENAI_API_TYPE", default="responses"
+    )
     if api_type:
         api_type = api_type.strip().lower()
         if api_type not in {"chat_completions", "responses"}:

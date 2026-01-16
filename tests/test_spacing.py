@@ -60,6 +60,27 @@ class TestSpacingManager(unittest.TestCase):
         # fold_start is a tool marker, so text after it gets a blank line
         self.assertEqual(delta2, "\n\nworld")
 
+    def test_consecutive_tool_calls_no_double_blank(self):
+        """Consecutive tool calls should only have one blank line between them, not two."""
+        # Simulate first tool call: tool header with fold_start
+        header1 = self.sm.format_content(
+            "ls", ContentType.TOOL_HEADER, ["fold_start", "tool_pending"]
+        )
+        # Tool output
+        output = self.sm.format_content("file.txt", ContentType.TOOL_OUTPUT)
+        # fold_end marker
+        fold_end = self.sm.format_content("", ContentType.MARKER, ["fold_end"])
+        self.assertTrue(fold_end.endswith("-->\n"))
+
+        # Now the second tool call - should only add one newline, not two
+        header2 = self.sm.format_content(
+            "cat file.txt", ContentType.TOOL_HEADER, ["fold_start", "tool_pending"]
+        )
+        # The header should start with just \n, not \n\n
+        # (fold_end already provided one newline)
+        self.assertTrue(header2.startswith("\n"))
+        self.assertFalse(header2.startswith("\n\n"))
+
 
 if __name__ == "__main__":
     unittest.main()

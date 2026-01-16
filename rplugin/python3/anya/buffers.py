@@ -345,7 +345,9 @@ def new(
     current_win = nvim.api.get_current_win()
 
     # First, try to find existing Anya windows dynamically (handles state out-of-sync)
-    found_chat_win, found_prompt_win, found_layout_win, stray_wins = _find_anya_windows(nvim)
+    found_chat_win, found_prompt_win, found_layout_win, stray_wins = _find_anya_windows(
+        nvim
+    )
 
     # Clean up any stray windows immediately (buffer leaked to non-floating windows)
     for stray_win in stray_wins:
@@ -675,7 +677,7 @@ def new(
     # We use an autocmd on InsertEnter/BufEnter to ensure our mapping overrides
     # any completion plugins (like blink.cmp) that might try to take over Ctrl+j.
     # We also apply it immediately to catch the current state (since we just entered/focused).
-    prompt_keys_cmd = f'''
+    prompt_keys_cmd = f"""
     local group = vim.api.nvim_create_augroup("AnyaPromptKeys_{prompt_buf_id}", {{ clear = true }})
 
     local function set_prompt_keys()
@@ -717,14 +719,14 @@ def new(
         group = group,
         callback = set_prompt_keys
     }})
-    '''
+    """
     nvim.exec_lua(prompt_keys_cmd, [])
 
     # Set up focus trap for the layout container
     # Redirect calls to the container buffer back to the prompt window
     nvim.api.buf_set_var(layout_buf, "anya_prompt_win", _win_id(prompt_win))
 
-    trap_cmd = f'''
+    trap_cmd = f"""
     local group = vim.api.nvim_create_augroup("AnyaLayoutFocusTrap_{layout_buf_id}", {{ clear = true }})
     vim.api.nvim_create_autocmd("WinEnter", {{
         buffer = {layout_buf_id},
@@ -740,7 +742,7 @@ def new(
             end)
         end
     }})
-    '''
+    """
     nvim.exec_lua(trap_cmd, [])
 
     return (chat_buf, prompt_buf)
@@ -793,7 +795,9 @@ def reposition_floats(nvim: Nvim):
         # Manual override allows expanding beyond content; shrinks when content is deleted
         manual_override = _anya_state.get("manual_prompt_height")
         if manual_override is not None:
-            prompt_height = min(max(1, max(display_height, manual_override)), PROMPT_MAX_HEIGHT)
+            prompt_height = min(
+                max(1, max(display_height, manual_override)), PROMPT_MAX_HEIGHT
+            )
         else:
             prompt_height = min(max(1, display_height), PROMPT_MAX_HEIGHT)
         _anya_state["prompt_height"] = prompt_height

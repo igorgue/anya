@@ -225,11 +225,6 @@ vim.keymap.set("n", "<Tab>", function()
   require("anya.float_focus").focus_prompt()
 end, { buffer = true, desc = "Switch to prompt window" })
 
--- Close Anya with q in normal mode
-vim.keymap.set("n", "q", function()
-  vim.cmd("Anya close")
-end, { buffer = true, desc = "Close Anya" })
-
 -- Resize prompt height from chat window too
 local function resize_prompt_height(delta)
   vim.fn.AnyaResizePromptHeight(delta)

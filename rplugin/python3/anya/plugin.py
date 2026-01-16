@@ -198,7 +198,8 @@ class AnyaPlugin:
         return AgentSettings(
             model=os.environ.get("ANYA_MODEL", "gpt-4.1"),
             api_key=os.environ.get("ANYA_API_KEY") or os.environ.get("OPENAI_API_KEY"),
-            api_base=os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE"),
+            api_base=os.environ.get("ANYA_API_BASE")
+            or os.environ.get("OPENAI_API_BASE"),
             api_type=os.environ.get("ANYA_API_TYPE", "responses"),
             thinking_budget=os.environ.get("ANYA_THINKING_BUDGET"),
             disable_mcp=os.environ.get("ANYA_DISABLE_MCP", "0") == "1",
@@ -1024,9 +1025,13 @@ vim.ui.select({lua_options},
                                     # This can happen if timer was paused or stopped
                                     # Force flush and continue instead of waiting for timeout
                                     if not timer_running and queue_length > 0:
-                                        self.nvim.exec_lua(
-                                            "require('anya.text').flush_queue(false)"
-                                        )
+
+                                        def flush_queue():
+                                            self.nvim.exec_lua(
+                                                "require('anya.text').flush_queue(false)"
+                                            )
+
+                                        self.nvim.async_call(flush_queue)
                                         return
                                 await asyncio.sleep(0.02)
 
@@ -1075,11 +1080,40 @@ vim.ui.select({lua_options},
 
                         self.nvim.async_call(render_and_setup)
 
-                        # Wait for render to complete
+                        # Wait for render to complete (up to 3 seconds)
                         wait_count = 0
-                        while not render_future.done() and wait_count < 50:
+                        while not render_future.done() and wait_count < 300:
                             await asyncio.sleep(0.01)
                             wait_count += 1
+
+                        # Check if render succeeded
+                        if render_future.done() and not render_future.result():
+                            # Render failed - send failure response
+                            try:
+                                loop = asyncio.get_event_loop()
+                                await loop.run_in_executor(
+                                    None,
+                                    functools.partial(
+                                        self._confirmation_client.send_request,
+                                        RequestType.TOOL_CONFIRMATION_RESPONSE,
+                                        self.session_id,
+                                        _confirmation_id,
+                                        {
+                                            "confirmation_id": _confirmation_id,
+                                            "choice": json.dumps(
+                                                {
+                                                    "action": "failed",
+                                                    "success": False,
+                                                    "message": "Failed to render edit UI",
+                                                }
+                                            ),
+                                        },
+                                        5.0,
+                                    ),
+                                )
+                            except Exception:
+                                pass
+                            return
 
                         # If YOLO mode, auto-apply
                         if _edit_yolo_mode:

@@ -168,8 +168,9 @@ function M.ensure_marker_line_isolation(text)
 
   -- Remove blank lines around markers (markers should be on their own line, but without extra blank lines)
   -- This aligns with the Python spacing.py ensure_marker_isolation behavior
-  -- Remove blank lines before markers
-  result = result:gsub("\n%s*\n+(<!%-%- at: .+ %-%->)", "\n%1")
+  -- NOTE: Do NOT remove blank lines before tool markers (fold_start etc) - Python spacing
+  -- manager intentionally adds blank lines before tool calls for readability.
+  -- Only remove blank lines before MESSAGE markers (am:)
   result = result:gsub("\n%s*\n+(<!%-%- am: .+ %-%->)", "\n%1")
   -- Remove extra blank lines after markers (keep only one newline)
   result = result:gsub("(<!%-%- at: .+ %-%->)%s*\n%s*\n+", "%1\n")

@@ -58,7 +58,11 @@ async def _wait_for_tool_folds_to_close(nvim, timeout: float = 300.0) -> None:
                 and not state["timer_running"]
                 and state["queue_length"] > 0
             ):
-                nvim.exec_lua("require('anya.text').flush_queue(false)")
+
+                def flush_queue():
+                    nvim.exec_lua("require('anya.text').flush_queue(false)")
+
+                nvim.async_call(flush_queue)
                 return
 
         # Small delay before next poll

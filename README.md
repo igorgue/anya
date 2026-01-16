@@ -86,7 +86,6 @@ pip install -r requirements.txt
 | `<C-Up>` / `<C-Down>` | Normal/Insert | Increase/decrease prompt height |
 | `<C-Left>` / `<C-Right>` | Normal/Insert | Resize side pane (pane layout) |
 | `<Tab>` | Normal | Toggle focus between chat and prompt |
-| `q` | Normal | Close Anya |
 
 ### Conversation History
 
