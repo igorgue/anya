@@ -583,6 +583,34 @@ function M._process_markers(bufnr)
         table.insert(message_markers, { id = msg_info.id, line = i })
         M._hide_line(bufnr, i)
       end
+    elseif markers.is_tool_output_marker(line) then
+       -- Tool output reference marker - hide it and add virtual text to line above
+       local info = markers.parse_tool_output_marker(line)
+       if info then
+         -- Hide the entire ato: marker line
+         M._hide_line(bufnr, i)
+
+         -- Check if line above has at: marker (the line we want to attach virtual text to)
+         if i > 1 then
+           local above_line = lines[i - 1]
+           local at_marker_idx = above_line:find("<!%-%- at:")
+
+           -- If above line has at: marker, attach virtual text there
+           if at_marker_idx then
+             local line_count = info.line_count or 0
+             -- Add virtual text at end of above line
+             vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, i - 2, #above_line, {
+               virt_text = {
+                 { "  " .. ui_utils.icons.success .. " ", "AnyaToolSuccess" },
+                 { ui_utils.icons.tool_output .. " View output", "Comment" },
+                 { " (" .. line_count .. " lines)", "NonText" },
+               },
+               virt_text_pos = "eol",
+               hl_mode = "combine",
+             })
+           end
+         end
+       end
     elseif markers.is_marker_line(line) then
       -- Hide the marker line
       M._hide_line(bufnr, i)

@@ -5,6 +5,8 @@ reconstructing UI state (folds, extmarks, widgets) from pure text content.
 They are human-readable and safe to edit.
 """
 
+import re
+
 # Marker names
 FOLD_START = "fold_start"
 FOLD_END = "fold_end"
@@ -23,6 +25,10 @@ SUFFIX = "-->"
 MESSAGE_PREFIX = "<!-- am:"
 MESSAGE_SUFFIX = "-->"
 
+TOOL_OUTPUT_PREFIX = "<!-- ato:"
+# Pattern: <!-- ato: output_id, tool_name, line_count -->
+TOOL_OUTPUT_PATTERN = re.compile(r"<!-- ato: ([^,]+), ([^,]+), (\d+) -->")
+
 
 def make_marker(*names: str) -> str:
     """Create a tool marker line with the given marker names."""
@@ -32,6 +38,11 @@ def make_marker(*names: str) -> str:
 def make_message_marker(msg_id: str) -> str:
     """Create a simplified message marker line with only the message ID."""
     return f"{MESSAGE_PREFIX} {msg_id} {MESSAGE_SUFFIX}"
+
+
+def make_tool_output_marker(output_id: str, tool_name: str, line_count: int = 0) -> str:
+    """Create a tool output reference marker."""
+    return f"<!-- ato: {output_id}, {tool_name}, {line_count} -->"
 
 
 def parse_marker(line: str) -> list[str] | None:
@@ -109,3 +120,23 @@ def with_markers(text: str, marker_list: list[str]) -> str:
         result.append(make_marker(FOLD_END))
 
     return "\n".join(result)
+
+
+def parse_tool_output_marker(line: str) -> tuple[str, str, int] | None:
+    """Parse a tool output marker line.
+
+    Args:
+        line: The line to parse (e.g., "<!-- ato: fa234uf, read_file, 234 -->")
+
+    Returns:
+        Tuple of (output_id, tool_name, line_count), or None if not a tool output marker
+    """
+    match = TOOL_OUTPUT_PATTERN.match(line.strip())
+    if match:
+        return match.group(1).strip(), match.group(2).strip(), int(match.group(3))
+    return None
+
+
+def is_tool_output_marker(line: str) -> bool:
+    """Check if a line is a tool output marker."""
+    return line.strip().startswith(TOOL_OUTPUT_PREFIX)

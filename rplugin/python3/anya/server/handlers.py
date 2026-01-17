@@ -27,6 +27,8 @@ from ..protocol import (
     make_error_response,
     make_success_response,
 )
+from .. import db
+from .. import ids
 from ..agents import MAIN_AGENT_NAME
 from ..token_tracker import (
     calculate_context_usage,
@@ -42,6 +44,77 @@ from .agents import AgentManager
 
 
 DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-4.1")
+
+# Tools that should use reference-based storage (not inline)
+# Excludes: edit (needs diff approval), thinking, and skip_output tools
+TOOL_OUTPUT_STORAGE_TOOLS = {
+    "read_file",
+    "read_many_files",
+    "exec",
+    "search_code",
+    "list_files",
+    "gh",
+    "create_file",
+    "write_file",
+}
+
+# Minimum lines for tool output to be stored as reference
+# Outputs shorter than this are kept inline for quick viewing
+TOOL_OUTPUT_MIN_LINES = 20
+
+
+def _detect_filetype(tool_name: str, content: str) -> str | None:
+    """Detect filetype for tool output based on tool name and content."""
+    if tool_name in ("read_file", "read_many_files"):
+        # Try to extract filename from the output header
+        # Format: "File: /path/to/file.ext"
+        lines = content.split("\n", 5)
+        for line in lines[:3]:
+            if line.startswith("File:"):
+                filename = line.split(":", 1)[1].strip()
+                ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+                # Map common extensions to filetypes
+                ext_map = {
+                    "py": "python",
+                    "js": "javascript",
+                    "ts": "typescript",
+                    "tsx": "typescriptreact",
+                    "jsx": "javascriptreact",
+                    "rs": "rust",
+                    "go": "go",
+                    "lua": "lua",
+                    "sh": "bash",
+                    "bash": "bash",
+                    "zsh": "zsh",
+                    "json": "json",
+                    "yaml": "yaml",
+                    "yml": "yaml",
+                    "toml": "toml",
+                    "md": "markdown",
+                    "html": "html",
+                    "css": "css",
+                    "sql": "sql",
+                    "c": "c",
+                    "cpp": "cpp",
+                    "h": "c",
+                    "hpp": "cpp",
+                    "java": "java",
+                    "rb": "ruby",
+                    "php": "php",
+                    "swift": "swift",
+                    "kt": "kotlin",
+                    "vim": "vim",
+                }
+                return ext_map.get(ext, "text")
+    elif tool_name == "exec":
+        return "bash"
+    elif tool_name == "search_code":
+        return "text"
+    elif tool_name == "list_files":
+        return "text"
+    elif tool_name == "gh":
+        return "text"
+    return "text"
 
 
 class RequestHandler:
@@ -659,6 +732,13 @@ class RequestHandler:
                                 else False
                             )
 
+                            # Check if this tool will likely use storage
+                            # (no fold needed - just header with marker appended later)
+                            will_use_storage = (
+                                tool_name in TOOL_OUTPUT_STORAGE_TOOLS
+                                and tool_name != "edit"
+                            )
+
                             if skip_output:
                                 expected_outputs += 1
                                 parallel_skip_tools.append(
@@ -691,6 +771,7 @@ class RequestHandler:
                                         "parallel_tools": parallel_tools,
                                         "is_first": len(parallel_tools) == 1,
                                         "skip_header": tool_name == "edit",
+                                        "skip_fold": will_use_storage,
                                     },
                                 )
                                 # Track active tool state for proper cleanup on cancellation
@@ -723,6 +804,74 @@ class RequestHandler:
                                 o for o in pending_tool_outputs if o
                             )
 
+                            # Determine if we should store this output as a reference
+                            # Conditions for storage:
+                            # 1. Not an edit tool (needs inline diff for approval)
+                            # 2. Not a skip_output tool (output not shown anyway)
+                            # 3. All tools in batch are in TOOL_OUTPUT_STORAGE_TOOLS
+                            # 4. Output has enough lines to be worth storing
+                            tool_output_refs = []
+                            use_storage = False
+
+                            all_tools = parallel_tools + parallel_skip_tools
+                            tool_names = [t["name"] for t in all_tools]
+
+                            # Check if all tools support storage
+                            all_support_storage = all(
+                                name in TOOL_OUTPUT_STORAGE_TOOLS for name in tool_names
+                            )
+
+                            # Count lines in output
+                            line_count = (
+                                all_outputs.count("\n") + 1 if all_outputs else 0
+                            )
+
+                            # Decide whether to use storage
+                            if (
+                                all_support_storage
+                                and not is_edit_tool
+                                and not has_failure
+                                and line_count >= TOOL_OUTPUT_MIN_LINES
+                                and payload.conversation_id  # Need conversation_id for storage
+                            ):
+                                use_storage = True
+
+                                # Store the output and create reference
+                                # For multiple tools, store combined output
+                                primary_tool_name = (
+                                    tool_names[0] if tool_names else "tool"
+                                )
+                                output_id = ids.new(
+                                    payload.conversation_id, min_length=7
+                                )
+                                filetype = _detect_filetype(
+                                    primary_tool_name, all_outputs
+                                )
+
+                                # Initialize database and save
+                                db.init_db()
+                                db.save_tool_output(
+                                    id=output_id,
+                                    conversation_id=payload.conversation_id,
+                                    message_id=request_id,
+                                    tool_name=primary_tool_name,
+                                    content=all_outputs,
+                                    filetype=filetype,
+                                )
+
+                                tool_output_refs.append(
+                                    {
+                                        "output_id": output_id,
+                                        "tool_name": primary_tool_name,
+                                        "line_count": line_count,
+                                    }
+                                )
+
+                                self.logger.info(
+                                    f"Stored tool output {output_id} ({line_count} lines) "
+                                    f"for {primary_tool_name}"
+                                )
+
                             # Send tool call end event
                             await self._send_stream_chunk(
                                 session_id,
@@ -735,6 +884,9 @@ class RequestHandler:
                                     "is_edit_tool": is_edit_tool,
                                     "skip_output": bool(parallel_skip_tools)
                                     and not parallel_tools,
+                                    # New fields for tool output storage
+                                    "use_storage": use_storage,
+                                    "tool_output_refs": tool_output_refs,
                                 },
                             )
 

@@ -8,6 +8,7 @@ M.icons = {
   success = "", -- Checkmark for success
   failure = "", -- Cross for failure
   thinking = "󰧑", -- Thinking brain for thinking reasoning text
+  tool_output = "󰈙", -- File icon for tool output reference
 }
 
 -- Namespace for extmarks

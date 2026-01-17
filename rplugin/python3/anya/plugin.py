@@ -578,6 +578,7 @@ class AnyaPlugin:
         thinking_finalized = False
         tool_was_called = False
         tool_fold_opened = False  # Track if a tool fold was opened (needs closing)
+        tool_fold_skipped = False  # Track if fold was skipped (storage prediction)
 
         try:
             # Send request to daemon (non-blocking, response comes via stream)
@@ -668,6 +669,7 @@ class AnyaPlugin:
                     parallel_tools = chunk.data.get("parallel_tools", [])
                     is_first = chunk.data.get("is_first", True)
                     skip_header = chunk.data.get("skip_header", False)
+                    skip_fold = chunk.data.get("skip_fold", False)
 
                     tool_was_called = True
 
@@ -689,21 +691,41 @@ class AnyaPlugin:
                         combined_header = " | ".join(tool_headers)
 
                         if is_first:
-                            pending_header = spacing_manager.format_content(
-                                combined_header,
-                                ContentType.TOOL_HEADER,
-                                ["fold_start", status],
-                            )
-                            collected_content.append(pending_header)
-                            tool_fold_opened = True  # Track that we opened a fold
-                            if not self._request_cancelled:
-                                self.nvim.async_call(
-                                    ui.stream_text_to_buffer_sync,
-                                    self.nvim,
-                                    chat_bufnr,
-                                    pending_header,
+                            # For storage-based tools, don't create a fold - just header + pending marker
+                            if skip_fold:
+                                pending_header = spacing_manager.format_content(
+                                    combined_header,
+                                    ContentType.TOOL_HEADER,
+                                    [status],  # No fold_start, just pending marker
                                 )
-                                self.nvim.async_call(self._set_tool_fold_open, True)
+                                collected_content.append(pending_header)
+                                tool_fold_skipped = True  # Track that we skipped the fold
+                                # No fold opened for storage tools
+                                # Skip marker processing - finalize_storage_tool_output will do it
+                                if not self._request_cancelled:
+                                    self.nvim.async_call(
+                                        ui.stream_text_to_buffer_sync,
+                                        self.nvim,
+                                        chat_bufnr,
+                                        pending_header,
+                                        True,  # skip_process_markers
+                                    )
+                            else:
+                                pending_header = spacing_manager.format_content(
+                                    combined_header,
+                                    ContentType.TOOL_HEADER,
+                                    ["fold_start", status],
+                                )
+                                collected_content.append(pending_header)
+                                tool_fold_opened = True  # Track that we opened a fold
+                                if not self._request_cancelled:
+                                    self.nvim.async_call(
+                                        ui.stream_text_to_buffer_sync,
+                                        self.nvim,
+                                        chat_bufnr,
+                                        pending_header,
+                                    )
+                                    self.nvim.async_call(self._set_tool_fold_open, True)
                         else:
                             if not self._request_cancelled:
                                 self.nvim.async_call(
@@ -720,6 +742,8 @@ class AnyaPlugin:
                     is_edit_tool = chunk.data.get("is_edit_tool", False)
                     skip_output = chunk.data.get("skip_output", False)
                     unclosed = chunk.data.get("unclosed", False)
+                    use_storage = chunk.data.get("use_storage", False)
+                    tool_output_refs = chunk.data.get("tool_output_refs", [])
 
                     # For skip_output tools, add a space before next text
                     if skip_output:
@@ -729,13 +753,27 @@ class AnyaPlugin:
                                 ui.stream_text_to_buffer, self.nvim, chat_bufnr, " "
                             )
 
-                    # Update markers (don't process yet - wait until fold_end is written)
-                    # Note: These markers are already written by fold_start, just update them
-                    if (
-                        not self._request_cancelled
-                        and not is_edit_tool
-                        and not skip_output
-                    ):
+                    # Handle storage-based tool outputs (no fold, just header + marker)
+                    if use_storage and tool_output_refs and not self._request_cancelled:
+                        ref = tool_output_refs[0]
+                        # Create the tool output reference marker
+                        output_marker = markers.make_tool_output_marker(
+                            ref["output_id"], ref["tool_name"], ref.get("line_count", 0)
+                        )
+                        collected_content.append(output_marker)
+                        # Update pending marker to success and append ato marker atomically
+                        # This prevents race conditions and duplicate headers
+                        self.nvim.async_call(
+                            ui.update_storage_tool_output_inline,
+                            self.nvim,
+                            chat_bufnr,
+                            output_marker,
+                        )
+                        tool_fold_skipped = False  # Reset for next tool
+                    elif tool_fold_skipped and not self._request_cancelled:
+                        # Fallback: we skipped fold but storage wasn't used
+                        # (e.g., tool failed or output too short)
+                        # Show inline output without fold, just update pending→success/failure
                         if has_failure:
                             self.nvim.async_call(
                                 ui.update_pending_markers_to_failure,
@@ -748,14 +786,10 @@ class AnyaPlugin:
                                 self.nvim,
                                 chat_bufnr,
                             )
-
-                    # Output tool result (skip marker processing - do it once at end)
-                    if not is_edit_tool and not skip_output and output:
-                        wrapped_output = spacing_manager.format_content(
-                            f"``````\n{output}\n``````", ContentType.TOOL_OUTPUT
-                        )
-                        collected_content.append(wrapped_output)
-                        if not self._request_cancelled:
+                        # Output inline (no fold wrapper)
+                        if output and not skip_output:
+                            wrapped_output = f"\n``````\n{output}\n``````\n"
+                            collected_content.append(wrapped_output)
                             self.nvim.async_call(
                                 ui.stream_text_to_buffer_sync,
                                 self.nvim,
@@ -763,28 +797,66 @@ class AnyaPlugin:
                                 wrapped_output,
                                 True,  # skip_process_markers
                             )
+                        tool_fold_skipped = False  # Reset for next tool
+                        self.nvim.async_call(ui.process_markers, self.nvim, chat_bufnr)
+                    else:
+                        # Traditional flow: update markers, output, close fold
+                        # Update markers (don't process yet - wait until fold_end is written)
+                        if (
+                            not self._request_cancelled
+                            and not is_edit_tool
+                            and not skip_output
+                        ):
+                            if has_failure:
+                                self.nvim.async_call(
+                                    ui.update_pending_markers_to_failure,
+                                    self.nvim,
+                                    chat_bufnr,
+                                )
+                            else:
+                                self.nvim.async_call(
+                                    ui.update_pending_markers_to_success,
+                                    self.nvim,
+                                    chat_bufnr,
+                                )
 
-                    # Close fold (skip marker processing - do it once at end)
-                    # Write fold_end if a fold was opened (tracked by tool_fold_opened)
-                    if tool_fold_opened:
-                        fold_end_marker = spacing_manager.format_content(
-                            "", ContentType.MARKER, ["fold_end"]
-                        )
-                        collected_content.append(fold_end_marker)
-                        tool_fold_opened = False  # Reset fold tracking
-                        if not self._request_cancelled:
-                            self.nvim.async_call(
-                                ui.stream_text_to_buffer_sync,
-                                self.nvim,
-                                chat_bufnr,
-                                fold_end_marker,
-                                True,  # skip_process_markers
+                        # Output tool result (skip marker processing - do it once at end)
+                        if not is_edit_tool and not skip_output and output:
+                            # Traditional inline output
+                            wrapped_output = spacing_manager.format_content(
+                                f"``````\n{output}\n``````", ContentType.TOOL_OUTPUT
                             )
-                            self.nvim.async_call(self._set_tool_fold_open, False)
-                            # Process markers ONCE after everything is written
-                            self.nvim.async_call(
-                                ui.process_markers, self.nvim, chat_bufnr
+                            collected_content.append(wrapped_output)
+                            if not self._request_cancelled:
+                                self.nvim.async_call(
+                                    ui.stream_text_to_buffer_sync,
+                                    self.nvim,
+                                    chat_bufnr,
+                                    wrapped_output,
+                                    True,  # skip_process_markers
+                                )
+
+                        # Close fold (skip marker processing - do it once at end)
+                        # Write fold_end if a fold was opened (tracked by tool_fold_opened)
+                        if tool_fold_opened:
+                            fold_end_marker = spacing_manager.format_content(
+                                "", ContentType.MARKER, ["fold_end"]
                             )
+                            collected_content.append(fold_end_marker)
+                            tool_fold_opened = False  # Reset fold tracking
+                            if not self._request_cancelled:
+                                self.nvim.async_call(
+                                    ui.stream_text_to_buffer_sync,
+                                    self.nvim,
+                                    chat_bufnr,
+                                    fold_end_marker,
+                                    True,  # skip_process_markers
+                                )
+                                self.nvim.async_call(self._set_tool_fold_open, False)
+                                # Process markers ONCE after everything is written
+                                self.nvim.async_call(
+                                    ui.process_markers, self.nvim, chat_bufnr
+                                )
 
                     # Emit completion events
                     for tool in tools:
@@ -1934,6 +2006,17 @@ Usage:
             return False
         self._ensure_db()
         return db.delete_conversation(args[0])
+
+    @pynvim.function("AnyaGetToolOutput", sync=True)
+    def get_tool_output(self, args):
+        """Fetch tool output content by ID."""
+        if not args:
+            return None
+        output_id = args[0]
+        if not output_id:
+            return None
+        self._ensure_db()
+        return db.get_tool_output(output_id)
 
     @pynvim.function("AnyaRebuildBufferContent", sync=True)
     def rebuild_buffer_content(self, args):

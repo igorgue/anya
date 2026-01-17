@@ -122,8 +122,9 @@ def parse_usage(usage: Any, provider: str | None = None) -> TokenUsage:
         cache_write=0,  # Not typically reported in usage
     )
 
-
     # Common provider prefixes for model name matching
+
+
 PROVIDER_PREFIXES = [
     "openai",
     "anthropic",

@@ -118,7 +118,7 @@ function M.ensure_marker_line_isolation(text)
     return text
   end
 
-  if not text:find("<!%-%- [aa][tm]:") then
+  if not text:find("<!%-%- a[tmo][mot]?:") then
     return text
   end
 
@@ -131,11 +131,15 @@ function M.ensure_marker_line_isolation(text)
     -- Check if line contains a marker pattern
     local contains_at_marker = line:find("<!%-%- at:") ~= nil
     local contains_am_marker = line:find("<!%-%- am:") ~= nil
-    local contains_marker = contains_at_marker or contains_am_marker
+    local contains_ato_marker = line:find("<!%-%- ato:") ~= nil
+    local contains_marker = contains_at_marker or contains_am_marker or contains_ato_marker
 
     if contains_marker then
       -- Check if stripped line IS a marker (marker already isolated)
-      local is_marker_line = M.is_marker_line(stripped) or M.is_message_marker(stripped)
+      local is_at = M.is_marker_line(stripped)
+      local is_am = M.is_message_marker(stripped)
+      local is_ato = M.is_tool_output_marker(stripped)
+      local is_marker_line = is_at or is_am or is_ato
 
       if is_marker_line then
         table.insert(normalized_lines, stripped)
@@ -175,8 +179,9 @@ function M.ensure_marker_line_isolation(text)
   -- Remove extra blank lines after markers (keep only one newline)
   result = result:gsub("(<!%-%- at: .+ %-%->)%s*\n%s*\n+", "%1\n")
   result = result:gsub("(<!%-%- am: .+ %-%->)%s*\n%s*\n+", "%1\n")
+  result = result:gsub("(<!%-%- ato: .+ %-%->)%s*\n%s*\n+", "%1\n")
   -- Ensure adjacent markers have only one newline between them
-  result = result:gsub("(<!%-%- a[mt]: .+ %-%->)%s*\n%s*(<!%-%- a[mt]: .+ %-%->)", "%1\n%2")
+  result = result:gsub("(<!%-%- a[mt]o?: .+ %-%->)%s*\n%s*(<!%-%- a[mt]o?: .+ %-%->)", "%1\n%2")
 
   -- Final normalization: collapse multiple newlines (reduce 3+ to 2)
   result = result:gsub("\n\n\n+", "\n\n")
@@ -232,6 +237,29 @@ function M.utc_to_local_time(iso_timestamp)
   local ampm = local_date.hour >= 12 and "pm" or "am"
 
   return string.format("%d:%02d%s", hour_12, local_date.min, ampm)
+end
+
+-- Tool output marker pattern: <!-- ato: id, tool_name, line_count -->
+-- Can be standalone or embedded in a line (e.g., appended to header)
+M.TOOL_OUTPUT_PATTERN = "<!%-%- ato: ([^,]+), ([^,]+), (%d+) %-%->"
+M.TOOL_OUTPUT_PREFIX = "<!-- ato:"
+
+--- Parse a tool output marker from a line (can be embedded anywhere in the line)
+--- @param line string The line to parse
+--- @return table|nil Parsed info: { id = string, tool_name = string, line_count = number }
+function M.parse_tool_output_marker(line)
+  local id, tool_name, line_count = line:match(M.TOOL_OUTPUT_PATTERN)
+  if id and tool_name and line_count then
+    return { id = vim.trim(id), tool_name = vim.trim(tool_name), line_count = tonumber(line_count) }
+  end
+  return nil
+end
+
+--- Check if a line contains a tool output marker
+--- @param line string The line to check
+--- @return boolean True if the line contains a tool output marker
+function M.is_tool_output_marker(line)
+  return line:find(M.TOOL_OUTPUT_PREFIX, 1, true) ~= nil
 end
 
 return M

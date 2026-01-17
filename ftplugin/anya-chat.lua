@@ -16,6 +16,8 @@ vim.opt_local.foldmethod = "manual"
 vim.opt_local.foldenable = true
 vim.opt_local.modifiable = true
 vim.opt_local.spell = false
+-- Prevent "save file?" prompts - buffer is managed by Anya
+vim.bo.modified = false
 -- Clear winbar initially to prevent navic/other plugins from interfering
 -- Our winbar will be set from Python after all windows are created (see buffers.py)
 vim.opt.winbar = ""
@@ -28,6 +30,32 @@ vim.opt_local.foldtext = [[v:lua.require'anya.foldtext'.get_foldtext()]]
 vim.keymap.set("n", "<C-c>", function()
   vim.cmd("Anya cancel")
 end, { buffer = true, desc = "Cancel agent response" })
+
+-- Tool output viewing keymaps
+local tool_output = require("anya.tool_output")
+
+-- Open tool output on <CR> if on a tool output line, else toggle fold
+vim.keymap.set("n", "<CR>", function()
+  if not tool_output.open_at_cursor() then
+    -- Try to toggle fold, ignore error if no fold exists
+    pcall(vim.cmd, "normal! za")
+  end
+end, { buffer = true, desc = "Open tool output or toggle fold" })
+
+-- Open tool output on <Space>
+vim.keymap.set("n", "<Space>", function()
+  tool_output.open_at_cursor()
+end, { buffer = true, desc = "Open tool output" })
+
+-- Single-click to open tool output (mouse support)
+-- <LeftRelease> fires AFTER cursor moves to clicked position
+-- Only opens if cursor lands on a tool output marker line
+vim.keymap.set("n", "<LeftRelease>", function()
+  -- Small delay to ensure cursor position is updated
+  vim.schedule(function()
+    tool_output.open_at_cursor() -- Returns false if not on marker line (no-op)
+  end)
+end, { buffer = true, desc = "Open tool output on click" })
 
 -- Section navigation: jump between # headers (# User, # Anya, etc.)
 local function jump_to_header(direction)

@@ -1,6 +1,6 @@
 -- Filetype plugin for anya-prompt buffer
 -- Configures the prompt input buffer
--- NOTE: Keymaps are defined in buffers.py to ensure they override other plugins
+-- NOTE: <CR> mapping for sending messages is defined here to coexist with completion plugins
 
 -- Disable treesitter for prompt buffer to improve typing performance
 -- vim.treesitter.language.register("markdown", "anya-prompt")
@@ -381,3 +381,26 @@ vim.keymap.set({ "n", "i" }, "<C-v>", function()
     end
   end
 end, { buffer = true, desc = "Paste (image-aware)" })
+
+-- Smart <CR> mapping for sending messages
+-- In normal mode: Always send the message
+-- In insert mode: Check if completion popup is visible first
+-- If popup is visible, just insert newline (let blink.cmp handle completion)
+-- If popup is not visible, exit insert mode and send message
+vim.keymap.set("n", "<CR>", function()
+  require("anya.conversation").send_message()
+end, { buffer = true, desc = "Send message" })
+
+vim.keymap.set("i", "<CR>", function()
+  -- Check if completion popup menu is visible
+  if vim.fn.pumvisible() ~= 0 then
+    -- Popup is open, just return CR to confirm completion
+    return "<CR>"
+  else
+    -- No popup, exit insert mode and send message
+    vim.schedule(function()
+      require("anya.conversation").send_message()
+    end)
+    return "<cmd>stopinsert<cr>"
+  end
+end, { buffer = true, expr = true, desc = "Send message or confirm completion" })

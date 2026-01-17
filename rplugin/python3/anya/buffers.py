@@ -657,22 +657,6 @@ def new(
         [],
     )
 
-    # Set up keymaps for the prompt buffer
-    nvim.api.buf_set_keymap(
-        prompt_buf,
-        "n",
-        "<CR>",
-        "<cmd>lua require('anya.conversation').send_message()<cr>",
-        {"noremap": True, "silent": True, "desc": "Send message"},
-    )
-    nvim.api.buf_set_keymap(
-        prompt_buf,
-        "i",
-        "<CR>",
-        "<cmd>stopinsert<cr><cmd>lua require('anya.conversation').send_message()<cr>",
-        {"noremap": True, "silent": True, "desc": "Send message"},
-    )
-
     # Force keymap precedence for Ctrl+j
     # We use an autocmd on InsertEnter/BufEnter to ensure our mapping overrides
     # any completion plugins (like blink.cmp) that might try to take over Ctrl+j.

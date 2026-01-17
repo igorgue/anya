@@ -3,6 +3,7 @@ from .edit import edit
 from .exec import exec
 from .exec_lua import exec_lua
 from .gh import gh
+from .get_tool_output import get_tool_output
 from .list_files import list_files
 from .read_file import read_file
 from .read_many_files import read_many_files
@@ -19,6 +20,7 @@ _ = (
     exec,
     exec_lua,
     gh,
+    get_tool_output,
     list_files,
     read_file,
     read_many_files,
@@ -39,6 +41,7 @@ __all__ = [
     "exec",
     "exec_lua",
     "gh",
+    "get_tool_output",
     "list_files",
     "read_file",
     "read_many_files",

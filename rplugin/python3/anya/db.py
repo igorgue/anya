@@ -7,7 +7,7 @@ $XDG_DATA_HOME/anya/conversations.db or ~/.local/share/anya/conversations.db
 import os
 import pathlib
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from . import markers
@@ -79,6 +79,21 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
             CREATE INDEX IF NOT EXISTS idx_memories_timestamp ON memories(timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_memories_dedup ON memories(deduplication_key);
+
+            CREATE TABLE IF NOT EXISTS tool_outputs (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                message_id TEXT,
+                tool_name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                line_count INTEGER,
+                filetype TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_tool_outputs_conversation ON tool_outputs(conversation_id);
+            CREATE INDEX IF NOT EXISTS idx_tool_outputs_message ON tool_outputs(message_id);
         """)
         conn.commit()
 
@@ -426,6 +441,77 @@ def load_conversation(id: str) -> dict[str, Any] | None:
 
     messages = get_messages(id)
     return {"conversation": conversation, "messages": messages}
+
+
+def save_tool_output(
+    id: str,
+    conversation_id: str,
+    message_id: str,
+    tool_name: str,
+    content: str,
+    filetype: str | None = None,
+) -> bool:
+    """Insert a tool output record."""
+    conn = get_connection()
+    try:
+        line_count = content.count("\n") + 1 if content else 0
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """INSERT INTO tool_outputs (id, conversation_id, message_id, tool_name, content, line_count, filetype, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                id,
+                conversation_id,
+                message_id,
+                tool_name,
+                content,
+                line_count,
+                filetype,
+                now,
+            ),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError as e:
+        import logging
+
+        logging.getLogger("anya.db").warning(
+            f"Failed to save tool output {id}: {e} (conv={conversation_id}, msg={message_id})"
+        )
+        return False
+    finally:
+        conn.close()
+
+
+def get_tool_output(id: str) -> dict[str, Any] | None:
+    """Get a tool output by ID."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            """SELECT id, conversation_id, message_id, tool_name, content, line_count, filetype, created_at
+               FROM tool_outputs WHERE id = ?""",
+            (id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+        return None
+    finally:
+        conn.close()
+
+
+def get_tool_outputs_for_message(message_id: str) -> list[dict[str, Any]]:
+    """Get all tool outputs for a message."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            """SELECT id, conversation_id, message_id, tool_name, content, line_count, filetype, created_at
+               FROM tool_outputs WHERE message_id = ? ORDER BY created_at ASC""",
+            (message_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
 
 
 def rebuild_buffer_content(

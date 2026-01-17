@@ -150,6 +150,9 @@ def stream_text_to_buffer_sync(nvim, bufnr, text, skip_process_markers=False):
     nvim.exec_lua(
         "require('anya.text').output_sync(...)", bufnr, text, None, skip_process_markers
     )
+    nvim.exec_lua(
+        "require('anya.text').output_sync(...)", bufnr, text, None, skip_process_markers
+    )
 
 
 def autoscroll(nvim, bufnr):
@@ -259,23 +262,27 @@ def flush_queue(nvim):
     nvim.exec_lua("require('anya.text').flush_queue()")
 
 
-def update_last_tool_pending_marker(nvim, bufnr: int, new_status: str) -> bool:
+def update_last_tool_pending_marker(
+    nvim, bufnr: int, new_status: str, sync: bool = False
+) -> bool:
     """Update the most recent tool_pending marker line to the given status.
 
     This only edits buffer text (no marker processing - caller should do it).
     Returns True if a marker was updated, False otherwise.
 
     Uses vim.schedule() to defer buffer modifications to avoid E565 errors
-    when called from async contexts.
+    when called from async contexts. If sync=True, executes immediately
+    without vim.schedule() (for use when already on main thread).
     """
     if not nvim.api.buf_is_valid(bufnr):
         return False
 
     # Use Lua with vim.schedule to safely modify buffer from async context
-    # Marker format: <!-- at: fold_start, tool_pending -->
+    # Marker format: <!-- at: fold_start, tool_pending --> or just <!-- at: tool_pending -->
     lua_code = """
-    local bufnr, new_status, pending_marker, success_marker, failure_marker, fold_start_marker = ...
-    vim.schedule(function()
+    local bufnr, new_status, pending_marker, success_marker, failure_marker, fold_start_marker, use_sync = ...
+
+    local function do_update()
         if not vim.api.nvim_buf_is_valid(bufnr) then return end
 
         local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -283,28 +290,32 @@ def update_last_tool_pending_marker(nvim, bufnr: int, new_status: str) -> bool:
             local line = lines[i]
             -- Check if line has tool_pending marker
             if line:find(pending_marker, 1, true) then
-                -- Check if it also has fold_start marker
-                if line:find(fold_start_marker, 1, true) then
-                    -- Remove pending/success/failure markers with proper comma handling
-                    local new_line = line
-                    -- Remove ", tool_pending" or "tool_pending, " or just "tool_pending"
-                    new_line = new_line:gsub(", " .. pending_marker, "")
-                    new_line = new_line:gsub(pending_marker .. ", ", "")
-                    new_line = new_line:gsub(pending_marker, "")
-                    new_line = new_line:gsub(", " .. success_marker, "")
-                    new_line = new_line:gsub(success_marker .. ", ", "")
-                    new_line = new_line:gsub(success_marker, "")
-                    new_line = new_line:gsub(", " .. failure_marker, "")
-                    new_line = new_line:gsub(failure_marker .. ", ", "")
-                    new_line = new_line:gsub(failure_marker, "")
-                    -- Add new status before the closing -->
-                    new_line = new_line:gsub(" %-%->", ", " .. new_status .. " -->")
-                    vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, {new_line})
-                    return
-                end
+                -- Update pending/success/failure markers with proper comma handling
+                local new_line = line
+                -- Remove ", tool_pending" or "tool_pending, " or just "tool_pending"
+                new_line = new_line:gsub(", " .. pending_marker, "")
+                new_line = new_line:gsub(pending_marker .. ", ", "")
+                new_line = new_line:gsub(pending_marker, "")
+                new_line = new_line:gsub(", " .. success_marker, "")
+                new_line = new_line:gsub(success_marker .. ", ", "")
+                new_line = new_line:gsub(success_marker, "")
+                new_line = new_line:gsub(", " .. failure_marker, "")
+                new_line = new_line:gsub(failure_marker .. ", ", "")
+                new_line = new_line:gsub(failure_marker, "")
+                -- Add new status before the closing -->
+                new_line = new_line:gsub(" %-%->", ", " .. new_status .. " -->")
+                vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, {new_line})
+                return true
             end
         end
-    end)
+        return false
+    end
+
+    if use_sync then
+        do_update()
+    else
+        vim.schedule(do_update)
+    end
     """
     nvim.exec_lua(
         lua_code,
@@ -314,18 +325,185 @@ def update_last_tool_pending_marker(nvim, bufnr: int, new_status: str) -> bool:
         markers.TOOL_SUCCESS,
         markers.TOOL_FAILURE,
         markers.FOLD_START,
+        sync,
     )
     return True
 
 
-def update_pending_markers_to_success(nvim, bufnr):
+def update_pending_markers_to_success(nvim, bufnr, sync: bool = False):
     """Update the most recent tool_pending marker to tool_success."""
-    update_last_tool_pending_marker(nvim, bufnr, markers.TOOL_SUCCESS)
+    update_last_tool_pending_marker(nvim, bufnr, markers.TOOL_SUCCESS, sync=sync)
 
 
-def update_pending_markers_to_failure(nvim, bufnr):
+def update_pending_markers_to_failure(nvim, bufnr, sync: bool = False):
     """Update the most recent tool_pending marker to tool_failure."""
-    update_last_tool_pending_marker(nvim, bufnr, markers.TOOL_FAILURE)
+    update_last_tool_pending_marker(nvim, bufnr, markers.TOOL_FAILURE, sync=sync)
+
+
+def finalize_storage_tool_output(nvim, bufnr, ato_marker: str):
+    """Finalize a storage-based tool output by updating marker and appending ato reference.
+
+    For storage-based tools, buffer has:
+      **tool header**
+      <!-- at: tool_pending -->
+
+    This function transforms it to:
+      **tool header**<!-- at: tool_success --><!-- ato: id, tool, lines -->
+
+    The header and markers are merged onto one line so virtual text appears inline.
+    """
+    lua_code = """
+    local bufnr, ato_marker, pending_marker, success_marker = ...
+
+    -- Flush queue synchronously first
+    require('anya.text').flush_queue(false)
+
+    -- Schedule the update to ensure all async writes have completed
+    vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(bufnr) then return end
+
+        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
+        -- Find the last tool_pending marker line (working backwards)
+        for i = #lines, 1, -1 do
+            local line = lines[i]
+            if line:find(pending_marker, 1, true) then
+                -- Found the pending marker line
+                -- Replace tool_pending with tool_success and append ato marker
+                local new_marker = line:gsub(pending_marker, success_marker) .. ato_marker
+
+                -- Check if line above is the header (starts with **)
+                local header_line_idx = i - 1
+                if header_line_idx >= 1 then
+                    local header_line = lines[header_line_idx]
+                    if header_line:match("^%*%*") then
+                        -- Merge header + markers onto one line
+                        local merged = header_line .. new_marker
+                        -- Delete marker line and update header line
+                        vim.api.nvim_buf_set_lines(bufnr, header_line_idx - 1, i, false, {merged})
+                        -- Process markers to create virtual text
+                        require('anya.markers_ui')._process_markers(bufnr)
+                        return
+                    end
+                end
+
+                -- No header found, just update the marker line
+                vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, {new_marker})
+                -- Process markers to create virtual text
+                require('anya.markers_ui')._process_markers(bufnr)
+                return
+            end
+        end
+
+        -- No pending marker found - give up with warning
+        vim.notify("finalize: pending marker not found (" .. #lines .. " lines)", vim.log.levels.WARN)
+    end)
+    """
+    nvim.exec_lua(
+        lua_code,
+        bufnr,
+        ato_marker,
+        markers.TOOL_PENDING,
+        markers.TOOL_SUCCESS,
+    )
+
+
+def update_storage_tool_output_inline(nvim, bufnr, ato_marker: str):
+    """Update pending marker to success and append ato marker on separate line.
+
+    For storage-based tools, buffer has:
+      **tool header**
+      <!-- at: tool_pending -->
+
+    This function transforms it to:
+      **tool header**
+      <!-- at: tool_success -->
+      <!-- ato: id, tool, lines -->
+
+    Used as an alternative to finalize_storage_tool_output when markers should be on separate lines.
+    """
+    lua_code = """
+    local bufnr, ato_marker, pending_marker, success_marker = ...
+
+    -- Flush queue synchronously first
+    require('anya.text').flush_queue(false)
+
+    -- Schedule to update to ensure all async writes have completed
+    vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(bufnr) then return end
+
+        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
+        -- Find the last tool_pending marker line (working backwards)
+        for i = #lines, 1, -1 do
+            local line = lines[i]
+            if line:find(pending_marker, 1, true) then
+                -- Found the pending marker line
+                -- Replace tool_pending with tool_success
+                local new_marker = line:gsub(pending_marker, success_marker)
+                vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, {new_marker})
+
+                -- Append ato marker on new line
+                vim.api.nvim_buf_set_lines(bufnr, i, i, false, {ato_marker})
+
+                -- Process markers to create virtual text
+                require('anya.markers_ui')._process_markers(bufnr)
+                return
+            end
+        end
+    end)
+    """
+    nvim.exec_lua(
+        lua_code,
+        bufnr,
+        ato_marker,
+        markers.TOOL_PENDING,
+        markers.TOOL_SUCCESS,
+    )
+
+
+def append_to_last_line(nvim, bufnr, text):
+    """Append text to the last line of the buffer (no new line)."""
+    if not nvim.api.buf_is_valid(bufnr):
+        return
+    lua_code = """
+    local bufnr, text = ...
+    local line_count = vim.api.nvim_buf_line_count(bufnr)
+    local last_line = vim.api.nvim_buf_get_lines(bufnr, line_count - 1, line_count, false)[1] or ""
+    vim.api.nvim_buf_set_lines(bufnr, line_count - 1, line_count, false, {last_line .. text})
+    """
+    nvim.exec_lua(lua_code, bufnr, text)
+
+
+def remove_last_fold_markers(nvim, bufnr):
+    """Remove the most recent fold_start marker line (for storage-based tool outputs).
+
+    When using storage, we don't want a fold - just the header.
+    This deletes the fold_start marker line that was written in TOOL_CALL_START.
+    """
+    lua_code = """
+    local bufnr = select(1, ...)
+    local fold_start_marker = select(2, ...)
+    
+    vim.api.nvim_buf_call(bufnr, function()
+        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        
+        -- Find the last fold_start marker line and DELETE it entirely
+        for i = #lines, 1, -1 do
+            local line = lines[i]
+            if line:find(fold_start_marker, 1, true) then
+                -- Delete this marker line
+                vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, {})
+                return
+            end
+        end
+    end)
+    """
+    nvim.exec_lua(
+        lua_code,
+        bufnr,
+        markers.FOLD_START,
+    )
 
 
 def render_edit_blocks(nvim, bufnr, edit_str):
