@@ -150,9 +150,6 @@ def stream_text_to_buffer_sync(nvim, bufnr, text, skip_process_markers=False):
     nvim.exec_lua(
         "require('anya.text').output_sync(...)", bufnr, text, None, skip_process_markers
     )
-    nvim.exec_lua(
-        "require('anya.text').output_sync(...)", bufnr, text, None, skip_process_markers
-    )
 
 
 def autoscroll(nvim, bufnr):
@@ -358,46 +355,44 @@ def finalize_storage_tool_output(nvim, bufnr, ato_marker: str):
     -- Flush queue synchronously first
     require('anya.text').flush_queue(false)
 
-    -- Schedule the update to ensure all async writes have completed
-    vim.schedule(function()
-        if not vim.api.nvim_buf_is_valid(bufnr) then return end
+    -- Run immediately (not scheduled) to avoid race with text deltas
+    if not vim.api.nvim_buf_is_valid(bufnr) then return end
 
-        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
-        -- Find the last tool_pending marker line (working backwards)
-        for i = #lines, 1, -1 do
-            local line = lines[i]
-            if line:find(pending_marker, 1, true) then
-                -- Found the pending marker line
-                -- Replace tool_pending with tool_success and append ato marker
-                local new_marker = line:gsub(pending_marker, success_marker) .. ato_marker
+    -- Find the last tool_pending marker line (working backwards)
+    for i = #lines, 1, -1 do
+        local line = lines[i]
+        if line:find(pending_marker, 1, true) then
+            -- Found the pending marker line
+            -- Replace tool_pending with tool_success and append ato marker
+            local new_marker = line:gsub(pending_marker, success_marker) .. ato_marker
 
-                -- Check if line above is the header (starts with **)
-                local header_line_idx = i - 1
-                if header_line_idx >= 1 then
-                    local header_line = lines[header_line_idx]
-                    if header_line:match("^%*%*") then
-                        -- Merge header + markers onto one line
-                        local merged = header_line .. new_marker
-                        -- Delete marker line and update header line
-                        vim.api.nvim_buf_set_lines(bufnr, header_line_idx - 1, i, false, {merged})
-                        -- Process markers to create virtual text
-                        require('anya.markers_ui')._process_markers(bufnr)
-                        return
-                    end
+            -- Check if line above is the header (starts with **)
+            local header_line_idx = i - 1
+            if header_line_idx >= 1 then
+                local header_line = lines[header_line_idx]
+                if header_line:match("^%*%*") then
+                    -- Merge header + markers onto one line
+                    local merged = header_line .. new_marker
+                    -- Delete marker line and update header line
+                    vim.api.nvim_buf_set_lines(bufnr, header_line_idx - 1, i, false, {merged})
+                    -- Process markers to create virtual text
+                    require('anya.markers_ui')._process_markers(bufnr)
+                    return
                 end
-
-                -- No header found, just update the marker line
-                vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, {new_marker})
-                -- Process markers to create virtual text
-                require('anya.markers_ui')._process_markers(bufnr)
-                return
             end
-        end
 
-        -- No pending marker found - give up with warning
-        vim.notify("finalize: pending marker not found (" .. #lines .. " lines)", vim.log.levels.WARN)
-    end)
+            -- No header found, just update the marker line
+            vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, {new_marker})
+            -- Process markers to create virtual text
+            require('anya.markers_ui')._process_markers(bufnr)
+            return
+        end
+    end
+
+    -- No pending marker found - give up with warning
+    vim.notify("finalize: pending marker not found (" .. #lines .. " lines)", vim.log.levels.WARN)
     """
     nvim.exec_lua(
         lua_code,
@@ -428,30 +423,28 @@ def update_storage_tool_output_inline(nvim, bufnr, ato_marker: str):
     -- Flush queue synchronously first
     require('anya.text').flush_queue(false)
 
-    -- Schedule to update to ensure all async writes have completed
-    vim.schedule(function()
-        if not vim.api.nvim_buf_is_valid(bufnr) then return end
+    -- Run immediately (not scheduled) to avoid race with text deltas
+    if not vim.api.nvim_buf_is_valid(bufnr) then return end
 
-        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
-        -- Find the last tool_pending marker line (working backwards)
-        for i = #lines, 1, -1 do
-            local line = lines[i]
-            if line:find(pending_marker, 1, true) then
-                -- Found the pending marker line
-                -- Replace tool_pending with tool_success
-                local new_marker = line:gsub(pending_marker, success_marker)
-                vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, {new_marker})
+    -- Find the last tool_pending marker line (working backwards)
+    for i = #lines, 1, -1 do
+        local line = lines[i]
+        if line:find(pending_marker, 1, true) then
+            -- Found the pending marker line
+            -- Replace tool_pending with tool_success
+            local new_marker = line:gsub(pending_marker, success_marker)
+            vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, {new_marker})
 
-                -- Append ato marker on new line
-                vim.api.nvim_buf_set_lines(bufnr, i, i, false, {ato_marker})
+            -- Append ato marker on new line
+            vim.api.nvim_buf_set_lines(bufnr, i, i, false, {ato_marker})
 
-                -- Process markers to create virtual text
-                require('anya.markers_ui')._process_markers(bufnr)
-                return
-            end
+            -- Process markers to create virtual text
+            require('anya.markers_ui')._process_markers(bufnr)
+            return
         end
-    end)
+    end
     """
     nvim.exec_lua(
         lua_code,
