@@ -330,8 +330,24 @@ function M.flush_queue(process_markers_after)
     if vim.api.nvim_buf_is_valid(item.bufnr) then
       -- Write all remaining text at once
       if item.text ~= "" then
-        M._append_to_buffer(item.bufnr, item.text)
-        M._autoscroll_to_bottom(item.bufnr)
+        -- Use pcall to handle textlock errors, schedule retry if needed
+        local ok, err = pcall(M._append_to_buffer, item.bufnr, item.text)
+        if not ok then
+          if err and err:match("E565") then
+            -- Textlock error - schedule for later
+            vim.schedule(function()
+              if vim.api.nvim_buf_is_valid(item.bufnr) then
+                pcall(M._append_to_buffer, item.bufnr, item.text)
+                pcall(M._autoscroll_to_bottom, item.bufnr)
+                if process_markers_after then
+                  pcall(markers_ui._process_markers, item.bufnr)
+                end
+              end
+            end)
+          end
+        else
+          M._autoscroll_to_bottom(item.bufnr)
+        end
       end
 
       flushed_buffers[item.bufnr] = true
@@ -349,7 +365,7 @@ function M.flush_queue(process_markers_after)
   -- Process markers once per buffer if requested
   if process_markers_after then
     for bufnr, _ in pairs(flushed_buffers) do
-      markers_ui._process_markers(bufnr)
+      pcall(markers_ui._process_markers, bufnr)
     end
   end
 end
