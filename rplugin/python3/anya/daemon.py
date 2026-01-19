@@ -186,7 +186,7 @@ def start_daemon(foreground: bool = False, debug: bool = False) -> bool:
         env["PYTHONPATH"] = str(rplugin_path)
 
     logger.info(f"Starting daemon with command: {' '.join(cmd)}")
-    logger.info(f"PYTHONPATH: {env['PYTHONPATH']}")
+    logger.debug(f"PYTHONPATH: {env['PYTHONPATH']}")
 
     try:
         if foreground:
@@ -208,32 +208,48 @@ def start_daemon(foreground: bool = False, debug: bool = False) -> bool:
                     env=env,
                 )
 
-            # Wait a moment for daemon to start
-            time.sleep(1.0)
+            # Wait for daemon to start - give it time to spawn Python,
+            # double-fork (daemonize), and bind sockets
+            time.sleep(0.5)
+
+            # The daemon uses double-fork daemonization, so the subprocess we
+            # spawned will exit with code 0 after forking the actual daemon.
+            # We can't use process.poll() to check if it's running - we must
+            # check the PID file and ping the daemon instead.
 
             # Check if daemon started successfully
-            for i in range(10):  # Try for 5 seconds
-                # First check if process died
-                if process.poll() is not None:
-                    # Read any error output from log
-                    try:
-                        with open(log_file, "r") as f:
-                            last_lines = f.readlines()[-20:]
-                            logger.error(
-                                f"Daemon exited with code {process.returncode}. "
-                                f"Last log lines: {''.join(last_lines)}"
-                            )
-                    except Exception:
-                        logger.error(f"Daemon exited with code {process.returncode}")
-                    return False
-
-                # Try to ping
+            # Try for up to ~8 seconds total (15 iterations with backoff)
+            for i in range(15):
+                # Try to ping - this checks PID file + process + ZeroMQ
                 if is_daemon_running():
                     logger.info("Daemon started successfully")
                     return True
-                time.sleep(0.5)
 
-            logger.warning("Daemon process started but not responding to ping")
+                # Progressive backoff: start fast, slow down over time
+                # 0.2s for first 5, 0.5s for next 5, 1.0s for rest
+                if i < 5:
+                    time.sleep(0.2)
+                elif i < 10:
+                    time.sleep(0.5)
+                else:
+                    time.sleep(1.0)
+
+            # Final check - see if PID file exists and process is alive
+            pid = read_pid_file()
+            if pid and is_process_running(pid):
+                # Process is running but not responding to ping
+                logger.warning(
+                    f"Daemon process {pid} is running but not responding to ping"
+                )
+                # Try one more time with a longer wait
+                time.sleep(2.0)
+                if is_daemon_running():
+                    logger.info("Daemon started successfully (delayed)")
+                    return True
+
+            logger.warning(
+                "Daemon process started but not responding to ping after retries"
+            )
             return False
 
     except subprocess.CalledProcessError as e:
