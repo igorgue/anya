@@ -671,6 +671,12 @@ def new(
         vim.keymap.set("n", "<S-CR>", "o<Esc>", opts)
         vim.keymap.set("i", "<S-CR>", "<C-o>o", opts)
 
+        -- Send message with Enter in normal mode
+        local send_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Send message" }}
+        vim.keymap.set("n", "<CR>", function()
+            require("anya.conversation").send_message()
+        end, send_opts)
+
         -- Focus chat window with Ctrl+k
         local focus_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Focus chat window" }}
         vim.keymap.set("n", "<C-k>", function()

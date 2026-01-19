@@ -56,6 +56,7 @@ function M.open_tool_output(output_id, tool_name)
     win = {
       style = "scratch",
       wo = { winhighlight = "NormalFloat:Normal" },
+      bo = { buftype = "nofile", bufhidden = "hide", swapfile = false, filetype = filetype },
     },
   })
 

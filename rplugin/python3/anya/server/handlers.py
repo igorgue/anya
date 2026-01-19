@@ -872,6 +872,14 @@ class RequestHandler:
                                     f"for {primary_tool_name}"
                                 )
 
+                            # DEBUG: Log what we're sending
+                            self.logger.warning(
+                                f"TOOL_CALL_END sending: use_storage={use_storage}, "
+                                f"tool_output_refs={tool_output_refs}, "
+                                f"line_count={line_count}, all_support_storage={all_support_storage}, "
+                                f"has_failure={has_failure}, conversation_id={payload.conversation_id}"
+                            )
+
                             # Send tool call end event
                             await self._send_stream_chunk(
                                 session_id,

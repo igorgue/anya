@@ -699,7 +699,9 @@ class AnyaPlugin:
                                     [status],  # No fold_start, just pending marker
                                 )
                                 collected_content.append(pending_header)
-                                tool_fold_skipped = True  # Track that we skipped the fold
+                                tool_fold_skipped = (
+                                    True  # Track that we skipped the fold
+                                )
                                 # No fold opened for storage tools
                                 # Skip marker processing - finalize_storage_tool_output will do it
                                 if not self._request_cancelled:
@@ -745,6 +747,18 @@ class AnyaPlugin:
                     use_storage = chunk.data.get("use_storage", False)
                     tool_output_refs = chunk.data.get("tool_output_refs", [])
 
+                    # DEBUG: Log TOOL_CALL_END event details
+                    import logging
+
+                    logger = logging.getLogger("anya.plugin")
+                    logger.warning(
+                        f"TOOL_CALL_END: use_storage={use_storage}, "
+                        f"tool_output_refs={tool_output_refs}, "
+                        f"tool_fold_skipped={tool_fold_skipped}, "
+                        f"skip_output={skip_output}, "
+                        f"cancelled={self._request_cancelled}"
+                    )
+
                     # For skip_output tools, add a space before next text
                     if skip_output:
                         collected_content.append(" ")
@@ -761,10 +775,10 @@ class AnyaPlugin:
                             ref["output_id"], ref["tool_name"], ref.get("line_count", 0)
                         )
                         collected_content.append(output_marker)
-                        # Update pending marker to success and append ato marker atomically
-                        # This prevents race conditions and duplicate headers
+                        # Update pending marker to success and append ato marker atomically,
+                        # merging with the header so the success state and "View output" button show inline.
                         self.nvim.async_call(
-                            ui.update_storage_tool_output_inline,
+                            ui.finalize_storage_tool_output,
                             self.nvim,
                             chat_bufnr,
                             output_marker,
