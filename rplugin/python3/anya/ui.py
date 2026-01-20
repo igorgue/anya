@@ -410,30 +410,15 @@ def finalize_storage_tool_output(nvim, bufnr, ato_marker: str):
         require('anya.text').flush_queue(false)
 
         -- Debug: log what we're looking for
-        vim.notify("finalize_storage: looking for '" .. pending_marker .. "' in buffer " .. bufnr, vim.log.levels.DEBUG)
 
         if finalize_once() then
-            vim.notify("finalize_storage: found and updated marker", vim.log.levels.DEBUG)
             return
         end
-
-        vim.notify("finalize_storage: marker not found on first try, scheduling retry", vim.log.levels.WARN)
 
         -- Retry once on next tick (gives any remaining scheduled writes time to complete)
         vim.schedule(function()
             -- Flush again in case there were deferred writes
             require('anya.text').flush_queue(false)
-
-            if finalize_once() then
-                vim.notify("finalize_storage: found marker on retry", vim.log.levels.DEBUG)
-            else
-                vim.notify("finalize_storage: marker still not found after retry!", vim.log.levels.ERROR)
-                -- Debug: dump last 10 lines of buffer
-                local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-                for i, line in ipairs(lines) do
-                    vim.notify("  Line " .. i .. ": " .. line, vim.log.levels.ERROR)
-                end
-            end
         end)
     end)
     """

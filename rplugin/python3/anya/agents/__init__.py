@@ -113,21 +113,13 @@ async def CodeAgent(
     if thinking_budget is None:
         thinking_budget = _get_setting("thinking_budget", "ANYA_THINKING_BUDGET")
 
-    # Configure reasoning if thinking_budget is set
-    if thinking_budget is not None:
+    # Configure reasoning effort if thinking_budget is set
+    # Only update if the model already has reasoning configured (set by get_default_model_settings)
+    # This ensures we don't add reasoning to models that don't support it
+    if thinking_budget is not None and model_settings_obj.reasoning is not None:
         effort = _parse_reasoning_effort(thinking_budget) or "medium"
-
-        # If model already has reasoning (like gpt-5), update the effort
-        if model_settings_obj.reasoning is not None:
-            model_settings_obj.reasoning.effort = effort
-            model_settings_obj.reasoning.summary = "auto"
-        else:
-            # For models without native reasoning, set it anyway
-            # This may or may not produce reasoning events depending on the model
-            model_settings_obj.reasoning = Reasoning(
-                effort=effort,
-                summary="auto",
-            )
+        model_settings_obj.reasoning.effort = effort
+        model_settings_obj.reasoning.summary = "auto"
 
     # Import tools here to avoid circular import
     from ..tools import (

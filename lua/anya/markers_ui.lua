@@ -584,23 +584,33 @@ function M._process_markers(bufnr)
         M._hide_line(bufnr, i)
       end
     elseif markers.is_tool_output_marker(line) then
-       -- Tool output reference marker - hide it and add virtual text to line above
+       -- Tool output reference marker - hide it and add virtual text
        local info = markers.parse_tool_output_marker(line)
        if info then
          local line_count = info.line_count or 0
          local is_header_line = line:match("^%*%*")
          local target_line_idx = i - 1 -- 0-indexed for extmark
-         local target_col = #line
 
          if is_header_line then
-           -- Keep header visible; add virt text on the same line (header line)
-           vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, target_line_idx, target_col, {
+           -- Header line with inline markers: **header**<!-- at: ... --><!-- ato: ... -->
+           -- Find where the markers start (first <!-- ) and conceal from there
+           local marker_start = line:find("<!%-%-", 1, false)
+           if marker_start then
+             -- Conceal all markers (from <!-- to end of line)
+             vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, target_line_idx, marker_start - 1, {
+               end_col = #line,
+               conceal = "",
+             })
+           end
+           -- Add virtual text at end of visible header (before concealed markers)
+           local header_end = marker_start and (marker_start - 1) or #line
+           vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, target_line_idx, header_end, {
              virt_text = {
                { "  " .. ui_utils.icons.success .. " ", "AnyaToolSuccess" },
                { ui_utils.icons.tool_output .. " View output", "Comment" },
                { " (" .. line_count .. " lines)", "NonText" },
              },
-             virt_text_pos = "eol",
+             virt_text_pos = "inline",
              hl_mode = "combine",
              virt_text_hide = true,
            })
