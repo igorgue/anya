@@ -397,10 +397,10 @@ vim.keymap.set("i", "<CR>", function()
     -- Popup is open, just return CR to confirm completion
     return "<CR>"
   else
-    -- No popup, exit insert mode and send message
+    -- No popup, send message while staying in insert mode
     vim.schedule(function()
       require("anya.conversation").send_message()
     end)
-    return "<cmd>stopinsert<cr>"
+    return ""
   end
 end, { buffer = true, expr = true, desc = "Send message or confirm completion" })
