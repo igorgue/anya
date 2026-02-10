@@ -48,14 +48,7 @@ DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-4.1")
 # Tools that should use reference-based storage (not inline)
 # Excludes: edit (needs diff approval), thinking, and skip_output tools
 TOOL_OUTPUT_STORAGE_TOOLS = {
-    "read_file",
-    "read_many_files",
-    "exec",
-    "search_code",
-    "list_files",
-    "gh",
-    "create_file",
-    "write_file",
+    "run_code",
 }
 
 # Minimum lines for tool output to be stored as reference
