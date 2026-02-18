@@ -198,7 +198,7 @@ function M.open_code_at_cursor(override_line, override_col)
             function(self)
               retry_code_with_anya(self.buf, title)
             end,
-            desc = "Retry with Anya",
+            desc = "retry",
             mode = { "n" },
           },
         },
