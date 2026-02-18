@@ -124,11 +124,19 @@ function M.open_code_at_cursor()
 
   local cwd = vim.fn.getcwd()
   local sanitized = sanitize_title(title)
-  local file_path = cwd .. "/.anya/code/" .. sanitized .. ".py"
 
-  if vim.fn.filereadable(file_path) == 0 then
+  -- Glob for all versioned files matching <sanitized>-<hash>.py
+  local pattern = cwd .. "/.anya/code/" .. sanitized .. "-*.py"
+  local matches = vim.fn.glob(pattern, false, true)
+  if not matches or #matches == 0 then
     return false
   end
+
+  -- Pick the most recently modified file
+  table.sort(matches, function(a, b)
+    return vim.fn.getftime(a) > vim.fn.getftime(b)
+  end)
+  local file_path = matches[1]
 
   local snacks_ok, Snacks = pcall(require, "snacks")
   if snacks_ok and Snacks.scratch then

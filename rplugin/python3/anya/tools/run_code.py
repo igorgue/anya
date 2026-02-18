@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 import tempfile
@@ -5,6 +6,18 @@ from agents import function_tool, RunContextWrapper
 
 from ..agents.context import NvimPluginContext
 from .utils import create_error_handler
+
+# Directory containing the `anya` package (rplugin/python3/).
+# Injected into generated scripts so they can `from anya.libs import ...`.
+_ANYA_PYTHON_PATH = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+_ANYA_PATH_PREAMBLE = (
+    f"import sys as _sys\n"
+    f"if {repr(_ANYA_PYTHON_PATH)} not in _sys.path:\n"
+    f"    _sys.path.insert(0, {repr(_ANYA_PYTHON_PATH)})\n"
+    f"del _sys\n"
+)
 
 
 def _sanitize_title(title: str) -> str:
@@ -16,16 +29,20 @@ def _sanitize_title(title: str) -> str:
 
 
 def _save_code_to_project(code: str, title: str, cwd: str) -> str | None:
-    """Save code to .anya/code/<sanitized-title>.py in the project directory.
+    """Save code to .anya/code/<sanitized-title>-<hash>.py in the project directory.
+
+    The filename includes a short MD5 hash of the code content so identical
+    code reuses the same file while different code produces a new file.
 
     Returns:
         Path to the saved file, or None on failure.
     """
     try:
         sanitized = _sanitize_title(title)
+        code_hash = hashlib.md5(code.encode()).hexdigest()[:8]
         code_dir = os.path.join(cwd, ".anya", "code")
         os.makedirs(code_dir, exist_ok=True)
-        file_path = os.path.join(code_dir, f"{sanitized}.py")
+        file_path = os.path.join(code_dir, f"{sanitized}-{code_hash}.py")
         with open(file_path, "w") as f:
             f.write(code)
         return file_path
@@ -71,7 +88,7 @@ def _build_python_command(code: str, cwd: str, use_venv: bool) -> tuple[str, str
     """
     script_fd, script_path = tempfile.mkstemp(suffix=".py", prefix="anya_run_")
     with os.fdopen(script_fd, "w") as f:
-        f.write(code)
+        f.write(_ANYA_PATH_PREAMBLE + "\n" + code)
 
     python_exe = "python3"
     if use_venv:

@@ -12,6 +12,7 @@ from .dynamic_instructions import (
 
 from .utils import get_instructions
 from ..system_prompt import apply_system_prompt
+from ..libs import get_libs_prompt
 
 if TYPE_CHECKING:
     from ..protocol import AgentSettings
@@ -56,8 +57,12 @@ async def CodeAgent(
     # Generate dynamic instructions
     dynamic_instructions = await generate_dynamic_code_instructions([])
 
+    # Append built-in libs section (auto-discovered from anya.libs)
+    libs_instructions = get_libs_prompt()
+
     # Combine instructions
     instructions = update_agent_instructions(base_instructions, dynamic_instructions)
+    instructions = update_agent_instructions(instructions, libs_instructions)
 
     # Expand placeholders and append environment context at the end.
     instructions = apply_system_prompt(instructions, nvim=nvim)
