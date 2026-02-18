@@ -61,6 +61,9 @@ class AgentManager:
         self._pub_socket = pub_socket
         self.logger.info("Agent manager initialized")
 
+        # Probe MCP servers in the background — does not block startup.
+        asyncio.create_task(self._probe_mcp_servers())
+
     async def get_or_create_session(self, session_id: str) -> SessionState:
         """Get or create a session state."""
         if session_id not in self._sessions:
@@ -176,6 +179,90 @@ class AgentManager:
         if session_id in self._sessions:
             return self._sessions[session_id].cancelled
         return False
+
+    async def _emit_system_event(self, event_type, data: dict):
+        """Emit a daemon-wide system event via the PUB socket."""
+        if not self._pub_socket:
+            return
+        from ..protocol import StreamChunk
+        chunk = StreamChunk(
+            request_id="system",
+            session_id="system",
+            event_type=event_type,
+            data=data,
+        )
+        try:
+            await self._pub_socket.send(chunk.serialize())
+        except Exception as e:
+            self.logger.warning(f"Failed to emit system event: {e}")
+
+    async def _probe_mcp_servers(self):
+        """Background task: probe all configured MCP servers and emit fidget events."""
+        from ..mcp_loader import load_mcp_server_configs, create_mcp_servers
+        from ..protocol import StreamEventType
+
+        configs = load_mcp_server_configs()
+        if not configs:
+            return
+
+        servers = create_mcp_servers(configs)
+        if not servers:
+            return
+
+        await self._emit_system_event(
+            StreamEventType.MCP_INIT_START,
+            {"message": f"starting {len(servers)} server(s)..."},
+        )
+
+        tool_results: dict[str, list] = {}
+
+        async def _probe_one_cached(server):
+            name = getattr(server, "name", "unknown")
+            await self._emit_system_event(
+                StreamEventType.MCP_SERVER_READY,
+                {"server": name, "status": "starting"},
+            )
+            try:
+                async with server:
+                    tools = await server.list_tools()
+                    tool_results[name] = [
+                        {"name": getattr(t, "name", t.get("name", "") if isinstance(t, dict) else ""),
+                         "description": getattr(t, "description", t.get("description", "") if isinstance(t, dict) else "")}
+                        for t in (tools or [])
+                    ]
+                    await self._emit_system_event(
+                        StreamEventType.MCP_SERVER_READY,
+                        {"server": name, "status": "ready", "tool_count": len(tools)},
+                    )
+                    return name
+            except Exception as e:
+                self.logger.warning(f"MCP probe failed for '{name}': {e}")
+                await self._emit_system_event(
+                    StreamEventType.MCP_SERVER_READY,
+                    {"server": name, "status": "failed", "error": str(e)},
+                )
+                return None
+
+        results = await asyncio.gather(*[_probe_one_cached(s) for s in servers])
+        ready = [r for r in results if r is not None]
+
+        # Persist tool listings so the agent prompt can include them without discovery calls
+        if tool_results:
+            import json
+            from pathlib import Path
+            cache_path = Path.home() / ".local" / "share" / "anya" / "mcp_tools_cache.json"
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(cache_path, "w") as f:
+                    json.dump(tool_results, f)
+            except Exception as e:
+                self.logger.warning(f"Failed to write MCP tools cache: {e}")
+
+        await self._emit_system_event(
+            StreamEventType.MCP_INIT_COMPLETE,
+            {"success": True, "servers": ready},
+        )
+        self.logger.info(f"MCP probe complete: {len(ready)}/{len(servers)} servers ready")
 
     async def get_status(self) -> dict:
         """Get the status of the agent manager."""

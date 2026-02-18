@@ -107,17 +107,61 @@ local function sanitize_title(title)
   return title ~= "" and title or "untitled"
 end
 
+--- Send a retry prompt for the code in the scratch buffer to Anya
+--- @param buf number Buffer number containing the code
+--- @param title string The code title (used in [[title]] reference)
+local function retry_code_with_anya(buf, title)
+  local content = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+  local prompt = string.format('Retry this code [[%s]]:\n\n```python\n%s\n```', title, content)
+
+  -- Find the prompt buffer
+  local prompt_buf = nil
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(b) then
+      local ft = vim.api.nvim_get_option_value("filetype", { buf = b })
+      if ft == "anya-prompt" then
+        prompt_buf = b
+        break
+      end
+    end
+  end
+
+  if not prompt_buf then
+    vim.notify("Anya: Open Anya first with :Anya, then retry.", vim.log.levels.WARN)
+    return
+  end
+
+  vim.api.nvim_set_option_value("modifiable", true, { buf = prompt_buf })
+  vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, vim.split(prompt, "\n", { plain = true }))
+  require("anya.conversation").send_message()
+end
+
 --- Open the saved code file for a [[title]] reference using Snacks scratch.
 --- The file lives at <cwd>/.anya/code/<sanitized-title>.py
+--- @param override_line? number Optional 1-indexed line (e.g. from getmousepos)
+--- @param override_col? number Optional 1-indexed column (e.g. from getmousepos)
 --- @return boolean True if a code file was opened, false otherwise
-function M.open_code_at_cursor()
+function M.open_code_at_cursor(override_line, override_col)
   local cursor = vim.api.nvim_win_get_cursor(0)
-  local line_num = cursor[1]
+  local line_num = override_line or cursor[1]
+  local col = override_col or (cursor[2] + 1) -- convert to 1-indexed
   local bufnr = vim.api.nvim_get_current_buf()
   local line = vim.api.nvim_buf_get_lines(bufnr, line_num - 1, line_num, false)[1] or ""
 
-  -- Look for [[title]] pattern on current line
-  local title = line:match("%[%[(.-)%]%]")
+  -- Find the [[title]] occurrence that the cursor is inside (col must be within [s, e])
+  local best_title = nil
+  local pos = 1
+  while true do
+    local s, e, title = line:find("%[%[(.-)%]%]", pos)
+    if not s then break end
+    if col >= s and col <= e then
+      best_title = title
+      break
+    end
+    pos = e + 1
+  end
+
+  local title = best_title
   if not title or title == "" then
     return false
   end
@@ -148,6 +192,16 @@ function M.open_code_at_cursor()
       win = {
         style = "scratch",
         wo = { winhighlight = "NormalFloat:Normal" },
+        keys = {
+          retry_with_anya = {
+            "gs",
+            function(self)
+              retry_code_with_anya(self.buf, title)
+            end,
+            desc = "Retry with Anya",
+            mode = { "n" },
+          },
+        },
       },
     })
   else

@@ -163,6 +163,8 @@ class AnyaPlugin:
                         self._handle_mcp_init_start(chunk.data)
                     elif chunk.event_type == StreamEventType.MCP_INIT_COMPLETE:
                         self._handle_mcp_init_complete(chunk.data)
+                    elif chunk.event_type == StreamEventType.MCP_SERVER_READY:
+                        self._handle_mcp_server_ready(chunk.data)
                 except Exception:
                     # Don't spam errors - just log once and continue
                     pass
@@ -185,6 +187,19 @@ class AnyaPlugin:
             "AnyaMcpInitStarted",
             {
                 "message": data.get("message", "Initializing MCP servers..."),
+            },
+        )
+
+    def _handle_mcp_server_ready(self, data: dict):
+        """Handle a per-server probe event."""
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaMcpServerUpdate",
+            {
+                "server": data.get("server", "unknown"),
+                "status": data.get("status", "starting"),
+                "tool_count": data.get("tool_count", 0),
+                "error": data.get("error"),
             },
         )
 

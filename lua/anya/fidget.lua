@@ -162,6 +162,26 @@ function M:init()
   })
 
   vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AnyaMcpServerUpdate",
+    group = group,
+    callback = function(event)
+      if not M.mcp_handle then
+        return
+      end
+      local server = event.data.server or "unknown"
+      local status = event.data.status or "starting"
+      if status == "starting" then
+        M.mcp_handle.message = string.format("starting %s", server)
+      elseif status == "ready" then
+        local count = event.data.tool_count or 0
+        M.mcp_handle.message = string.format("%s ready (%d tools)", server, count)
+      elseif status == "failed" then
+        M.mcp_handle.message = string.format("%s failed", server)
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ "User" }, {
     pattern = "AnyaMcpInitFinished",
     group = group,
     callback = function(event)

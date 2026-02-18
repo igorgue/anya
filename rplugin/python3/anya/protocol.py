@@ -52,6 +52,8 @@ class StreamEventType(Enum):
     # System events (daemon-wide, not tied to a specific request)
     MCP_INIT_START = "mcp_init_start"
     MCP_INIT_COMPLETE = "mcp_init_complete"
+    # Per-server probe event: emitted as each server starts/succeeds/fails
+    MCP_SERVER_READY = "mcp_server_ready"
     # Memory events
     MEMORY_STORED = "memory_stored"
     # Token usage update

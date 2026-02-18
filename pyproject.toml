@@ -10,6 +10,7 @@ dependencies = [
     "hashids",
     "pyzmq",
     "cbor2",
+    "html2text",
 ]
 
 [project.scripts]

@@ -50,11 +50,11 @@ vim.keymap.set("n", "<Space>", function()
 end, { buffer = true, desc = "Open code or tool output" })
 
 -- Single-click to open code or tool output (mouse support)
--- <LeftRelease> fires AFTER cursor moves to clicked position
+-- Capture mouse position immediately (before vim.schedule) for accurate column detection.
 vim.keymap.set("n", "<LeftRelease>", function()
-  -- Small delay to ensure cursor position is updated
+  local mpos = vim.fn.getmousepos()
   vim.schedule(function()
-    if not tool_output.open_code_at_cursor() then
+    if not tool_output.open_code_at_cursor(mpos.line, mpos.column) then
       tool_output.open_at_cursor() -- Returns false if not on marker line (no-op)
     end
   end)
@@ -86,6 +86,10 @@ end, { buffer = true, desc = "Jump to previous header" })
 -- Highlight @filepath references and /commands using extmarks (works with treesitter)
 vim.api.nvim_set_hl(0, "AnyaFileRef", { link = "Constant", default = true })
 vim.api.nvim_set_hl(0, "AnyaSlashCommand", { link = "Special", default = true })
+do
+  local comment_hl = vim.api.nvim_get_hl(0, { name = "Comment", link = false })
+  vim.api.nvim_set_hl(0, "AnyaCodeRef", { fg = comment_hl.fg, italic = true })
+end
 
 local highlight_ns = vim.api.nvim_create_namespace("anya_highlights")
 local bufnr = vim.api.nvim_get_current_buf()
@@ -109,6 +113,21 @@ local function highlight_refs()
       end
 
       vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaFileRef", line_idx, start_col - 1, end_col)
+      pos = end_col + 1
+    end
+
+    -- Find [[code_ref]] references (use set_extmark with high priority to beat render-markdown)
+    pos = 1
+    while true do
+      local start_col, end_col = line:find("%[%[.-%]%]", pos)
+      if not start_col then
+        break
+      end
+      vim.api.nvim_buf_set_extmark(bufnr, highlight_ns, line_idx, start_col - 1, {
+        end_col = end_col,
+        hl_group = "AnyaCodeRef",
+        priority = 200,
+      })
       pos = end_col + 1
     end
 
@@ -191,6 +210,13 @@ vim.api.nvim_create_autocmd("WinEnter", {
   callback = function()
     last_anya_win = vim.api.nvim_get_current_win()
     vim.g.anya_left_anya_win = false
+
+    -- Re-apply our highlights after render-markdown finishes re-rendering
+    vim.schedule(function()
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        highlight_refs()
+      end
+    end)
 
     -- Refresh winbar highlight to ensure it's properly styled
     local win = vim.api.nvim_get_current_win()

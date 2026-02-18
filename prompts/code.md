@@ -45,6 +45,10 @@ Use proper Markdown formatting. Wrap filenames and symbols in backticks. Code bl
 # example
 ```
 
+## Using MCP Servers
+
+When using `anya.libs.mcp`, always call `mcp.list_tools(server)` first to discover tool names and schemas — never guess. Then call the tool and print only the result. Do not echo discovery code in your response text.
+
 ## IMPORTANT
 
 - Do not use emojis.
