@@ -129,6 +129,8 @@ class RequestHandler:
                 return await self._handle_cancel_request(request)
             elif request.type == RequestType.TOOL_CONFIRMATION_RESPONSE:
                 return await self._handle_confirmation_response(request)
+            elif request.type == RequestType.GENERATE_TITLE:
+                return await self._handle_generate_title(request)
             else:
                 return make_error_response(
                     request.request_id,
@@ -254,6 +256,107 @@ class RequestHandler:
         finally:
             self.agent_manager.clear_active_request(session_id)
             self._active_tools.pop(session_id, None)
+
+    async def _handle_generate_title(self, request: Request) -> Response:
+        """Handle a GENERATE_TITLE request.
+
+        Returns immediately; title is generated in a background task and
+        the result is emitted as a TITLE_GENERATED system event.
+        """
+        asyncio.create_task(
+            self._generate_title_background(
+                conversation_id=request.payload.get("conversation_id", ""),
+                user_message=request.payload.get("user_message", ""),
+                assistant_message=request.payload.get("assistant_message", ""),
+                settings_dict=request.payload.get("settings", {}),
+            )
+        )
+        return make_success_response(request.request_id, {"status": "started"})
+
+    async def _generate_title_background(
+        self,
+        conversation_id: str,
+        user_message: str,
+        assistant_message: str,
+        settings_dict: dict,
+    ):
+        """Generate a conversation title using the same API client as the coding agent."""
+        import re
+
+        title = None
+        try:
+            settings = AgentSettings.from_dict(settings_dict) if settings_dict else None
+
+            # Resolve API config — same logic as model_provider.py
+            if settings:
+                model = settings.model or "gpt-4.1"
+                base_url = settings.api_base
+                api_key = settings.api_key
+            else:
+                model = os.environ.get("ANYA_MODEL", "gpt-4.1")
+                base_url = os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE")
+                api_key = os.environ.get("ANYA_API_KEY") or os.environ.get("OPENAI_API_KEY")
+
+            if not base_url and model and "/" in model:
+                base_url = "https://openrouter.ai/api/v1"
+
+            from openai import AsyncOpenAI
+
+            client_kwargs: dict = {}
+            if api_key:
+                client_kwargs["api_key"] = api_key
+            if base_url:
+                client_kwargs["base_url"] = base_url
+
+            client = AsyncOpenAI(**client_kwargs)
+
+            def _clean(text: str, max_chars: int = 400) -> str:
+                text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+                text = re.sub(r"\[\[.*?\]\]", "", text)
+                text = re.sub(r"\n{3,}", "\n\n", text)
+                return text.strip()[:max_chars]
+
+            prompt = (
+                "Generate a short, descriptive title (maximum 8 words) for this "
+                "conversation. Output ONLY the title — no quotes, no trailing "
+                "punctuation, no explanation.\n\n"
+                f"User: {_clean(user_message)}\n"
+                f"Assistant: {_clean(assistant_message)}\n"
+                "Title:"
+            )
+
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=30,
+                    temperature=0.3,
+                ),
+                timeout=30.0,
+            )
+
+            raw = response.choices[0].message.content or ""
+            cleaned = raw.strip().strip("\"'").rstrip(".!?").strip()
+            title = cleaned if cleaned else None
+
+        except Exception as e:
+            self.logger.warning(f"Title generation failed: {e}")
+
+        # Always emit result so the plugin can finish the fidget
+        result_chunk = StreamChunk(
+            request_id="system",
+            session_id="system",
+            event_type=StreamEventType.TITLE_GENERATED,
+            data={
+                "conversation_id": conversation_id,
+                "title": title or "",
+                "success": bool(title),
+            },
+        )
+        try:
+            await self.pub_socket.send(result_chunk.serialize())
+        except Exception as e:
+            self.logger.warning(f"Failed to emit TITLE_GENERATED event: {e}")
 
     async def _handle_cancel_request(self, request: Request) -> Response:
         """Handle a CANCEL_REQUEST request."""

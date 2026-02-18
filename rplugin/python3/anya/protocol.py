@@ -19,6 +19,7 @@ class RequestType(Enum):
     SHUTDOWN = "shutdown"
     PING = "ping"
     TOOL_CONFIRMATION_RESPONSE = "tool_confirmation_response"
+    GENERATE_TITLE = "generate_title"
 
 
 class ResponseType(Enum):
@@ -58,6 +59,8 @@ class StreamEventType(Enum):
     MEMORY_STORED = "memory_stored"
     # Token usage update
     TOKEN_USAGE = "token_usage"
+    # Title generation result (system event)
+    TITLE_GENERATED = "title_generated"
 
 
 @dataclass

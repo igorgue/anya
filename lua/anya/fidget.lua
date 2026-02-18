@@ -16,6 +16,9 @@ M.handles = {}
 -- Handle for MCP initialization progress (not tied to a specific request)
 M.mcp_handle = nil
 
+-- Handle for conversation title generation
+M.title_handle = nil
+
 -- Fun status phrases that will randomly show up
 M.status_phrases = {
   -- "brewing",
@@ -142,6 +145,45 @@ function M:init()
             M.memory_notification_active = nil
           end
         end, 2000)
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AnyaTitleGenerationStarted",
+    group = group,
+    callback = function(_event)
+      -- Close any existing title handle before creating a new one
+      if M.title_handle then
+        M.title_handle:finish()
+        M.title_handle = nil
+      end
+      M.title_handle = fidget_progress.handle.create({
+        title = "",
+        message = "creating conversation title",
+        lsp_client = {
+          name = " Anya",
+        },
+      })
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AnyaTitleGenerationFinished",
+    group = group,
+    callback = function(event)
+      if M.title_handle then
+        if event.data.success then
+          M.title_handle.message = "title saved"
+        else
+          M.title_handle.message = "title failed"
+        end
+        vim.defer_fn(function()
+          if M.title_handle then
+            M.title_handle:finish()
+            M.title_handle = nil
+          end
+        end, 1000)
       end
     end,
   })

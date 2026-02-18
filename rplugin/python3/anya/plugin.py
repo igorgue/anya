@@ -165,6 +165,8 @@ class AnyaPlugin:
                         self._handle_mcp_init_complete(chunk.data)
                     elif chunk.event_type == StreamEventType.MCP_SERVER_READY:
                         self._handle_mcp_server_ready(chunk.data)
+                    elif chunk.event_type == StreamEventType.TITLE_GENERATED:
+                        self._handle_title_generated(chunk.data)
                 except Exception:
                     # Don't spam errors - just log once and continue
                     pass
@@ -200,6 +202,29 @@ class AnyaPlugin:
                 "status": data.get("status", "starting"),
                 "tool_count": data.get("tool_count", 0),
                 "error": data.get("error"),
+            },
+        )
+
+    def _handle_title_generated(self, data: dict):
+        """Handle TITLE_GENERATED system event from daemon."""
+        conversation_id = data.get("conversation_id", "")
+        title = data.get("title", "")
+        success = data.get("success", False)
+
+        if success and title and conversation_id:
+            try:
+                self._ensure_db()
+                db.update_conversation_title(conversation_id, title)
+            except Exception:
+                pass
+
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaTitleGenerationFinished",
+            {
+                "conversation_id": conversation_id,
+                "title": title,
+                "success": success,
             },
         )
 
@@ -421,7 +446,7 @@ class AnyaPlugin:
             self.nvim, layout, direction, force_open
         )
 
-    def send(self, text, conversation_id=None):
+    def send(self, text, conversation_id=None, is_new_conversation=False):
         """Send a prompt to the code agent and stream the response to the chat buffer."""
         # Prevent concurrent requests - check if a task is still running
         if self._current_task is not None and not self._current_task.done():
@@ -442,13 +467,15 @@ class AnyaPlugin:
         self._request_cancelled = False  # Reset cancellation flag for new request
         self._current_task = asyncio.run_coroutine_threadsafe(
             self._run_agent_via_daemon(
-                text, conversation_id, chat_buf.number, request_id
+                text, conversation_id, chat_buf.number, request_id,
+                is_new_conversation=is_new_conversation,
             ),
             loop,
         )
 
     async def _run_agent_via_daemon(
-        self, text, conversation_id, chat_bufnr, request_id
+        self, text, conversation_id, chat_bufnr, request_id,
+        is_new_conversation=False,
     ):
         """Run the agent via the daemon and handle streaming responses."""
         # Ensure daemon is running (run blocking check in thread pool)
@@ -1352,6 +1379,17 @@ vim.ui.select({lua_options},
 
             self.nvim.async_call(save_after_streaming)
 
+            # Generate title if the conversation doesn't have one yet
+            if conversation_id and message_text:
+                asyncio.create_task(
+                    self._generate_conversation_title(
+                        conversation_id,
+                        text,
+                        message_text,
+                        request_agent_settings,
+                    )
+                )
+
             # Emit finish event immediately (UI responsiveness)
             # Duration will be displayed when process_markers runs after DB save
             fidget.emit_user_event(
@@ -1446,6 +1484,57 @@ vim.ui.select({lua_options},
                     pass
 
             self.nvim.async_call(_safe_set_tool_fold_open)
+
+    async def _generate_conversation_title(
+        self,
+        conversation_id: str,
+        user_message: str,
+        assistant_message: str,
+        settings: AgentSettings,
+    ):
+        """Delegate title generation to the daemon (uses same API client as coding agent)."""
+        # Skip if the conversation already has a title
+        try:
+            self._ensure_db()
+            conv = db.get_conversation(conversation_id)
+            if conv and conv.get("title"):
+                return
+        except Exception:
+            pass
+
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaTitleGenerationStarted",
+            {"conversation_id": conversation_id},
+        )
+
+        # Send to daemon — returns immediately; result arrives via TITLE_GENERATED system event
+        try:
+            loop = asyncio.get_event_loop()
+            import functools
+            await loop.run_in_executor(
+                None,
+                functools.partial(
+                    self._client.send_request,
+                    RequestType.GENERATE_TITLE,
+                    self.session_id,
+                    f"title_{conversation_id}",
+                    {
+                        "conversation_id": conversation_id,
+                        "user_message": user_message,
+                        "assistant_message": assistant_message,
+                        "settings": settings.to_dict(),
+                    },
+                    5.0,  # Short — just waiting for the "started" ack
+                ),
+            )
+        except Exception:
+            # Daemon unreachable — close the fidget immediately
+            fidget.emit_user_event(
+                self.nvim,
+                "AnyaTitleGenerationFinished",
+                {"conversation_id": conversation_id, "title": "", "success": False},
+            )
 
     async def _send_to_daemon(
         self,
@@ -1732,7 +1821,7 @@ vim.ui.select({lua_options},
                     pass  # Non-critical, ignore errors
 
             # Schedule async agent task
-            self.send(text, conv_id)
+            self.send(text, conv_id, is_new_conversation=is_new_conversation)
 
             # Return IDs for Lua to render the message
             return {
