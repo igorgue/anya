@@ -15,6 +15,12 @@ M._sending_in_progress = false
 -- Track whether Python agent is running (set via autocommand)
 M._request_in_progress = false
 
+-- Timestamp when _request_in_progress was last set to true (for timeout detection)
+M._request_started_at = nil
+
+-- Maximum time (seconds) to consider a request in-progress before assuming it's stuck
+local REQUEST_TIMEOUT_SECONDS = 300
+
 --- Check if we should block sending
 --- @return boolean True if sending should be blocked
 local function is_send_blocked()
@@ -22,13 +28,30 @@ local function is_send_blocked()
   if M._sending_in_progress then
     return true
   end
-  -- Block if Python agent is still running
+  -- Block if Python agent is still running (with timeout safety)
   if M._request_in_progress then
+    if M._request_started_at then
+      local elapsed = vim.loop.now() - M._request_started_at
+      if elapsed > REQUEST_TIMEOUT_SECONDS * 1000 then
+        -- Request timed out, force reset
+        M._request_in_progress = false
+        M._request_started_at = nil
+        return false
+      end
+    end
     return true
   end
-  -- Block if Lua streaming queue still has content
+  -- Block if Lua streaming queue still has content AND timer is running
+  -- If timer is not running but queue has items, the queue is stale/stuck — don't block
   local status = text.get_queue_status()
-  return status.queue_length > 0 or status.timer_running
+  if status.queue_length > 0 and status.timer_running then
+    return true
+  end
+  -- Clear stale queue items (timer died but items remain)
+  if status.queue_length > 0 and not status.timer_running then
+    text.clear_queue()
+  end
+  return false
 end
 
 --- Get the chat buffer by looking for a buffer with filetype "anya-chat"
@@ -251,6 +274,7 @@ function M.send_message()
   -- Handoff: clear sending lock, set request lock
   M._sending_in_progress = false
   M._request_in_progress = true
+  M._request_started_at = vim.loop.now()
 
   return true
 end
@@ -325,6 +349,7 @@ end
 function M.force_reset_request_state()
   M._sending_in_progress = false
   M._request_in_progress = false
+  M._request_started_at = nil
 end
 
 --- Set up autocommands to track request state
@@ -339,6 +364,7 @@ function M.setup_request_tracking()
       -- Handoff: clear the send lock, agent is now running
       M._sending_in_progress = false
       M._request_in_progress = true
+      M._request_started_at = vim.loop.now()
     end,
     desc = "Track when Anya request starts",
   })
@@ -349,6 +375,7 @@ function M.setup_request_tracking()
     callback = function()
       M._sending_in_progress = false
       M._request_in_progress = false
+      M._request_started_at = nil
     end,
     desc = "Track when Anya request finishes",
   })

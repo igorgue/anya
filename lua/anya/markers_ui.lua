@@ -542,7 +542,10 @@ end
 -- - tool_success: highlights header line with OkMsg
 -- - am: displays time or agent info, creates message folds
 -- @param bufnr number: Buffer number to process
-function M._process_markers(bufnr)
+-- @param messages table|nil: Optional pre-loaded messages list to avoid Lua->Python callback.
+--   When called from Python (e.g., _save_agent_message_to_db), passing messages avoids
+--   an RPC re-entrancy deadlock (Python exec_lua -> Lua vim.fn -> Python blocked).
+function M._process_markers(bufnr, messages)
   -- Clear existing extmarks to avoid duplicates
   vim.api.nvim_buf_clear_namespace(bufnr, ui_utils.ns_id, 0, -1)
 
@@ -554,18 +557,28 @@ function M._process_markers(bufnr)
   local fold_is_edit = false -- Track if current fold is an edit (should be open)
   local message_markers = {}
 
-  local conv_id = nil
-  local ok_conv, conv_var = pcall(vim.api.nvim_buf_get_var, bufnr, "anya_conversation_id")
-  if ok_conv then
-    conv_id = conv_var
-  end
-
   local message_lookup = {}
-  if conv_id then
-    local ok_data, data = pcall(vim.fn.AnyaLoadConversation, conv_id)
-    if ok_data and data and data.messages then
-      for _, msg in ipairs(data.messages) do
+  if type(messages) == "table" then
+    -- Use pre-loaded messages (avoids Lua->Python RPC callback)
+    for _, msg in ipairs(messages) do
+      if msg.id then
         message_lookup[msg.id] = msg
+      end
+    end
+  else
+    -- Fallback: load from Python via vim.fn (safe when NOT called from Python exec_lua)
+    local conv_id = nil
+    local ok_conv, conv_var = pcall(vim.api.nvim_buf_get_var, bufnr, "anya_conversation_id")
+    if ok_conv then
+      conv_id = conv_var
+    end
+
+    if conv_id then
+      local ok_data, data = pcall(vim.fn.AnyaLoadConversation, conv_id)
+      if ok_data and data and data.messages then
+        for _, msg in ipairs(data.messages) do
+          message_lookup[msg.id] = msg
+        end
       end
     end
   end
@@ -602,40 +615,10 @@ function M._process_markers(bufnr)
                conceal = "",
              })
            end
-           -- Add virtual text at end of visible header (before concealed markers)
-           local header_end = marker_start and (marker_start - 1) or #line
-           vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, target_line_idx, header_end, {
-             virt_text = {
-               { "  " .. ui_utils.icons.success .. " ", "AnyaToolSuccess" },
-               { ui_utils.icons.tool_output .. " View output", "Comment" },
-               { " (" .. line_count .. " lines)", "NonText" },
-             },
-             virt_text_pos = "inline",
-             hl_mode = "combine",
-             virt_text_hide = true,
-           })
+           -- No virtual text - just conceal the markers
          else
            -- Hide the entire ato: marker line
            M._hide_line(bufnr, i)
-
-           -- Check if line above has at: marker (the line we want to attach virtual text to)
-           if i > 1 then
-             local above_line = lines[i - 1]
-             local at_marker_idx = above_line:find("<!%-%- at:")
-
-             -- If above line has at: marker, attach virtual text there
-             if at_marker_idx then
-               vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, i - 2, #above_line, {
-                 virt_text = {
-                   { "  " .. ui_utils.icons.success .. " ", "AnyaToolSuccess" },
-                   { ui_utils.icons.tool_output .. " View output", "Comment" },
-                   { " (" .. line_count .. " lines)", "NonText" },
-                 },
-                 virt_text_pos = "eol",
-                 hl_mode = "combine",
-               })
-             end
-           end
          end
        end
     elseif markers.is_marker_line(line) then
@@ -670,14 +653,12 @@ function M._process_markers(bufnr)
             fold_is_edit = false
             thinking_content_start = nil
           elseif marker_name == markers.tool_success then
-            -- Highlight the header line (line above marker) with checkmark icon
-            M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", ui_utils.icons.success)
+            -- Highlight the header line (line above marker) in green - no icon
+            M._apply_header_highlight(bufnr, i - 1, "AnyaToolSuccess", nil)
           elseif marker_name == markers.tool_failure then
-            -- Highlight the header line (line above marker) with X icon
-            M._apply_header_highlight(bufnr, i - 1, "AnyaToolFailure", ui_utils.icons.failure)
-          elseif marker_name == markers.tool_pending then
-            -- Highlight the header line (line above marker) with pending icon
-            M._apply_header_highlight(bufnr, i - 1, "AnyaToolPending", ui_utils.icons.pending)
+            -- Highlight the header line (line above marker) in red - no icon
+            M._apply_header_highlight(bufnr, i - 1, "AnyaToolFailure", nil)
+          -- tool_pending: no highlight, just wait for completion
           elseif marker_name == markers.thinking then
             -- Thinking block: treat like a fold with brain icon
             fold_start_line = i - 1

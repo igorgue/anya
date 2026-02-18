@@ -122,19 +122,10 @@ class SpacingManager:
             self._last_content_type = next_type
             return ""
 
-        # After a tool marker (from tool header or thinking), we need blank line before text/output
+        # After a tool marker (from tool header or thinking), just continue on next line
         if self._last_content_type == ContentType.TOOL_MARKER:
             self._last_content_type = next_type
-            if next_type in [
-                ContentType.TOOL_OUTPUT,
-                ContentType.TEXT,
-                ContentType.TOOL_HEADER,
-                ContentType.EDIT_BLOCK,
-            ]:
-                return "\n\n"
-            # MARKER type is for fold_end and similar - no spacing needed, marker has its own newline
-            if next_type == ContentType.MARKER:
-                return ""
+            # No extra blank lines - just continue
             return ""
 
         # After a message marker (message boundary), no blank line needed
@@ -161,14 +152,7 @@ class SpacingManager:
         spacing = "\n"
 
         # Rules for transitions between non-marker blocks
-        if next_type in [ContentType.TOOL_HEADER, ContentType.EDIT_BLOCK]:
-            # After fold_end, we already have a trailing newline from the marker
-            # so only add one more newline (not two) for consecutive tool calls
-            if self._last_was_fold_end:
-                spacing = "\n"
-            else:
-                spacing = "\n\n"
-        elif next_type == ContentType.TEXT:
+        if next_type == ContentType.TEXT:
             if self._last_content_type in [
                 ContentType.TOOL_OUTPUT,
                 ContentType.THINKING,

@@ -27,8 +27,6 @@ from ..protocol import (
     make_error_response,
     make_success_response,
 )
-from .. import db
-from .. import ids
 from ..agents import MAIN_AGENT_NAME
 from ..token_tracker import (
     calculate_context_usage,
@@ -44,16 +42,6 @@ from .agents import AgentManager
 
 
 DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-4.1")
-
-# Tools that should use reference-based storage (not inline)
-# Excludes: edit (needs diff approval), thinking, and skip_output tools
-TOOL_OUTPUT_STORAGE_TOOLS = {
-    "run_code",
-}
-
-# Minimum lines for tool output to be stored as reference
-# Outputs shorter than this are kept inline for quick viewing
-TOOL_OUTPUT_MIN_LINES = 20
 
 
 def _detect_filetype(tool_name: str, content: str) -> str | None:
@@ -725,24 +713,13 @@ class RequestHandler:
                                 else False
                             )
 
-                            # Check if this tool will likely use storage
-                            # (no fold needed - just header with marker appended later)
-                            will_use_storage = (
-                                tool_name in TOOL_OUTPUT_STORAGE_TOOLS
-                                and tool_name != "edit"
-                            )
-
                             if skip_output:
                                 expected_outputs += 1
                                 parallel_skip_tools.append(
                                     {"name": tool_name, "args": tool_args}
                                 )
                             else:
-                                status = (
-                                    "edit_pending"
-                                    if tool_name == "edit"
-                                    else "tool_pending"
-                                )
+                                status = "tool_pending"
                                 parallel_tools.append(
                                     {
                                         "name": tool_name,
@@ -752,7 +729,6 @@ class RequestHandler:
                                 )
                                 expected_outputs += 1
 
-                                # Send tool call start event
                                 await self._send_stream_chunk(
                                     session_id,
                                     request_id,
@@ -763,15 +739,11 @@ class RequestHandler:
                                         "status": status,
                                         "parallel_tools": parallel_tools,
                                         "is_first": len(parallel_tools) == 1,
-                                        "skip_header": tool_name == "edit",
-                                        "skip_fold": will_use_storage,
                                     },
                                 )
-                                # Track active tool state for proper cleanup on cancellation
-                                is_edit = tool_name == "edit"
                                 self._active_tools[session_id] = {
                                     "tools": parallel_tools + parallel_skip_tools,
-                                    "is_edit": is_edit,
+                                    "is_edit": False,
                                     "was_called": tool_was_called,
                                 }
 
@@ -784,114 +756,24 @@ class RequestHandler:
                             len(pending_tool_outputs) >= expected_outputs
                             and expected_outputs > 0
                         ):
-                            is_edit_tool = any(
-                                t["name"] == "edit" for t in parallel_tools
-                            )
                             has_failure = any(
                                 o.strip().startswith("Error:")
                                 for o in pending_tool_outputs
                                 if isinstance(o, str)
                             )
 
-                            all_outputs = "\n".join(
-                                o for o in pending_tool_outputs if o
-                            )
-
-                            # Determine if we should store this output as a reference
-                            # Conditions for storage:
-                            # 1. Not an edit tool (needs inline diff for approval)
-                            # 2. Not a skip_output tool (output not shown anyway)
-                            # 3. All tools in batch are in TOOL_OUTPUT_STORAGE_TOOLS
-                            # 4. Output has enough lines to be worth storing
-                            tool_output_refs = []
-                            use_storage = False
-
-                            all_tools = parallel_tools + parallel_skip_tools
-                            tool_names = [t["name"] for t in all_tools]
-
-                            # Check if all tools support storage
-                            all_support_storage = all(
-                                name in TOOL_OUTPUT_STORAGE_TOOLS for name in tool_names
-                            )
-
-                            # Count lines in output
-                            line_count = (
-                                all_outputs.count("\n") + 1 if all_outputs else 0
-                            )
-
-                            # Decide whether to use storage
-                            if (
-                                all_support_storage
-                                and not is_edit_tool
-                                and not has_failure
-                                and line_count >= TOOL_OUTPUT_MIN_LINES
-                                and payload.conversation_id  # Need conversation_id for storage
-                            ):
-                                use_storage = True
-
-                                # Store the output and create reference
-                                # For multiple tools, store combined output
-                                primary_tool_name = (
-                                    tool_names[0] if tool_names else "tool"
-                                )
-                                output_id = ids.new(
-                                    payload.conversation_id, min_length=7
-                                )
-                                filetype = _detect_filetype(
-                                    primary_tool_name, all_outputs
-                                )
-
-                                # Initialize database and save
-                                db.init_db()
-                                db.save_tool_output(
-                                    id=output_id,
-                                    conversation_id=payload.conversation_id,
-                                    message_id=request_id,
-                                    tool_name=primary_tool_name,
-                                    content=all_outputs,
-                                    filetype=filetype,
-                                )
-
-                                tool_output_refs.append(
-                                    {
-                                        "output_id": output_id,
-                                        "tool_name": primary_tool_name,
-                                        "line_count": line_count,
-                                    }
-                                )
-
-                                self.logger.info(
-                                    f"Stored tool output {output_id} ({line_count} lines) "
-                                    f"for {primary_tool_name}"
-                                )
-
-                            # DEBUG: Log what we're sending
-                            self.logger.warning(
-                                f"TOOL_CALL_END sending: use_storage={use_storage}, "
-                                f"tool_output_refs={tool_output_refs}, "
-                                f"line_count={line_count}, all_support_storage={all_support_storage}, "
-                                f"has_failure={has_failure}, conversation_id={payload.conversation_id}"
-                            )
-
-                            # Send tool call end event
                             await self._send_stream_chunk(
                                 session_id,
                                 request_id,
                                 StreamEventType.TOOL_CALL_END,
                                 {
                                     "tools": parallel_tools + parallel_skip_tools,
-                                    "output": all_outputs,
                                     "has_failure": has_failure,
-                                    "is_edit_tool": is_edit_tool,
                                     "skip_output": bool(parallel_skip_tools)
                                     and not parallel_tools,
-                                    # New fields for tool output storage
-                                    "use_storage": use_storage,
-                                    "tool_output_refs": tool_output_refs,
                                 },
                             )
 
-                            # Clear active tools state since the tool completed
                             self._active_tools.pop(session_id, None)
 
                             pending_tool_outputs = []

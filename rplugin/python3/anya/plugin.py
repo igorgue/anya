@@ -3,6 +3,7 @@
 import pynvim
 import asyncio
 import concurrent.futures
+import json
 import threading
 import os
 import uuid
@@ -82,6 +83,23 @@ class AnyaPlugin:
     def _run_loop(self):
         """Run the event loop forever in a background thread."""
         asyncio.set_event_loop(self._loop)
+
+        def exception_handler(loop, context):
+            import traceback
+            msg = context.get("message", "")
+            exc = context.get("exception")
+            task = context.get("future")
+            with open(os.path.expanduser("~/.local/share/anya/plugin_errors.log"), "a") as f:
+                f.write(f"\n--- Unhandled exception in event loop ---\n")
+                f.write(f"Message: {msg}\n")
+                if task:
+                    f.write(f"Task: {task}\n")
+                if exc:
+                    f.write(f"Exception: {exc}\n")
+                    f.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+                f.write(f"---\n")
+
+        self._loop.set_exception_handler(exception_handler)
         self._loop.run_forever()
 
     async def _ensure_daemon_running(self):
@@ -433,6 +451,12 @@ class AnyaPlugin:
                     self.nvim.err_write,
                     "Anya: Failed to start daemon. Run: python -m anya.server.main -f\n",
                 )
+                # Emit finish event so Lua state is properly reset
+                fidget.emit_user_event(
+                    self.nvim,
+                    "AnyaRequestFinished",
+                    {"id": request_id, "status": "error"},
+                )
                 return
             self.nvim.async_call(
                 self.nvim.out_write,
@@ -566,21 +590,20 @@ class AnyaPlugin:
 
         # Subscribe to streaming events
         subscriber = StreamSubscriber(self.session_id, request_id)
-        await subscriber.connect()
-
-        # Small delay to ensure SUB socket is fully connected before sending request
-        # ZeroMQ PUB/SUB has a "slow joiner" problem where early messages can be lost
-        await asyncio.sleep(0.1)
 
         # Collected content for saving
         collected_content: list[str] = []
         thinking_started = False
         thinking_finalized = False
         tool_was_called = False
-        tool_fold_opened = False  # Track if a tool fold was opened (needs closing)
-        tool_fold_skipped = False  # Track if fold was skipped (storage prediction)
 
         try:
+            await subscriber.connect()
+
+            # Small delay to ensure SUB socket is fully connected before sending request
+            # ZeroMQ PUB/SUB has a "slow joiner" problem where early messages can be lost
+            await asyncio.sleep(0.1)
+
             # Send request to daemon (non-blocking, response comes via stream)
             # We need to send the request in a separate task since the daemon
             # will block until the agent completes
@@ -664,16 +687,10 @@ class AnyaPlugin:
 
                 elif chunk.event_type == StreamEventType.TOOL_CALL_START:
                     tool_name = chunk.data.get("tool_name", "")
-                    tool_args = chunk.data.get("tool_args", "")
-                    status = chunk.data.get("status", "tool_pending")
-                    parallel_tools = chunk.data.get("parallel_tools", [])
-                    is_first = chunk.data.get("is_first", True)
-                    skip_header = chunk.data.get("skip_header", False)
-                    skip_fold = chunk.data.get("skip_fold", False)
+                    tool_args_raw = chunk.data.get("tool_args", "")
 
                     tool_was_called = True
 
-                    # Emit tool execution event for fidget
                     fidget.emit_user_event(
                         self.nvim,
                         "AnyaToolExecution",
@@ -683,196 +700,39 @@ class AnyaPlugin:
                         },
                     )
 
-                    if not skip_header:
-                        tool_headers = [
-                            utils.format_tool_header(t["name"], t["args"])
-                            for t in parallel_tools
-                        ]
-                        combined_header = " | ".join(tool_headers)
+                    # Display tool action header in buffer
+                    if tool_name and not self._request_cancelled:
+                        # For run_code, use the title argument as the display name
+                        display_name = tool_name
+                        if tool_name == "run_code" and tool_args_raw:
+                            try:
+                                args_dict = (
+                                    json.loads(tool_args_raw)
+                                    if isinstance(tool_args_raw, str)
+                                    else tool_args_raw
+                                )
+                                title = args_dict.get("title", "")
+                                if title:
+                                    display_name = title
+                            except (ValueError, AttributeError):
+                                pass
 
-                        if is_first:
-                            # For storage-based tools, don't create a fold - just header + pending marker
-                            if skip_fold:
-                                pending_header = spacing_manager.format_content(
-                                    combined_header,
-                                    ContentType.TOOL_HEADER,
-                                    [status],  # No fold_start, just pending marker
-                                )
-                                collected_content.append(pending_header)
-                                tool_fold_skipped = (
-                                    True  # Track that we skipped the fold
-                                )
-                                # No fold opened for storage tools
-                                # Skip marker processing - finalize_storage_tool_output will do it
-                                if not self._request_cancelled:
-                                    self.nvim.async_call(
-                                        ui.stream_text_to_buffer_sync,
-                                        self.nvim,
-                                        chat_bufnr,
-                                        pending_header,
-                                        True,  # skip_process_markers
-                                    )
-                            else:
-                                pending_header = spacing_manager.format_content(
-                                    combined_header,
-                                    ContentType.TOOL_HEADER,
-                                    ["fold_start", status],
-                                )
-                                collected_content.append(pending_header)
-                                tool_fold_opened = True  # Track that we opened a fold
-                                if not self._request_cancelled:
-                                    self.nvim.async_call(
-                                        ui.stream_text_to_buffer_sync,
-                                        self.nvim,
-                                        chat_bufnr,
-                                        pending_header,
-                                    )
-                                    self.nvim.async_call(self._set_tool_fold_open, True)
-                        else:
-                            if not self._request_cancelled:
-                                self.nvim.async_call(
-                                    ui.update_tool_header_line,
-                                    self.nvim,
-                                    chat_bufnr,
-                                    combined_header,
-                                )
+                        # Use format_delta (TEXT) to avoid \n wrapping around [[...]]
+                        tool_header = spacing_manager.format_delta(
+                            f" [[{display_name}]] ",
+                            ContentType.TEXT,
+                        )
+                        collected_content.append(tool_header)
+                        self.nvim.async_call(
+                            ui.stream_text_to_buffer,
+                            self.nvim,
+                            chat_bufnr,
+                            tool_header,
+                        )
 
                 elif chunk.event_type == StreamEventType.TOOL_CALL_END:
                     tools = chunk.data.get("tools", [])
-                    output = chunk.data.get("output", "")
-                    has_failure = chunk.data.get("has_failure", False)
-                    is_edit_tool = chunk.data.get("is_edit_tool", False)
-                    skip_output = chunk.data.get("skip_output", False)
-                    unclosed = chunk.data.get("unclosed", False)
-                    use_storage = chunk.data.get("use_storage", False)
-                    tool_output_refs = chunk.data.get("tool_output_refs", [])
 
-                    # DEBUG: Log TOOL_CALL_END event details
-                    import logging
-
-                    logger = logging.getLogger("anya.plugin")
-                    logger.warning(
-                        f"TOOL_CALL_END: use_storage={use_storage}, "
-                        f"tool_output_refs={tool_output_refs}, "
-                        f"tool_fold_skipped={tool_fold_skipped}, "
-                        f"skip_output={skip_output}, "
-                        f"cancelled={self._request_cancelled}"
-                    )
-
-                    # For skip_output tools, add a space before next text
-                    if skip_output:
-                        collected_content.append(" ")
-                        if not self._request_cancelled:
-                            self.nvim.async_call(
-                                ui.stream_text_to_buffer, self.nvim, chat_bufnr, " "
-                            )
-
-                    # Handle storage-based tool outputs (no fold, just header + marker)
-                    if use_storage and tool_output_refs and not self._request_cancelled:
-                        ref = tool_output_refs[0]
-                        # Create the tool output reference marker
-                        output_marker = markers.make_tool_output_marker(
-                            ref["output_id"], ref["tool_name"], ref.get("line_count", 0)
-                        )
-                        collected_content.append(output_marker)
-                        # Update pending marker to success and append ato marker atomically,
-                        # merging with the header so the success state and "View output" button show inline.
-                        self.nvim.async_call(
-                            ui.finalize_storage_tool_output,
-                            self.nvim,
-                            chat_bufnr,
-                            output_marker,
-                        )
-                        tool_fold_skipped = False  # Reset for next tool
-                    elif tool_fold_skipped and not self._request_cancelled:
-                        # Fallback: we skipped fold but storage wasn't used
-                        # (e.g., tool failed or output too short)
-                        # Show inline output without fold, just update pending→success/failure
-                        if has_failure:
-                            self.nvim.async_call(
-                                ui.update_pending_markers_to_failure,
-                                self.nvim,
-                                chat_bufnr,
-                            )
-                        else:
-                            self.nvim.async_call(
-                                ui.update_pending_markers_to_success,
-                                self.nvim,
-                                chat_bufnr,
-                            )
-                        # Output inline (no fold wrapper)
-                        if output and not skip_output:
-                            wrapped_output = f"\n``````\n{output}\n``````\n"
-                            collected_content.append(wrapped_output)
-                            self.nvim.async_call(
-                                ui.stream_text_to_buffer_sync,
-                                self.nvim,
-                                chat_bufnr,
-                                wrapped_output,
-                                True,  # skip_process_markers
-                            )
-                        tool_fold_skipped = False  # Reset for next tool
-                        self.nvim.async_call(ui.process_markers, self.nvim, chat_bufnr)
-                    else:
-                        # Traditional flow: update markers, output, close fold
-                        # Update markers (don't process yet - wait until fold_end is written)
-                        if (
-                            not self._request_cancelled
-                            and not is_edit_tool
-                            and not skip_output
-                        ):
-                            if has_failure:
-                                self.nvim.async_call(
-                                    ui.update_pending_markers_to_failure,
-                                    self.nvim,
-                                    chat_bufnr,
-                                )
-                            else:
-                                self.nvim.async_call(
-                                    ui.update_pending_markers_to_success,
-                                    self.nvim,
-                                    chat_bufnr,
-                                )
-
-                        # Output tool result (skip marker processing - do it once at end)
-                        if not is_edit_tool and not skip_output and output:
-                            # Traditional inline output
-                            wrapped_output = spacing_manager.format_content(
-                                f"``````\n{output}\n``````", ContentType.TOOL_OUTPUT
-                            )
-                            collected_content.append(wrapped_output)
-                            if not self._request_cancelled:
-                                self.nvim.async_call(
-                                    ui.stream_text_to_buffer_sync,
-                                    self.nvim,
-                                    chat_bufnr,
-                                    wrapped_output,
-                                    True,  # skip_process_markers
-                                )
-
-                        # Close fold (skip marker processing - do it once at end)
-                        # Write fold_end if a fold was opened (tracked by tool_fold_opened)
-                        if tool_fold_opened:
-                            fold_end_marker = spacing_manager.format_content(
-                                "", ContentType.MARKER, ["fold_end"]
-                            )
-                            collected_content.append(fold_end_marker)
-                            tool_fold_opened = False  # Reset fold tracking
-                            if not self._request_cancelled:
-                                self.nvim.async_call(
-                                    ui.stream_text_to_buffer_sync,
-                                    self.nvim,
-                                    chat_bufnr,
-                                    fold_end_marker,
-                                    True,  # skip_process_markers
-                                )
-                                self.nvim.async_call(self._set_tool_fold_open, False)
-                                # Process markers ONCE after everything is written
-                                self.nvim.async_call(
-                                    ui.process_markers, self.nvim, chat_bufnr
-                                )
-
-                    # Emit completion events
                     for tool in tools:
                         fidget.emit_user_event(
                             self.nvim,
@@ -883,8 +743,7 @@ class AnyaPlugin:
                             },
                         )
 
-                    if not unclosed:
-                        tool_was_called = False
+                    tool_was_called = False
 
                 elif chunk.event_type == StreamEventType.MEMORY_STORED:
                     # Emit memory stored event for fidget notification
@@ -918,11 +777,21 @@ class AnyaPlugin:
 
                 elif chunk.event_type == StreamEventType.MESSAGE_END:
                     # Flush queue and clean up trailing blank lines in the buffer
-                    self.nvim.async_call(ui.flush_queue, self.nvim)
-                    self.nvim.async_call(
-                        ui.cleanup_trailing_blanks, self.nvim, chat_bufnr
-                    )
-                    status = chunk.data.get("status", "success")
+                    # Wrap callbacks with error handling to prevent silent crashes
+                    def _safe_flush_queue():
+                        try:
+                            ui.flush_queue(self.nvim)
+                        except Exception:
+                            pass
+
+                    def _safe_cleanup_trailing():
+                        try:
+                            ui.cleanup_trailing_blanks(self.nvim, chat_bufnr)
+                        except Exception:
+                            pass
+
+                    self.nvim.async_call(_safe_flush_queue)
+                    self.nvim.async_call(_safe_cleanup_trailing)
                     break
 
                 elif chunk.event_type == StreamEventType.TOOL_CONFIRMATION_REQUEST:
@@ -1441,15 +1310,6 @@ vim.ui.select({lua_options},
                     thinking_footer,
                 )
 
-            # Close any open tool folds
-            if tool_fold_opened:
-                fold_end_marker = "\n" + markers.make_marker("fold_end") + "\n"
-                collected_content.append(fold_end_marker)
-                self.nvim.async_call(
-                    ui.stream_text_to_buffer, self.nvim, chat_bufnr, fold_end_marker
-                )
-                self.nvim.async_call(self._set_tool_fold_open, False)
-
             # Save message to database
             now = datetime.now(timezone.utc)
             end_timestamp = (
@@ -1459,19 +1319,26 @@ vim.ui.select({lua_options},
             message_text = "".join(collected_content)
 
             def save_after_streaming():
-                self._save_agent_message_to_db(
-                    chat_bufnr,
-                    msg_id,
-                    "Code",
-                    conversation_id,
-                    timestamp,
-                    end_timestamp,
-                    message_text,
-                )
+                try:
+                    self._save_agent_message_to_db(
+                        chat_bufnr,
+                        msg_id,
+                        "Code",
+                        conversation_id,
+                        timestamp,
+                        end_timestamp,
+                        message_text,
+                    )
+                except Exception as e:
+                    try:
+                        self.nvim.err_write(f"Error saving message to DB: {e}\n")
+                    except Exception:
+                        pass
 
             self.nvim.async_call(save_after_streaming)
 
-            # Emit finish event
+            # Emit finish event immediately (UI responsiveness)
+            # Duration will be displayed when process_markers runs after DB save
             fidget.emit_user_event(
                 self.nvim,
                 "AnyaRequestFinished",
@@ -1489,29 +1356,28 @@ vim.ui.select({lua_options},
                 + f"{int(now.microsecond / 1000):03d}Z"
             )
 
-            if tool_fold_opened:
-                fold_end_marker = "\n" + markers.make_marker("fold_end") + "\n"
-                collected_content.append(fold_end_marker)
-                self.nvim.async_call(
-                    ui.append_to_chat_buffer, self.nvim, chat_bufnr, fold_end_marker
-                )
-                self.nvim.async_call(self._set_tool_fold_open, False)
-
             message_text = "".join(collected_content)
 
             def save_after_cancel():
-                self._save_agent_message_to_db(
-                    chat_bufnr,
-                    msg_id,
-                    "Code",
-                    conversation_id,
-                    timestamp,
-                    end_timestamp,
-                    message_text,
-                )
+                try:
+                    self._save_agent_message_to_db(
+                        chat_bufnr,
+                        msg_id,
+                        "Code",
+                        conversation_id,
+                        timestamp,
+                        end_timestamp,
+                        message_text,
+                    )
+                except Exception as e:
+                    try:
+                        self.nvim.err_write(f"Error saving cancelled message to DB: {e}\n")
+                    except Exception:
+                        pass
 
             self.nvim.async_call(save_after_cancel)
 
+            # Emit finish event immediately
             fidget.emit_user_event(
                 self.nvim,
                 "AnyaRequestFinished",
@@ -1522,11 +1388,23 @@ vim.ui.select({lua_options},
             )
 
         except Exception as e:
-            self.nvim.async_call(
-                ui.append_to_chat_buffer, self.nvim, chat_bufnr, f"\n\n**Error:** {e}\n"
-            )
-            self.nvim.async_call(self.nvim.err_write, f"Agent error: {e}\n")
+            # Wrap callbacks with error handling
+            def _safe_append_error():
+                try:
+                    ui.append_to_chat_buffer(self.nvim, chat_bufnr, f"\n\n**Error:** {e}\n")
+                except Exception:
+                    pass
 
+            def _safe_write_error():
+                try:
+                    self.nvim.err_write(f"Agent error: {e}\n")
+                except Exception:
+                    pass
+
+            self.nvim.async_call(_safe_append_error)
+            self.nvim.async_call(_safe_write_error)
+
+            # For errors, emit finish event immediately (no DB save needed for error case)
             fidget.emit_user_event(
                 self.nvim,
                 "AnyaRequestFinished",
@@ -1537,11 +1415,22 @@ vim.ui.select({lua_options},
             )
 
         finally:
-            await subscriber.disconnect()
+            try:
+                await subscriber.disconnect()
+            except Exception:
+                pass  # Ignore disconnect errors
+
             self._current_task = None
             self._current_request_id = None
             self._request_cancelled = False
-            self.nvim.async_call(self._set_tool_fold_open, False)
+
+            def _safe_set_tool_fold_open():
+                try:
+                    self._set_tool_fold_open(False)
+                except Exception:
+                    pass
+
+            self.nvim.async_call(_safe_set_tool_fold_open)
 
     async def _send_to_daemon(
         self,
@@ -1593,8 +1482,9 @@ vim.ui.select({lua_options},
         message_text,
     ):
         """Save agent message to database."""
-        # Flush the streaming queue
-        self.nvim.exec_lua("require('anya.text').flush_queue()")
+        # Flush the streaming queue without processing markers (we do it at the end
+        # with pre-loaded messages to avoid RPC re-entrancy deadlock)
+        self.nvim.exec_lua("require('anya.text').flush_queue(false)")
 
         self._ensure_db()
 
@@ -1671,7 +1561,15 @@ vim.ui.select({lua_options},
         if conversation_id:
             db.update_conversation_timestamp(conversation_id, end_timestamp)
 
-        ui.process_markers(self.nvim, chat_bufnr)
+        # Load messages from DB and pass to process_markers to avoid
+        # RPC re-entrancy deadlock (Python exec_lua -> Lua vim.fn -> Python blocked)
+        messages = []
+        if conversation_id:
+            conv_data = db.load_conversation(conversation_id)
+            if conv_data and conv_data.get("messages"):
+                messages = conv_data["messages"]
+
+        ui.process_markers(self.nvim, chat_bufnr, messages)
 
     def cancel_agent(self):
         """Cancel the current agent response and flush the queue."""
@@ -1759,71 +1657,87 @@ vim.ui.select({lua_options},
             args[0]: The prompt text
             args[1]: Optional existing conversation ID (None for new conversation)
         """
-        if not args:
-            self.nvim.err_write("AnyaSend requires a prompt argument.\n")
-            return None
-        text = args[0]
-        existing_conv_id = args[1] if len(args) > 1 else None
+        try:
+            if not args:
+                self.nvim.err_write("AnyaSend requires a prompt argument.\n")
+                return None
+            text = args[0]
+            existing_conv_id = args[1] if len(args) > 1 else None
 
-        # Handle slash commands (no return value needed)
-        if text and text.strip().startswith("/"):
-            self._handle_slash_command(text.strip(), existing_conv_id)
-            return None
+            # Handle slash commands (no return value needed)
+            if text and text.strip().startswith("/"):
+                self._handle_slash_command(text.strip(), existing_conv_id)
+                return None
 
-        # Generate IDs and timestamp on server side
-        from datetime import datetime, timezone
+            # Generate IDs and timestamp on server side
+            from datetime import datetime, timezone
 
-        now = datetime.now(timezone.utc)
-        timestamp = (
-            now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
-        )
-
-        # Use existing conversation ID or generate new one
-        is_new_conversation = existing_conv_id is None
-        conv_id = existing_conv_id if existing_conv_id else ids.new()
-        msg_id = ids.new(conv_id)
-
-        # Get user name
-        user_name = self.nvim.eval("$USER") or "User"
-
-        # Save to database
-        self._ensure_db()
-        if is_new_conversation:
-            db.save_conversation(conv_id, timestamp)
-        db.save_message_dict(
-            msg_id=msg_id,
-            conversation_id=conv_id,
-            role="user",
-            content=text,
-            author=user_name,
-            model=None,
-            created_at=timestamp,
-            ended_at=timestamp,
-            markers=None,
-        )
-
-        # Save to prompt history via Lua
-        if text and text.strip():
-            self.nvim.exec_lua(
-                """
-                local prompt_text = select(1, ...)
-                if prompt_text and prompt_text ~= "" then
-                    require("anya.history").add(prompt_text)
-                end
-                """,
-                text,
+            now = datetime.now(timezone.utc)
+            timestamp = (
+                now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
             )
 
-        # Schedule async agent task
-        self.send(text, conv_id)
+            # Use existing conversation ID or generate new one
+            is_new_conversation = existing_conv_id is None
+            conv_id = existing_conv_id if existing_conv_id else ids.new()
+            msg_id = ids.new(conv_id)
 
-        # Return IDs for Lua to render the message
-        return {
-            "conv_id": conv_id,
-            "msg_id": msg_id,
-            "timestamp": timestamp,
-            "is_new": is_new_conversation,
-        }
+            # Get user name
+            user_name = self.nvim.eval("$USER") or "User"
+
+            # Save to database
+            self._ensure_db()
+            if is_new_conversation:
+                db.save_conversation(conv_id, timestamp)
+            db.save_message_dict(
+                msg_id=msg_id,
+                conversation_id=conv_id,
+                role="user",
+                content=text,
+                author=user_name,
+                model=None,
+                created_at=timestamp,
+                ended_at=timestamp,
+                markers=None,
+            )
+
+            # Save to prompt history via Lua
+            if text and text.strip():
+                try:
+                    self.nvim.exec_lua(
+                        """
+                        local prompt_text = select(1, ...)
+                        if prompt_text and prompt_text ~= "" then
+                            require("anya.history").add(prompt_text)
+                        end
+                        """,
+                        text,
+                    )
+                except Exception:
+                    pass  # Non-critical, ignore errors
+
+            # Schedule async agent task
+            self.send(text, conv_id)
+
+            # Return IDs for Lua to render the message
+            return {
+                "conv_id": conv_id,
+                "msg_id": msg_id,
+                "timestamp": timestamp,
+                "is_new": is_new_conversation,
+            }
+        except Exception as e:
+            import traceback
+            self.nvim.err_write(f"AnyaSend error: {e}\n")
+            # Log to file for debugging
+            try:
+                with open(os.path.expanduser("~/.local/share/anya/plugin_errors.log"), "a") as f:
+                    f.write(f"\n--- AnyaSend exception ---\n")
+                    f.write("".join(traceback.format_exception(type(e), e, e.__traceback__)))
+                    f.write(f"---\n")
+            except Exception:
+                pass
+            return None
 
     def _handle_slash_command(self, command, conversation_id=None):
         """Handle slash commands like /clear, /cancel, /help."""

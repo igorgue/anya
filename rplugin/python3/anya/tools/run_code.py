@@ -1,9 +1,36 @@
 import os
+import re
 import tempfile
 from agents import function_tool, RunContextWrapper
 
 from ..agents.context import NvimPluginContext
 from .utils import create_error_handler
+
+
+def _sanitize_title(title: str) -> str:
+    """Sanitize a title for use as a filename (lowercase, hyphens for non-alphanumeric)."""
+    title = title.lower().strip()
+    title = re.sub(r"[^a-z0-9]+", "-", title)
+    title = title.strip("-")
+    return title or "untitled"
+
+
+def _save_code_to_project(code: str, title: str, cwd: str) -> str | None:
+    """Save code to .anya/code/<sanitized-title>.py in the project directory.
+
+    Returns:
+        Path to the saved file, or None on failure.
+    """
+    try:
+        sanitized = _sanitize_title(title)
+        code_dir = os.path.join(cwd, ".anya", "code")
+        os.makedirs(code_dir, exist_ok=True)
+        file_path = os.path.join(code_dir, f"{sanitized}.py")
+        with open(file_path, "w") as f:
+            f.write(code)
+        return file_path
+    except OSError:
+        return None
 
 
 def _detect_virtualenv(cwd: str) -> str | None:
@@ -73,7 +100,7 @@ async def run_code(
 
     Args:
         ctx: The RunContextWrapper containing the plugin context.
-        title: A title or description for the code being run (for logging purposes).
+        title: A title or description for the code being run (for logging purposes), use lowercase.
         code: Python code to execute
         cwd: Current working directory for code execution (default: current working directory)
         use_venv: Whether to detect and use virtualenv if available (default: True)
@@ -85,6 +112,9 @@ async def run_code(
 
     if cwd is None:
         cwd = plugin_context.cwd if plugin_context.cwd else os.getcwd()
+
+    # Save code to project directory for later viewing
+    _save_code_to_project(code, title, cwd)
 
     command, script_path = _build_python_command(code, cwd, use_venv)
 
@@ -118,13 +148,19 @@ async def run_code(
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 process.communicate(), timeout=30.0
             )
-            stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
-            stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+            stdout = (
+                stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+            )
+            stderr = (
+                stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+            )
 
             if process.returncode == 0:
                 return stdout if stdout.strip() else "Code executed successfully."
             else:
-                error_msg = stderr if stderr.strip() else f"Exit code: {process.returncode}"
+                error_msg = (
+                    stderr if stderr.strip() else f"Exit code: {process.returncode}"
+                )
                 return f"Error executing code:\n{error_msg}"
 
         else:

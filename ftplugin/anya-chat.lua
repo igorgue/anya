@@ -34,28 +34,31 @@ end, { buffer = true, desc = "Cancel agent response" })
 -- Tool output viewing keymaps
 local tool_output = require("anya.tool_output")
 
--- Open tool output on <CR> if on a tool output line, else toggle fold
+-- Open code, tool output on <CR>, else toggle fold
 vim.keymap.set("n", "<CR>", function()
-  if not tool_output.open_at_cursor() then
+  if not tool_output.open_code_at_cursor() and not tool_output.open_at_cursor() then
     -- Try to toggle fold, ignore error if no fold exists
     pcall(vim.cmd, "normal! za")
   end
-end, { buffer = true, desc = "Open tool output or toggle fold" })
+end, { buffer = true, desc = "Open code, tool output, or toggle fold" })
 
--- Open tool output on <Space>
+-- Open code or tool output on <Space>
 vim.keymap.set("n", "<Space>", function()
-  tool_output.open_at_cursor()
-end, { buffer = true, desc = "Open tool output" })
+  if not tool_output.open_code_at_cursor() then
+    tool_output.open_at_cursor()
+  end
+end, { buffer = true, desc = "Open code or tool output" })
 
--- Single-click to open tool output (mouse support)
+-- Single-click to open code or tool output (mouse support)
 -- <LeftRelease> fires AFTER cursor moves to clicked position
--- Only opens if cursor lands on a tool output marker line
 vim.keymap.set("n", "<LeftRelease>", function()
   -- Small delay to ensure cursor position is updated
   vim.schedule(function()
-    tool_output.open_at_cursor() -- Returns false if not on marker line (no-op)
+    if not tool_output.open_code_at_cursor() then
+      tool_output.open_at_cursor() -- Returns false if not on marker line (no-op)
+    end
   end)
-end, { buffer = true, desc = "Open tool output on click" })
+end, { buffer = true, desc = "Open code or tool output on click" })
 
 -- Section navigation: jump between # headers (# User, # Anya, etc.)
 local function jump_to_header(direction)

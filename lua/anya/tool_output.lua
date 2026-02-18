@@ -95,6 +95,61 @@ function M._open_simple_scratch(lines, tool_name, filetype)
   vim.keymap.set("n", "q", "<cmd>close<cr>", { buffer = buf, desc = "Close tool output" })
 end
 
+--- Sanitize a title for use as a filename (matches Python's _sanitize_title)
+--- Lowercase, replace non-alphanumeric sequences with hyphens, strip leading/trailing hyphens.
+--- @param title string The title to sanitize
+--- @return string Sanitized filename stem
+local function sanitize_title(title)
+  title = title:lower()
+  title = title:match("^%s*(.-)%s*$") or "" -- trim
+  title = title:gsub("[^a-z0-9]+", "-")
+  title = title:match("^%-*(.-)%-*$") or "" -- strip leading/trailing hyphens
+  return title ~= "" and title or "untitled"
+end
+
+--- Open the saved code file for a [[title]] reference using Snacks scratch.
+--- The file lives at <cwd>/.anya/code/<sanitized-title>.py
+--- @return boolean True if a code file was opened, false otherwise
+function M.open_code_at_cursor()
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local line_num = cursor[1]
+  local bufnr = vim.api.nvim_get_current_buf()
+  local line = vim.api.nvim_buf_get_lines(bufnr, line_num - 1, line_num, false)[1] or ""
+
+  -- Look for [[title]] pattern on current line
+  local title = line:match("%[%[(.-)%]%]")
+  if not title or title == "" then
+    return false
+  end
+
+  local cwd = vim.fn.getcwd()
+  local sanitized = sanitize_title(title)
+  local file_path = cwd .. "/.anya/code/" .. sanitized .. ".py"
+
+  if vim.fn.filereadable(file_path) == 0 then
+    return false
+  end
+
+  local snacks_ok, Snacks = pcall(require, "snacks")
+  if snacks_ok and Snacks.scratch then
+    Snacks.scratch.open({
+      name = "Code: " .. title,
+      ft = "python",
+      icon = "󰌠",
+      file = file_path,
+      win = {
+        style = "scratch",
+        wo = { winhighlight = "NormalFloat:Normal" },
+      },
+    })
+  else
+    -- Fallback: open in a vertical split
+    vim.cmd("vsplit " .. vim.fn.fnameescape(file_path))
+  end
+
+  return true
+end
+
 --- Check if cursor is on or near a tool output marker and open it if so
 --- @return boolean True if a tool output was opened, false otherwise
 function M.open_at_cursor()

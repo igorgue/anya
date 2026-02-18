@@ -179,7 +179,7 @@ def format_tool_call(tool_name: str, tool_args: str) -> str:
 
 
 def format_tool_call_with_status(tool_name: str, tool_args: str, status: str) -> str:
-    """Format a tool call as a header with opening fold marker and status.
+    """Format a tool call as a header with status marker.
 
     Args:
         tool_name: The name of the tool function
@@ -187,12 +187,10 @@ def format_tool_call_with_status(tool_name: str, tool_args: str, status: str) ->
         status: The tool status marker (tool_pending, tool_success, tool_failure)
 
     Returns:
-        Formatted header with opening fold marker and status
+        Formatted header with status marker
     """
     from . import markers
 
-    # Format header with proper truncation
     header = format_tool_header(tool_name, tool_args)
 
-    # Add opening fold marker with status and newline so it's on its own line
-    return header + "\n" + markers.make_marker("fold_start", status) + "\n"
+    return header + "\n" + markers.make_marker(status) + "\n"

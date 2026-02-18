@@ -37,10 +37,23 @@ end
 
 -- Set up autocommands
 local augroup = vim.api.nvim_create_augroup("AnyaPromptHistory", { clear = true })
+
+-- Flag to prevent autocmds from stopping navigation during programmatic updates
+local navigating_programmatically = false
+
+-- Expose the flag setter for the cycle_history function
+_G._anya_set_navigating_programmatically = function(value)
+  navigating_programmatically = value
+end
+
 vim.api.nvim_create_autocmd("InsertEnter", {
   group = augroup,
   buffer = 0,
   callback = function()
+    -- Don't stop navigation if we're programmatically updating
+    if navigating_programmatically then
+      return
+    end
     local history = require("anya.history")
     if history.is_navigating() then
       history.stop_navigation()
@@ -54,6 +67,10 @@ vim.api.nvim_create_autocmd("TextChangedI", {
   group = augroup,
   buffer = 0,
   callback = function()
+    -- Don't stop navigation if we're programmatically updating
+    if navigating_programmatically then
+      return
+    end
     local history = require("anya.history")
     if history.is_navigating() then
       history.stop_navigation()
@@ -336,27 +353,45 @@ local function cycle_history(direction)
   -- Update buffer if we got a prompt
   if prompt then
     local lines = vim.split(prompt, "\n", { plain = true })
+    -- Set flag to prevent autocmds from stopping navigation
+    _G._anya_set_navigating_programmatically(true)
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    -- Move cursor to end of buffer
+    local last_line = #lines
+    local last_col = #lines[last_line]
+    vim.api.nvim_win_set_cursor(0, { last_line, last_col })
+    -- Reset flag after a short delay to allow autocmds to fire and be ignored
+    vim.defer_fn(function()
+      _G._anya_set_navigating_programmatically(false)
+    end, 10)
   end
 end
 
 -- Navigate to previous (older) prompt with <C-p>
 vim.keymap.set("i", "<C-p>", function()
+  -- Close any completion popup first to prevent interference
+  if vim.fn.pumvisible() ~= 0 then
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-e>", true, false, true), "n", false)
+  end
   cycle_history("previous")
-end, { buffer = true, desc = "Previous prompt in history" })
+end, { buffer = true, nowait = true, desc = "Previous prompt in history" })
 
 vim.keymap.set("n", "<C-p>", function()
   cycle_history("previous")
-end, { buffer = true, desc = "Previous prompt in history" })
+end, { buffer = true, nowait = true, desc = "Previous prompt in history" })
 
 -- Navigate to next (newer) prompt with <C-n>
 vim.keymap.set("i", "<C-n>", function()
+  -- Close any completion popup first to prevent interference
+  if vim.fn.pumvisible() ~= 0 then
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-e>", true, false, true), "n", false)
+  end
   cycle_history("next")
-end, { buffer = true, desc = "Next prompt in history" })
+end, { buffer = true, nowait = true, desc = "Next prompt in history" })
 
 vim.keymap.set("n", "<C-n>", function()
   cycle_history("next")
-end, { buffer = true, desc = "Next prompt in history" })
+end, { buffer = true, nowait = true, desc = "Next prompt in history" })
 
 -- Paste image with <C-v> in normal and insert mode
 vim.keymap.set({ "n", "i" }, "<C-v>", function()

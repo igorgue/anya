@@ -217,8 +217,7 @@ def cleanup_trailing_blanks(nvim, bufnr):
 def update_tool_header_line(nvim, bufnr, new_header: str):
     """Update the most recent tool header line with a new combined header.
 
-    Finds the last line containing a tool header (starting with **) and
-    replaces it with the new combined header.
+    Finds the last line starting with 'running' and replaces it.
 
     Uses vim.schedule() to defer buffer modifications to avoid E565 errors.
     """
@@ -227,7 +226,6 @@ def update_tool_header_line(nvim, bufnr, new_header: str):
 
     lua_code = """
     local bufnr, new_header = ...
-    -- Flush queue first
     require('anya.text').flush_queue(false)
     
     vim.schedule(function()
@@ -236,7 +234,7 @@ def update_tool_header_line(nvim, bufnr, new_header: str):
         local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
         for i = #lines, 1, -1 do
             local line = lines[i]
-            if line:match("^%*%*.*%*%*$") then
+            if line:match("^running ") then
                 vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, {new_header})
                 require('anya.text')._process_markers(bufnr)
                 break
@@ -247,11 +245,22 @@ def update_tool_header_line(nvim, bufnr, new_header: str):
     nvim.exec_lua(lua_code, bufnr, new_header)
 
 
-def process_markers(nvim, bufnr):
-    """Process markers in the buffer via Lua."""
+def process_markers(nvim, bufnr, messages=None):
+    """Process markers in the buffer via Lua.
+
+    Args:
+        nvim: Neovim instance
+        bufnr: Buffer number
+        messages: Optional pre-loaded messages list to pass to Lua.
+            When called from Python (e.g., async_call callbacks), passing
+            messages avoids an RPC re-entrancy deadlock.
+    """
     if not nvim.api.buf_is_valid(bufnr):
         return
-    nvim.exec_lua("require('anya.text')._process_markers(...)", bufnr)
+    if messages is not None:
+        nvim.exec_lua("require('anya.text')._process_markers(...)", bufnr, messages)
+    else:
+        nvim.exec_lua("require('anya.text')._process_markers(...)", bufnr)
 
 
 def flush_queue(nvim):

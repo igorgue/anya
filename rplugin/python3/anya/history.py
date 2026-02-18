@@ -87,19 +87,35 @@ def strip_blockquote(text: str) -> str:
     return "\n".join(result)
 
 
-def clean_assistant_content(text: str) -> str:
+def clean_assistant_content(text: str, record_markers: list | None = None) -> str:
     """Clean assistant message content for LLM history.
 
-    Removes SEARCH/REPLACE blocks and edit headers that were rendered
-    as tool output in the UI but shouldn't be included in conversation
-    history sent to the LLM.
+    Removes SEARCH/REPLACE blocks, edit headers, and thinking blocks
+    that were rendered as tool output in the UI but shouldn't be
+    included in conversation history sent to the LLM.
 
     Args:
-        text: The raw assistant message content
+        text: The raw assistant message content (markers already stripped)
+        record_markers: Optional list of Marker objects from the MessageRecord.
+            Used to identify thinking block boundaries.
 
     Returns:
-        Cleaned content with edit blocks removed
+        Cleaned content with edit blocks and thinking blocks removed
     """
+    # Build set of line positions that are within thinking blocks.
+    # Markers reference positions in the cleaned content (without marker lines).
+    # A thinking block starts at a fold_start+thinking marker and ends at a fold_end.
+    thinking_ranges: list[tuple[int, int]] = []
+    if record_markers:
+        thinking_start: int | None = None
+        for m in record_markers:
+            if "thinking" in m.ids:
+                # fold_start+thinking marker: the **thinking** header is at pos-1
+                thinking_start = max(0, m.pos - 1)
+            elif "fold_end" in m.ids and thinking_start is not None:
+                thinking_ranges.append((thinking_start, m.pos))
+                thinking_start = None
+
     lines = text.split("\n")
     result = []
     in_edit_block = False
@@ -108,6 +124,11 @@ def clean_assistant_content(text: str) -> str:
     i = 0
     while i < len(lines):
         line = lines[i]
+
+        # Skip lines within thinking ranges
+        if any(start <= i < end for start, end in thinking_ranges):
+            i += 1
+            continue
 
         # Detect edit header pattern: "+N -M | filename"
         # This appears before SEARCH/REPLACE blocks
@@ -251,8 +272,8 @@ def build_llm_history(
                 content = strip_blockquote(content)
             elif record.role == "assistant":
                 # Clean assistant content to remove SEARCH/REPLACE blocks
-                # that were rendered as tool output in the UI
-                content = clean_assistant_content(content)
+                # and thinking blocks that were rendered in the UI
+                content = clean_assistant_content(content, record.markers)
             # Skip empty messages after cleaning
             if not content.strip():
                 continue

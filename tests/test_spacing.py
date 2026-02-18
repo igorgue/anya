@@ -26,11 +26,10 @@ class TestSpacingManager(unittest.TestCase):
         self.assertEqual(isolated, "some text\n<!-- at: fold_start -->\nmore text")
 
     def test_transitions(self):
-        # Text -> Tool Header
+        # Text -> Tool Header (single newline spacing, no double blank)
         self.sm.format_delta("hello", ContentType.TEXT)
         header = self.sm.format_content("ls", ContentType.TOOL_HEADER, ["fold_start"])
-        # Header then marker. Markers always end with \n for isolation.
-        self.assertEqual(header, "\n\nls\n<!-- at: fold_start -->\n")
+        self.assertEqual(header, "\nls\n<!-- at: fold_start -->\n")
 
         # Marker -> Text (after tool marker, should have blank line)
         text = self.sm.format_delta("output", ContentType.TEXT)
