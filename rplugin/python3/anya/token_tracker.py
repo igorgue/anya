@@ -3,7 +3,7 @@
 This module implements token counting similar to opencode's approach:
 - Tracks input, output, reasoning, and cache (read/write) tokens separately
 - Calculates usable context as: context_limit - max_output_tokens
-- Detects overflow when: input + cache.read + output > usable_context
+- Detects overflow when: input + cache.read > usable_context
 - Handles cached tokens differently for Anthropic (doesn't subtract from input)
 """
 
@@ -47,8 +47,11 @@ class TokenUsage:
 
     @property
     def context_tokens(self) -> int:
-        """Tokens that count toward context window (input + cache.read + output)."""
-        return self.input + self.cache_read + self.output
+        """Tokens that count toward context window (input + cache.read).
+        
+        Note: Output tokens don't consume context - they're generated from it.
+        """
+        return self.input + self.cache_read
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -121,8 +124,6 @@ def parse_usage(usage: Any, provider: str | None = None) -> TokenUsage:
         cache_read=cached_tokens,
         cache_write=0,  # Not typically reported in usage
     )
-
-    # Common provider prefixes for model name matching
 
 
 PROVIDER_PREFIXES = [
@@ -226,20 +227,29 @@ def calculate_context_usage(
         model: Model name
 
     Returns:
-        Tuple of (percentage, context_window, context_window, is_overflow)
+        Tuple of (percentage, context_window, usable_context, is_overflow)
+        
+        - percentage: context_tokens / usable_context * 100
+        - context_window: full context window size
+        - usable_context: context_window - max_output_tokens
+        - is_overflow: whether context_tokens exceeds usable_context
     """
     context_window = get_context_window(model)
+    
+    # Usable context is the portion available for input
+    # (reserve space for model output)
+    usable_context = context_window - DEFAULT_MAX_OUTPUT
 
-    # Context tokens = input + cache.read + output (what actually counts)
+    # Context tokens = input + cache.read (what fills the context window)
     context_tokens = usage.context_tokens
 
-    # Calculate percentage of context window
-    percentage = (context_tokens / context_window) * 100 if context_window > 0 else 0
+    # Calculate percentage of usable context
+    percentage = (context_tokens / usable_context) * 100 if usable_context > 0 else 0
 
-    # Check overflow (when context tokens exceed context window)
-    is_overflow = context_tokens > context_window
+    # Check overflow (when context tokens exceed usable context)
+    is_overflow = context_tokens > usable_context
 
-    return percentage, context_window, context_window, is_overflow
+    return percentage, context_window, usable_context, is_overflow
 
 
 def format_context_window(context_window: int) -> str:
