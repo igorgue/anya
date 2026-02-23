@@ -90,9 +90,8 @@ def strip_blockquote(text: str) -> str:
 def clean_assistant_content(text: str, record_markers: list | None = None) -> str:
     """Clean assistant message content for LLM history.
 
-    Removes SEARCH/REPLACE blocks, edit headers, and thinking blocks
-    that were rendered as tool output in the UI but shouldn't be
-    included in conversation history sent to the LLM.
+    Removes thinking blocks that were rendered as tool output in the UI
+    but should not be included in conversation history sent to the LLM.
 
     Args:
         text: The raw assistant message content (markers already stripped)
@@ -100,7 +99,7 @@ def clean_assistant_content(text: str, record_markers: list | None = None) -> st
             Used to identify thinking block boundaries.
 
     Returns:
-        Cleaned content with edit blocks and thinking blocks removed
+        Cleaned content with thinking blocks removed
     """
     # Build set of line positions that are within thinking blocks.
     # Markers reference positions in the cleaned content (without marker lines).
@@ -118,57 +117,12 @@ def clean_assistant_content(text: str, record_markers: list | None = None) -> st
 
     lines = text.split("\n")
     result = []
-    in_edit_block = False
-    skip_next_fence = False
 
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-
+    for i, line in enumerate(lines):
         # Skip lines within thinking ranges
         if any(start <= i < end for start, end in thinking_ranges):
-            i += 1
             continue
-
-        # Detect edit header pattern: "+N -M | filename"
-        # This appears before SEARCH/REPLACE blocks
-        if re.match(r"^\+\d+ -\d+ \| .+$", line.strip()):
-            # Skip this line and look for the code fence + SEARCH/REPLACE
-            i += 1
-            continue
-
-        # Start of code fence that might contain SEARCH/REPLACE
-        if line.strip().startswith("``") and not in_edit_block:
-            # Look ahead to see if this contains SEARCH/REPLACE
-            has_search_replace = False
-            for j in range(i + 1, min(i + 5, len(lines))):
-                if "<<<<<<< SEARCH" in lines[j]:
-                    has_search_replace = True
-                    break
-
-            if has_search_replace:
-                in_edit_block = True
-                i += 1
-                continue
-
-        # End of SEARCH/REPLACE block
-        if in_edit_block:
-            if ">>>>>>> REPLACE" in line:
-                # Skip until we find the closing fence
-                skip_next_fence = True
-                i += 1
-                continue
-            if skip_next_fence and line.strip().startswith("``"):
-                in_edit_block = False
-                skip_next_fence = False
-                i += 1
-                continue
-            # Skip everything inside the block
-            i += 1
-            continue
-
         result.append(line)
-        i += 1
 
     # Clean up result - remove leading/trailing empty lines
     cleaned = "\n".join(result).strip()
@@ -271,8 +225,7 @@ def build_llm_history(
             if record.role == "user":
                 content = strip_blockquote(content)
             elif record.role == "assistant":
-                # Clean assistant content to remove SEARCH/REPLACE blocks
-                # and thinking blocks that were rendered in the UI
+                # Clean assistant content to remove thinking blocks
                 content = clean_assistant_content(content, record.markers)
             # Skip empty messages after cleaning
             if not content.strip():

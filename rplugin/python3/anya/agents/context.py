@@ -21,11 +21,6 @@ class NvimPluginContext:
     open_buffers: list[dict] = field(default_factory=list)
     # Confirmation callback for requesting user confirmation in daemon mode (exec tool)
     confirmation_callback: Callable[[str, list[str]], Awaitable[str]] | None = None
-    # Edit confirmation callback for edit tool in daemon mode
-    # Takes (edit_blocks: str, yolo_mode: bool) and returns dict with action/success/message
-    edit_confirmation_callback: (
-        Callable[[str, bool], Awaitable[dict[str, Any]]] | None
-    ) = None
     # Exec callback for running commands on the client machine in daemon mode
     # Takes (command: str, cwd: str, timeout: int) and returns dict with stdout/stderr/returncode
     exec_callback: Callable[[str, str, int], Awaitable[dict[str, Any]]] | None = None  # (command, cwd, timeout, ui_dir=None)

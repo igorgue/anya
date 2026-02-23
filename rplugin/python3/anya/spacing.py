@@ -18,7 +18,6 @@ class ContentType(Enum):
     TOOL_OUTPUT = "tool_output"
     THINKING = "thinking"
     MESSAGE_BOUNDARY = "message_boundary"
-    EDIT_BLOCK = "edit_block"
 
 
 class SpacingManager:
@@ -229,7 +228,6 @@ class SpacingManager:
                     if (
                         marker.startswith("fold_")
                         or marker.startswith("tool_")
-                        or marker.startswith("edit_")
                     ):
                         is_tool_marker = True
                         break
