@@ -87,7 +87,7 @@ def _detect_virtualenv(cwd: str) -> str | None:
     return None
 
 
-def _build_python_command(code: str, cwd: str, use_venv: bool) -> tuple[str, str]:
+def _build_python_command(code: str, cwd: str, use_venv: bool, extra_env: dict | None = None) -> tuple[str, str]:
     """Build a shell command to run Python code, detecting virtualenv if needed.
 
     Returns:
@@ -95,7 +95,14 @@ def _build_python_command(code: str, cwd: str, use_venv: bool) -> tuple[str, str
     """
     script_fd, script_path = tempfile.mkstemp(suffix=".py", prefix="anya_run_")
     with os.fdopen(script_fd, "w") as f:
-        f.write(_ANYA_PATH_PREAMBLE + "\n" + code)
+        preamble = _ANYA_PATH_PREAMBLE
+        if extra_env:
+            env_lines = "import os as _os\n"
+            for k, v in extra_env.items():
+                env_lines += f"_os.environ[{repr(k)}] = {repr(v)}\n"
+            env_lines += "del _os\n"
+            preamble = env_lines + preamble
+        f.write(preamble + "\n" + code)
 
     python_exe = "python3"
     if use_venv:
@@ -210,6 +217,149 @@ def cleanup_completed_processes(max_age_hours: int = 24) -> int:
     return len(to_remove)
 
 
+
+async def _run_with_ui_requests(
+    exec_task: "asyncio.Task[dict]",
+    ui_dir: str,
+    plugin_context: "NvimPluginContext",
+) -> dict:
+    """Run exec_task while serving any ui.ask/ui.input requests from the subprocess.
+
+    The subprocess writes  <id>.request.json  to ui_dir and waits for
+    <id>.response.json.  We poll for request files at 50 ms intervals
+    while the subprocess is running, dispatch them through
+    confirmation_callback, and write response files back.
+
+    Args:
+        exec_task: Coroutine task for the exec_callback call.
+        ui_dir: Path to the UI rendezvous directory.
+        plugin_context: Agent context (for confirmation_callback access).
+
+    Returns:
+        The dict result from exec_task (stdout/stderr/returncode).
+    """
+    import glob
+    import json as _json
+
+    while not exec_task.done():
+        await asyncio.sleep(0.05)
+        await _serve_ui_requests(ui_dir, plugin_context)
+
+    # Drain any final requests written just before the subprocess exited
+    await _serve_ui_requests(ui_dir, plugin_context)
+    return exec_task.result()
+
+
+async def _run_with_ui_requests_nvim(
+    comm_task: "asyncio.Task",
+    ui_dir: str,
+    plugin_context: "NvimPluginContext",
+) -> tuple:
+    """Like _run_with_ui_requests but for the has_nvim direct path.
+
+    Returns the (stdout_bytes, stderr_bytes) tuple from process.communicate().
+    """
+    while not comm_task.done():
+        await asyncio.sleep(0.05)
+        await _serve_ui_requests(ui_dir, plugin_context)
+
+    await _serve_ui_requests(ui_dir, plugin_context)
+    return comm_task.result()
+
+
+async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
+    """Scan ui_dir for pending request files and serve each one.
+
+    Handles both "select" (vim.ui.select) and "input" (vim.ui.input) kinds.
+    Each request file is removed after reading; the response is written to
+    a matching .response.json file for the subprocess to pick up.
+    """
+    import glob
+    import json as _json
+
+    pattern = os.path.join(ui_dir, "*.request.json")
+    for request_file in glob.glob(pattern):
+        try:
+            with open(request_file) as f:
+                req = _json.load(f)
+            os.unlink(request_file)
+        except Exception:
+            continue
+
+        request_id = req.get("id", "")
+        kind = req.get("kind", "select")
+        prompt = req.get("prompt", "")
+        response_file = os.path.join(ui_dir, f"{request_id}.response.json")
+
+        result = ""
+        try:
+            if kind == "select":
+                options = req.get("options", [])
+                if plugin_context.confirmation_callback:
+                    result = await plugin_context.confirmation_callback(prompt, options)
+                elif plugin_context.has_nvim:
+                    from ..tools.exec import _nvim_ui_select
+                    result = await _nvim_ui_select(plugin_context.nvim, options, prompt)
+            elif kind == "input":
+                default = req.get("default", "")
+                if plugin_context.has_nvim:
+                    result = await _nvim_ui_input(plugin_context.nvim, prompt, default)
+                elif plugin_context.confirmation_callback:
+                    # Daemon mode: present as a single-option select with a text field
+                    # We send a special marker so plugin.py can render vim.ui.input
+                    result = await plugin_context.confirmation_callback(
+                        f"__input__:{default}:{prompt}", []
+                    )
+        except Exception:
+            result = ""
+
+        try:
+            with open(response_file, "w") as f:
+                _json.dump({"result": result}, f)
+        except Exception:
+            pass
+
+
+async def _nvim_ui_input(nvim, prompt: str, default: str = "") -> str:
+    """Ask user for free-form text using vim.ui.input (direct Neovim mode)."""
+    lua_prompt = prompt.replace('"', '\\"').replace("\n", "\\n")
+    lua_default = default.replace('"', '\\"')
+
+    result = [None]
+
+    def run_input():
+        nvim.exec_lua(
+            f"""
+vim.g.anya_input_result = nil
+vim.ui.input(
+    {{prompt = "{lua_prompt}", default = "{lua_default}"}},
+    function(value)
+        vim.g.anya_input_result = value or ""
+    end)
+"""
+        )
+
+    nvim.async_call(run_input)
+
+    start_time = asyncio.get_event_loop().time()
+    while asyncio.get_event_loop().time() - start_time < 300.0:
+        def get_result():
+            try:
+                val = nvim.eval("get(g:, 'anya_input_result', v:null)")
+                if val is not None and val != "v:null" and val != "null":
+                    result[0] = str(val)
+            except Exception:
+                pass
+
+        nvim.async_call(get_result)
+        await asyncio.sleep(0.1)
+
+        if result[0] is not None:
+            return result[0]
+
+    return ""
+
+
 @function_tool(failure_error_function=create_error_handler)
 async def run_code(
     ctx: RunContextWrapper[NvimPluginContext],
@@ -242,7 +392,11 @@ async def run_code(
     # Save code to project directory for later viewing
     _save_code_to_project(code, title, cwd)
 
-    command, script_path = _build_python_command(code, cwd, use_venv)
+    # Set up UI rendezvous directory for anya.libs.ui
+    ui_dir = os.path.join(cwd, ".anya", "ui", str(uuid.uuid4())[:8])
+    os.makedirs(ui_dir, exist_ok=True)
+
+    command, script_path = _build_python_command(code, cwd, use_venv, extra_env={"ANYA_UI_DIR": ui_dir})
 
     try:
         # Background execution
@@ -335,7 +489,10 @@ async def run_code(
 
         # Foreground execution (original behavior)
         if plugin_context.exec_callback:
-            result = await plugin_context.exec_callback(command, cwd, 30)
+            exec_task = asyncio.create_task(
+                plugin_context.exec_callback(command, cwd, 30, ui_dir=ui_dir)
+            )
+            result = await _run_with_ui_requests(exec_task, ui_dir, plugin_context)
 
             if result.get("error"):
                 return f"Error executing code:\n{result['error']}"
@@ -358,8 +515,11 @@ async def run_code(
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(), timeout=30.0
+            comm_task = asyncio.create_task(
+                asyncio.wait_for(process.communicate(), timeout=30.0)
+            )
+            stdout_bytes, stderr_bytes = await _run_with_ui_requests_nvim(
+                comm_task, ui_dir, plugin_context
             )
             stdout = (
                 stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
@@ -388,4 +548,9 @@ async def run_code(
             try:
                 os.unlink(script_path)
             except OSError:
+                pass
+            try:
+                import shutil as _shutil
+                _shutil.rmtree(ui_dir, ignore_errors=True)
+            except Exception:
                 pass

@@ -41,16 +41,7 @@ run_code(title="start dev server", code="...", background=True)
 When `background=True`:
 - Returns immediately with a process ID
 - Output is written to `.anya/background/<process-id>.log`
-- Use `background_status` tool to check progress
-
-### Checking Background Processes
-
-Use the `background_status` tool to monitor background processes:
-
-- `background_status()` - List all background processes
-- `background_status(process_id="abc123")` - Get status of a specific process
-- `background_status(process_id="abc123", action="output")` - Read full output
-- `background_status(action="cleanup")` - Remove completed processes from registry
+- Check progress by reading the log file inside a subsequent `run_code` call
 
 ## Guidelines
 

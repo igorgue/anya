@@ -28,7 +28,7 @@ class NvimPluginContext:
     ) = None
     # Exec callback for running commands on the client machine in daemon mode
     # Takes (command: str, cwd: str, timeout: int) and returns dict with stdout/stderr/returncode
-    exec_callback: Callable[[str, str, int], Awaitable[dict[str, Any]]] | None = None
+    exec_callback: Callable[[str, str, int], Awaitable[dict[str, Any]]] | None = None  # (command, cwd, timeout, ui_dir=None)
 
     @property
     def has_nvim(self) -> bool:

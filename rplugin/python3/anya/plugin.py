@@ -854,7 +854,80 @@ class AnyaPlugin:
                         _prompt=prompt,
                         _options=options,
                     ):
-                        # Format options for Lua table
+                        import functools
+
+                        async def _send_choice(choice: str):
+                            try:
+                                loop = asyncio.get_event_loop()
+                                await loop.run_in_executor(
+                                    None,
+                                    functools.partial(
+                                        self._confirmation_client.send_request,
+                                        RequestType.TOOL_CONFIRMATION_RESPONSE,
+                                        self.session_id,
+                                        _confirmation_id,
+                                        {
+                                            "confirmation_id": _confirmation_id,
+                                            "choice": choice,
+                                        },
+                                        5.0,
+                                    ),
+                                )
+                            except Exception as e:
+                                self.nvim.async_call(
+                                    self.nvim.err_write,
+                                    f"Anya: Exception sending confirmation: {e}\n",
+                                )
+
+                        async def _poll_result(global_var: str, timeout: float = 300.0) -> str | None:
+                            """Poll a Neovim global until it becomes non-null."""
+                            start = asyncio.get_event_loop().time()
+                            while asyncio.get_event_loop().time() - start < timeout:
+                                slot = [None]
+
+                                def _read(s=slot, gv=global_var):
+                                    try:
+                                        val = self.nvim.eval(f"get(g:, '{gv}', v:null)")
+                                        if val is not None and val != "v:null" and val != "null":
+                                            s[0] = str(val)
+                                    except Exception:
+                                        pass
+
+                                self.nvim.async_call(_read)
+                                await asyncio.sleep(0.1)
+                                if slot[0] is not None:
+                                    return slot[0]
+                            return None
+
+                        # __input__ sentinel: use vim.ui.input
+                        # Format: "__input__:<default>:<prompt>"
+                        if _prompt.startswith("__input__:"):
+                            rest = _prompt[len("__input__:"):]
+                            colon_idx = rest.find(":")
+                            inp_default = rest[:colon_idx] if colon_idx >= 0 else ""
+                            inp_prompt = rest[colon_idx + 1:] if colon_idx >= 0 else rest
+                            lua_p = inp_prompt.replace('"', '\\"').replace("\n", "\\n")
+                            lua_d = inp_default.replace('"', '\\"')
+
+                            def run_input_ui():
+                                self.nvim.exec_lua(
+                                    f"""
+vim.g.anya_confirmation_result = nil
+vim.ui.input(
+    {{prompt = "{lua_p}", default = "{lua_d}"}},
+    function(val)
+        vim.g.anya_confirmation_result = val or ""
+    end)
+"""
+                                )
+
+                            self.nvim.async_call(run_input_ui)
+                            await asyncio.sleep(0.2)
+                            choice = await _poll_result("anya_confirmation_result") or ""
+                            await _send_choice(choice)
+                            return
+
+                        # Normal select path
                         lua_options = (
                             "{" + ", ".join(f'"{opt}"' for opt in _options) + "}"
                         )
@@ -872,97 +945,12 @@ vim.ui.select({lua_options},
 """
                             )
 
-                        # Schedule the select UI to run on Neovim thread
                         self.nvim.async_call(run_select)
-
-                        # Wait a bit for UI to appear
                         await asyncio.sleep(0.2)
-
-                        # Poll for result (same pattern as exec.py)
-                        start_time = asyncio.get_event_loop().time()
-                        while asyncio.get_event_loop().time() - start_time < 300.0:
-                            result = [None]
-
-                            def get_result():
-                                try:
-                                    val = self.nvim.eval(
-                                        "get(g:, 'anya_confirmation_result', v:null)"
-                                    )
-                                    # Handle v:null - it might be returned as None or as a string
-                                    if (
-                                        val is not None
-                                        and val != "v:null"
-                                        and val != "null"
-                                    ):
-                                        result[0] = val
-                                except Exception:
-                                    pass
-
-                            self.nvim.async_call(get_result)
-                            await asyncio.sleep(0.1)  # Give async_call time to execute
-
-                            if result[0] is not None:
-                                choice = str(result[0])
-                                # Send confirmation response to daemon
-                                self.nvim.async_call(
-                                    self.nvim.out_write,
-                                    f"Anya: Sending confirmation response: {choice}\n",
-                                )
-                                try:
-                                    # Send confirmation response to daemon
-                                    import functools
-
-                                    loop = asyncio.get_event_loop()
-                                    response = await loop.run_in_executor(
-                                        None,
-                                        functools.partial(
-                                            self._confirmation_client.send_request,
-                                            RequestType.TOOL_CONFIRMATION_RESPONSE,
-                                            self.session_id,
-                                            _confirmation_id,
-                                            {
-                                                "confirmation_id": _confirmation_id,
-                                                "choice": choice,
-                                            },
-                                            5.0,
-                                        ),
-                                    )
-                                    self.nvim.async_call(
-                                        self.nvim.out_write,
-                                        f"Anya: Confirmation choice sent: {choice}\n",
-                                    )
-                                except Exception as e:
-                                    self.nvim.async_call(
-                                        self.nvim.err_write,
-                                        f"Anya: Exception sending confirmation: {e}\n",
-                                    )
-                                return
-
-                        # Timeout - send Cancel
-                        self.nvim.async_call(
-                            self.nvim.out_write,
-                            "Anya: Confirmation timed out, sending Cancel\n",
-                        )
-                        try:
-                            import functools
-
-                            loop = asyncio.get_event_loop()
-                            await loop.run_in_executor(
-                                None,
-                                functools.partial(
-                                    self._confirmation_client.send_request,
-                                    RequestType.TOOL_CONFIRMATION_RESPONSE,
-                                    self.session_id,
-                                    _confirmation_id,
-                                    {
-                                        "confirmation_id": _confirmation_id,
-                                        "choice": "Cancel",
-                                    },
-                                    5.0,
-                                ),
-                            )
-                        except Exception:
-                            pass  # Silent fail on timeout
+                        choice = await _poll_result("anya_confirmation_result")
+                        if choice is None:
+                            choice = "Cancel"
+                        await _send_choice(choice)
 
                     # Handle confirmation in background task
                     asyncio.create_task(handle_confirmation())
@@ -1249,6 +1237,7 @@ vim.ui.select({lua_options},
                     exec_command = chunk.data.get("command", "")
                     exec_cwd = chunk.data.get("cwd", "")
                     exec_timeout = chunk.data.get("timeout", 30)
+                    exec_ui_dir = chunk.data.get("ui_dir", "")
 
                     # Use default args to capture values by value, not reference
                     async def handle_exec_request(
@@ -1256,8 +1245,10 @@ vim.ui.select({lua_options},
                         _exec_command=exec_command,
                         _exec_cwd=exec_cwd,
                         _exec_timeout=exec_timeout,
+                        _exec_ui_dir=exec_ui_dir,
                     ):
                         import functools
+                        import glob
                         import json
                         import subprocess
 
@@ -1275,23 +1266,168 @@ vim.ui.select({lua_options},
                                 text=True,
                             )
 
-                            try:
-                                stdout, stderr = process.communicate(
-                                    timeout=_exec_timeout
-                                )
-                                result = {
-                                    "stdout": stdout,
-                                    "stderr": stderr,
-                                    "returncode": process.returncode,
-                                }
-                            except subprocess.TimeoutExpired:
-                                process.kill()
-                                result = {
-                                    "stdout": "",
-                                    "stderr": "",
-                                    "returncode": -1,
-                                    "error": f"Command timed out after {_exec_timeout} seconds",
-                                }
+                            # Poll for process completion while serving UI requests
+                            deadline = asyncio.get_event_loop().time() + _exec_timeout
+                            result = None
+                            while result is None:
+                                poll = process.poll()
+                                if poll is not None:
+                                    stdout = process.stdout.read() if process.stdout else ""
+                                    stderr = process.stderr.read() if process.stderr else ""
+                                    result = {
+                                        "stdout": stdout,
+                                        "stderr": stderr,
+                                        "returncode": process.returncode,
+                                    }
+                                    break
+                                if asyncio.get_event_loop().time() > deadline:
+                                    process.kill()
+                                    result = {
+                                        "stdout": "",
+                                        "stderr": "",
+                                        "returncode": -1,
+                                        "error": f"Command timed out after {_exec_timeout} seconds",
+                                    }
+                                    break
+
+                                # Serve any pending UI requests from the subprocess
+                                if _exec_ui_dir and os.path.isdir(_exec_ui_dir):
+                                    for req_file in glob.glob(
+                                        os.path.join(_exec_ui_dir, "*.request.json")
+                                    ):
+                                        try:
+                                            with open(req_file) as _f:
+                                                req = json.load(_f)
+                                            os.unlink(req_file)
+                                        except Exception:
+                                            continue
+
+                                        req_id = req.get("id", "")
+                                        kind = req.get("kind", "select")
+                                        prompt = req.get("prompt", "")
+                                        resp_file = os.path.join(
+                                            _exec_ui_dir, f"{req_id}.response.json"
+                                        )
+
+                                        ui_result = ""
+                                        try:
+                                            if kind == "select":
+                                                options = req.get("options", [])
+                                                lua_options = (
+                                                    "{"
+                                                    + ", ".join(
+                                                        f'"{o}"' for o in options
+                                                    )
+                                                    + "}"
+                                                )
+                                                lua_prompt = prompt.replace(
+                                                    '"', '\\"'
+                                                ).replace("\n", "\\n")
+                                                _select_result = [None]
+
+                                                def _run_select(
+                                                    _lo=lua_options, _lp=lua_prompt
+                                                ):
+                                                    self.nvim.exec_lua(
+                                                        f"""
+vim.g.anya_ui_result = nil
+vim.ui.select({_lo},
+    {{prompt = "{_lp}"}},
+    function(sel)
+        vim.g.anya_ui_result = sel or "Cancel"
+    end)
+"""
+                                                    )
+
+                                                self.nvim.async_call(_run_select)
+                                                _t0 = asyncio.get_event_loop().time()
+                                                while (
+                                                    asyncio.get_event_loop().time()
+                                                    - _t0
+                                                    < 300.0
+                                                ):
+                                                    def _get_sel():
+                                                        try:
+                                                            v = self.nvim.eval(
+                                                                "get(g:, 'anya_ui_result', v:null)"
+                                                            )
+                                                            if (
+                                                                v is not None
+                                                                and v != "v:null"
+                                                                and v != "null"
+                                                            ):
+                                                                _select_result[0] = str(v)
+                                                        except Exception:
+                                                            pass
+
+                                                    self.nvim.async_call(_get_sel)
+                                                    await asyncio.sleep(0.1)
+                                                    if _select_result[0] is not None:
+                                                        ui_result = _select_result[0]
+                                                        break
+
+                                            elif kind == "input":
+                                                default = req.get("default", "")
+                                                lua_prompt = prompt.replace(
+                                                    '"', '\\"'
+                                                ).replace("\n", "\\n")
+                                                lua_default = default.replace(
+                                                    '"', '\\"'
+                                                )
+                                                _input_result = [None]
+
+                                                def _run_input(
+                                                    _lp=lua_prompt, _ld=lua_default
+                                                ):
+                                                    self.nvim.exec_lua(
+                                                        f"""
+vim.g.anya_ui_result = nil
+vim.ui.input(
+    {{prompt = "{_lp}", default = "{_ld}"}},
+    function(val)
+        vim.g.anya_ui_result = val or ""
+    end)
+"""
+                                                    )
+
+                                                self.nvim.async_call(_run_input)
+                                                _t0 = asyncio.get_event_loop().time()
+                                                while (
+                                                    asyncio.get_event_loop().time()
+                                                    - _t0
+                                                    < 300.0
+                                                ):
+                                                    def _get_inp():
+                                                        try:
+                                                            v = self.nvim.eval(
+                                                                "get(g:, 'anya_ui_result', v:null)"
+                                                            )
+                                                            if (
+                                                                v is not None
+                                                                and v != "v:null"
+                                                                and v != "null"
+                                                            ):
+                                                                _input_result[0] = str(v)
+                                                        except Exception:
+                                                            pass
+
+                                                    self.nvim.async_call(_get_inp)
+                                                    await asyncio.sleep(0.1)
+                                                    if _input_result[0] is not None:
+                                                        ui_result = _input_result[0]
+                                                        break
+
+                                        except Exception:
+                                            ui_result = ""
+
+                                        try:
+                                            with open(resp_file, "w") as _f:
+                                                json.dump({"result": ui_result}, _f)
+                                        except Exception:
+                                            pass
+
+                                await asyncio.sleep(0.05)
+
                         except Exception as e:
                             result = {
                                 "stdout": "",

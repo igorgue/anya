@@ -554,7 +554,7 @@ class RequestHandler:
                     self.logger.error(f"Error waiting for edit confirmation: {e}")
                     return {"action": "failed", "success": False, "message": str(e)}
 
-        async def exec_callback(command: str, cwd: str, timeout: int) -> dict:
+        async def exec_callback(command: str, cwd: str, timeout: int, ui_dir: str | None = None) -> dict:
             """Request command execution on the plugin (user's machine).
 
             Sends the command to the plugin which executes it locally and
@@ -573,6 +573,7 @@ class RequestHandler:
                     "command": command,
                     "cwd": cwd,
                     "timeout": timeout,
+                    "ui_dir": ui_dir or "",
                 },
             )
 

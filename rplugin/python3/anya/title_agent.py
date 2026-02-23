@@ -17,8 +17,11 @@ logger = logging.getLogger("anya.title_agent")
 # Timeout in seconds for the title generation API call
 _API_TIMEOUT = 30.0
 
+# Maximum characters per message to include in title generation prompt
+_MAX_CONTENT_CHARS = 200
 
-def _clean_content(text: str, max_chars: int = 500) -> str:
+
+def _clean_content(text: str) -> str:
     """Strip Anya buffer markers and noise from content before passing to LLM.
 
     Removes:
@@ -31,9 +34,12 @@ def _clean_content(text: str, max_chars: int = 500) -> str:
     # Strip [[tool_name]] tool headers
     text = re.sub(r"\[\[.*?\]\]", "", text)
     # Collapse runs of whitespace / blank lines
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"
+{3,}", "
+
+", text)
     text = text.strip()
-    return text[:max_chars]
+    return text[:_MAX_CONTENT_CHARS]
 
 
 async def generate_title(
@@ -70,15 +76,19 @@ async def generate_title(
         client = AsyncOpenAI(**client_kwargs)
 
         # Clean and truncate both messages
-        user_snippet = _clean_content(user_message, 400)
-        assistant_snippet = _clean_content(assistant_message, 400)
+        user_snippet = _clean_content(user_message)
+        assistant_snippet = _clean_content(assistant_message)
 
         prompt = (
             "Generate a short, descriptive title (maximum 8 words) for this "
             "conversation. Output ONLY the title — no quotes, no trailing "
-            "punctuation, no explanation.\n\n"
-            f"User: {user_snippet}\n"
-            f"Assistant: {assistant_snippet}\n"
+            "punctuation, no explanation.
+
+"
+            f"User: {user_snippet}
+"
+            f"Assistant: {assistant_snippet}
+"
             "Title:"
         )
 
@@ -90,15 +100,18 @@ async def generate_title(
         )
 
         raw = response.choices[0].message.content or ""
-        title = raw.strip().strip("\"'").rstrip(".!?").strip()
+        title = raw.strip().strip(""'").rstrip(".!?").strip()
         return title if title else None
 
     except Exception as e:
         import traceback, os
         log_path = os.path.expanduser("~/.local/share/anya/plugin_errors.log")
         with open(log_path, "a") as f:
-            f.write("\n--- title_agent error ---\n")
+            f.write("
+--- title_agent error ---
+")
             f.write("".join(traceback.format_exception(type(e), e, e.__traceback__)))
-            f.write("---\n")
+            f.write("---
+")
         logger.warning(f"Title generation failed: {e}")
         return None
