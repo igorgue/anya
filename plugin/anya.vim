@@ -18,7 +18,7 @@ function! AnyaComplete(ArgLead, CmdLine, CursorPos)
 
   " Split into parts
   let parts = split(cmdline)
-  let subcommands = ['help', 'open', 'close', 'toggle', 'send', 'tab', 'pane', 'history']
+  let subcommands = ['daemon', 'help', 'open', 'close', 'toggle', 'send', 'tab', 'pane', 'history']
 
   " If no arguments yet or we're completing the first subcommand
   if len(parts) <= 1 || (len(parts) == 1 && a:ArgLead != '')
@@ -28,6 +28,16 @@ function! AnyaComplete(ArgLead, CmdLine, CursorPos)
   " Complete subcommand arguments
   if len(parts) >= 1
     let first_cmd = parts[0]
+
+    " Complete actions for 'daemon' subcommand
+    if first_cmd ==# 'daemon'
+      let daemon_cmds = ['status', 'start', 'stop', 'restart']
+      if len(parts) == 1 || (len(parts) == 2 && a:ArgLead != '')
+        return filter(copy(daemon_cmds), 'v:val =~# "^" . a:ArgLead')
+      elseif len(parts) == 2 && a:ArgLead == ''
+        return daemon_cmds
+      endif
+    endif
 
     " Complete directions for 'pane' subcommand
     if first_cmd ==# 'pane' && len(parts) == 2 && a:ArgLead != ''
