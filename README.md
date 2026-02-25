@@ -5,54 +5,120 @@ A persistent Neovim AI assistant with multi-conversation support, built on OpenA
 ## Features
 
 - **Persistent Conversations**: Conversations survive Neovim restarts via SQLite storage
-- **Multi-Layout Support**: Toggle between replace, pane, tab, and split layouts
+- **Multi-Layout Support**: Toggle between replace, pane, and tab layouts
 - **Streaming Output**: Real-time LLM responses with animated text rendering
 - **Prompt History**: Cycle through previous prompts with `<C-p>` and `<C-n>`
-- **Context Awareness**: Automatic inclusion of selected code and file references
+- **Context Awareness**: Automatic inclusion of selected code and `@file` references
 - **Conversation Browser**: Browse and load previous conversations with `:Anya history`
-- **Intelligent Code Awareness**: File editing, searching, and execution tools
-- **Modular Architecture**: Extensible agent and tool system in both Python and Lua
+- **Intelligent Code Tools**: File editing, searching, and execution with confirmation flow
+- **OpenRouter & Custom Providers**: Drop-in support for any OpenAI-compatible API
+- **MCP Tools**: Optional external tool access via Model Context Protocol
+
+## Requirements
+
+- Neovim 0.10+
+- Python 3.13+
+- An OpenAI API key (or compatible provider key)
+
+## Optional Neovim plugins
+
+These are not required, but enhance the experience:
+
+| Plugin | Purpose |
+|--------|---------|
+| [blink.cmp](https://github.com/Saghen/blink.cmp) | Autocompletion for `@file` references and `/commands` in the prompt buffer |
+| [snacks.nvim](https://github.com/folke/snacks.nvim) | Powers the `:Anya history` conversation picker |
 
 ## Installation
 
-```vim
-Plug 'igorkav/anya'  " using vim-plug
+### lazy.nvim
+
+```lua
+{
+  "igorkav/anya",
+  build = "pip install -r requirements.txt",
+  config = function()
+    require("anya").setup({
+      start_in_insert = true, -- Enter insert mode when opening the prompt
+    })
+  end,
+}
 ```
 
-### Requirements
+### vim-plug
 
-**Python:** 3.13+
+```vim
+Plug 'igorkav/anya'
+```
 
-**Required packages:**
-- `pynvim`
-- `openai`
-- `openai-agents`
-- `hashids`
-- `pyzmq`
-- `cbor2`
+Then install Python dependencies manually:
 
-**Optional for advanced features:**
-- `snacks.nvim`
-- `img-clip.nvim`
-- `blink.cmp`
-
-Install Python dependencies:
 ```bash
+cd ~/.local/share/nvim/plugged/anya  # or wherever vim-plug installs it
 pip install -r requirements.txt
 ```
 
+After installing, register the remote plugin once:
+
+```
+:UpdateRemotePlugins
+```
+
+Then restart Neovim.
+
+## Configuration
+
 ### Environment Variables
+
+Set these before launching Neovim (e.g. in your shell profile):
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `OPENAI_API_KEY` | (required) | LLM access |
-| `ANYA_MODEL` | gpt-4.1 | Default LLM |
-| `ANYA_API_KEY` | (unset) | Override API key (for OpenRouter, etc.) |
-| `ANYA_API_BASE` | (unset) | Custom API endpoint |
-| `ANYA_API_TYPE` | responses | API type: "responses" or "chat_completions" |
-| `ANYA_THINKING_BUDGET` | (unset) | Reasoning effort for model |
-| `ANYA_DISABLE_MCP` | "0" | Disable MCP agent/tools |
-| `ANYA_YOLO` | "" | Approve all edits automatically |
+| `OPENAI_API_KEY` | (required) | Your OpenAI API key |
+| `ANYA_MODEL` | `gpt-4.1` | Model to use |
+| `ANYA_API_KEY` | — | Override API key (e.g. for OpenRouter) |
+| `ANYA_API_BASE` | — | Custom API base URL |
+| `ANYA_API_TYPE` | `responses` | API type: `responses` or `chat_completions` |
+| `ANYA_THINKING_BUDGET` | — | Reasoning effort hint for supported models |
+| `ANYA_DISABLE_MCP` | `0` | Set to `1` to disable MCP tools |
+| `ANYA_YOLO` | — | Set to `true` to auto-apply all file edits |
+
+### OpenRouter
+
+```bash
+export ANYA_API_TYPE=chat_completions
+export ANYA_API_KEY="sk-or-..."
+export ANYA_MODEL="anthropic/claude-opus-4-5"
+nvim
+```
+
+Any model name containing `/` or `:` is automatically routed through
+`https://openrouter.ai/api/v1`. You can also point `ANYA_API_BASE` at any
+other OpenAI-compatible endpoint.
+
+### Lua setup options
+
+```lua
+require("anya").setup({
+  start_in_insert = true, -- Auto-enter insert mode when prompt opens (default: false)
+})
+```
+
+## Terminal alias
+
+For quick access from the terminal, add this alias to your `~/.zshrc` or `~/.bashrc`:
+
+```bash
+alias anya="nvim +Anya"
+```
+
+Then reload your shell:
+
+```bash
+source ~/.zshrc  # or source ~/.bashrc
+```
+
+Now you can open Anya directly by typing `anya` in your terminal.
 
 ## Usage
 
@@ -60,165 +126,113 @@ pip install -r requirements.txt
 
 | Command | Description |
 |---------|-------------|
-| `:Anya` | Toggle Anya UI |
+| `:Anya` | Toggle Anya UI (reopens last layout) |
 | `:Anya open` | Open Anya UI |
-| `:Anya pane` | Open in side pane layout |
-| `:Anya tab` | Open in tab layout |
-| `:Anya send <text>` | Send text without opening UI |
-| `:Anya history` | Open conversation history picker |
+| `:Anya close` | Close Anya UI |
+| `:Anya tab` | Open in a new tab |
+| `:Anya pane [right\|left]` | Open as a side pane |
+| `:Anya send <text>` | Send a message without opening the UI |
+| `:Anya cancel` | Cancel the current in-progress response |
+| `:Anya history` | Open the conversation history picker |
+| `:Anya daemon start` | Start the background daemon manually |
+| `:Anya daemon stop` | Stop the background daemon |
+| `:Anya daemon status` | Show daemon status |
+| `:Anya help` | Show help text |
 
-### Basic Workflow
+The daemon starts automatically when Neovim loads the plugin — you normally
+don't need to manage it manually.
+
+### Basic workflow
 
 1. Run `:Anya` to open the chat interface
-2. Type your message in the bottom prompt window
-3. Press `Enter` to send
+2. Type your message in the prompt window at the bottom
+3. Press `<CR>` to send
 
-### Keymaps (in prompt buffer)
+### Prompt buffer keymaps
 
 | Key | Mode | Action |
 |-----|------|--------|
-| `<CR>` | Normal | Send message |
-| `<CR>` | Insert | Exit insert mode and send message |
-| `<C-p>` | Normal/Insert | Navigate to previous (older) prompt in history |
-| `<C-n>` | Normal/Insert | Navigate to next (newer) prompt in history |
-| `<C-j>` | Normal/Insert | Insert blank line |
-| `<C-k>` | Normal/Insert | Focus chat window |
-| `<C-Up>` / `<C-Down>` | Normal/Insert | Increase/decrease prompt height |
-| `<C-Left>` / `<C-Right>` | Normal/Insert | Resize side pane (pane layout) |
-| `<Tab>` | Normal | Toggle focus between chat and prompt |
+| `<CR>` | Normal / Insert | Send message |
+| `<C-p>` | Normal / Insert | Previous prompt in history |
+| `<C-n>` | Normal / Insert | Next prompt in history |
+| `<C-j>` | Normal / Insert | Insert blank line |
+| `<C-k>` | Normal / Insert | Focus chat window |
+| `<Tab>` | Normal | Toggle focus to chat window |
+| `<C-Up>` / `<C-Down>` | Normal / Insert | Increase / decrease prompt height |
+| `<C-Left>` / `<C-Right>` | Normal / Insert | Resize side pane (pane layout) |
+| `<C-a>` / `<C-e>` | Normal / Insert | Jump to start / end of line |
+| `<C-u>` | Normal / Insert | Delete whole line |
 
-### Conversation History
+### Chat buffer keymaps
 
-Conversations are automatically saved to a SQLite database at `~/.local/share/anya/conversations.db`.
+| Key | Mode | Action |
+|-----|------|--------|
+| `<CR>` | Normal | Open code block / tool output, or toggle fold |
+| `<Space>` | Normal | Open code block or tool output |
+| `<Tab>` | Normal | Toggle focus to prompt window |
+| `<C-c>` | Normal | Cancel current response |
+| `]]` / `[[` | Normal | Jump to next / previous message header |
+| `<localleader>y` | Normal | Toggle YOLO mode (auto-apply edits) |
+| `<localleader>h` | Normal | Open conversation history |
+| `<C-j>` | Normal | Focus prompt window |
 
-Use `:Anya history` to browse and load previous conversations (requires `snacks.nvim`).
+### File references and slash commands
 
-### Prompt History
+In either buffer you can use:
 
-Previously sent prompts are automatically saved and can be cycled through using:
+- **`@path/to/file`** — include a file's contents in your message
+- **`/command`** — run a built-in slash command (e.g. `/review`, `/plan`)
 
-- `<C-p>` (Previous) - Go to older prompts
-- `<C-n>` (Next) - Go to newer prompts
-- Pressing `<CR>` or typing stops navigation and starts a new prompt
+Both are highlighted automatically.
 
-History is stored at `~/.local/share/anya/prompt_history.txt`.
+### Edit confirmation flow
 
-## Architecture
+When Anya proposes a file change, a folded block appears in the chat buffer
+showing the diff. You are prompted to:
 
-> How many programmers does it take to change a light bulb? None, that's a hardware problem!
+- **Apply** — write the change to disk
+- **Reject** — discard the change
 
-### Buffer Types
+All edit states (pending / applied / rejected) persist across restarts.
+Set `ANYA_YOLO=true` to skip confirmation and apply all edits automatically.
 
-- **anya-chat**: Main chat buffer displaying conversation history
-- **anya-prompt**: Input buffer for typing messages
+## Conversation history
 
-### Data Flow
+Conversations are saved to `~/.local/share/anya/conversations.db`.
 
-1. User types message → Prompt buffer
-2. Press `<CR>` → Message sent via ZeroMQ to daemon
-3. Daemon processes with agent (OpenAI) → Streams response back
-4. Lua handles streaming → Animated rendering in chat buffer
-5. All events persisted to SQLite database
-
-### Tool System
-
-Anya includes intelligent tools for code interaction:
-
-- `read_file`, `edit`, `replace_file` - File operations
-- `search_code` - Search codebase with ripgrep
-- `exec`, `exec_lua` - Run shell/Lua commands
-- `gh` - GitHub CLI integration
-- And more (MCP tools for external APIs)
-
-### Edit Tool Workflow
-
-The `edit` tool provides interactive, confirmation-based file editing:
-
-1. **Agent proposes changes**: When the agent needs to edit a file, it generates SEARCH/REPLACE blocks
-2. **Marker creation**: Edit markers are embedded in the chat buffer as hidden HTML comments, tracking:
-   - Pending edits (waiting for your approval)
-   - Applied edits (changes successfully written)
-   - Rejected edits (changes you declined)
-   - Failed edits (errors occurred during application)
-3. **Folded preview**: Proposed edits appear as folded blocks in the chat buffer
-4. **User confirmation**: You're prompted to:
-   - **Apply** the changes to the file
-   - **Reject** the changes entirely
-5. **State persistence**: All edit states (pending/applied/rejected) persist across restarts via markers
-
-This approach ensures:
-- **Safety**: No changes without explicit approval
-- **Replayability**: Complete history of proposed and actual changes
-- **Crash recovery**: Edit state can be recovered from buffer markers alone
-
-**Auto-approval**: Set `ANYA_YOLO` environment variable to automatically apply all edits without confirmation.
-
-## Configuration
-
-```lua
--- Lazy.nvim example
-{
-  'igorkav/anya',
-  config = function()
-    require('anya').setup({
-      start_in_insert = true,  -- Enter insert mode when opening prompt
-    })
-  end
-}
-```
-
-## Development
-
-See [AGENTS.md](AGENTS.md) for detailed documentation on the agent system, marker format, and architecture.
-
-### Project Structure
-
-```
-anya/
-├── rplugin/python3/anya/
-│   ├── plugin.py          # Main Neovim plugin
-│   ├── server/            # Daemon process
-│   ├── db.py              # SQLite database
-│   ├── buffers.py         # Window/buffer management
-│   ├── history.py         # Python history integration
-│   └── tools/             # Modular tool system
-├── lua/anya/
-│   ├── init.lua           # Public API
-│   ├── history.lua        # Prompt history management
-│   ├── conversation.lua    # Message sending logic
-│   ├── text.lua           # Streaming animation
-│   └── markers.lua        # Marker handling
-└── prompts/               # System prompt templates
-```
-
-### Testing History Navigation
-
-After installation, you can test the prompt history:
-
-1. Open Anya with `:Anya`
-2. Type a message and press `<CR>` to send it
-3. Send another different message
-4. In the prompt buffer, press `<C-p>` to cycle back to previous prompts
-5. Press `<C-n>` to cycle forward
-6. Start typing to exit navigation mode and compose a new message
+Use `:Anya history` to browse and reload previous conversations.
+This requires [snacks.nvim](https://github.com/folke/snacks.nvim).
 
 ## Troubleshooting
 
-**Daemon not running?**
+**Daemon not starting?**
+
 ```bash
-python -m anya.server.main -f  # Start daemon in foreground
+# Start manually in the foreground to see errors
+python -m anya.server.main --foreground
 ```
 
-**Streaming issues?**
-Check logs at `~/.local/share/anya/daemon.log`
+**Plugin not loading after install?**
 
-**Missing prompts after restart?**
-Prompts are saved to `~/.local/share/anya/prompt_history.txt`
+Make sure you ran `:UpdateRemotePlugins` and restarted Neovim.
+
+**Streaming issues or errors?**
+
+Check the log:
+```bash
+tail -f ~/.local/share/anya/daemon.log
+```
+
+**Commands not found?**
+
+Confirm the Python dependencies are installed in the same environment Neovim
+uses. Run `:checkhealth provider` to verify.
+
+## Architecture
+
+See [AGENTS.md](AGENTS.md) for a full technical reference covering the agent
+system, daemon design, IPC protocol, marker format, and tool extensibility.
 
 ## License
 
-MIT
-
----
-
-Made with love by the Anya community
+TBD

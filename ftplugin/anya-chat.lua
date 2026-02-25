@@ -112,7 +112,6 @@ local function highlight_refs()
       pos = end_col + 1
     end
 
-
     -- Find /commands (simpler check without tracking ranges)
     pos = 1
     while true do

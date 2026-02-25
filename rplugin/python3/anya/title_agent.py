@@ -34,10 +34,7 @@ def _clean_content(text: str) -> str:
     # Strip [[tool_name]] tool headers
     text = re.sub(r"\[\[.*?\]\]", "", text)
     # Collapse runs of whitespace / blank lines
-    text = re.sub(r"
-{3,}", "
-
-", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     text = text.strip()
     return text[:_MAX_CONTENT_CHARS]
 
@@ -81,14 +78,10 @@ async def generate_title(
 
         prompt = (
             "Generate a short, descriptive title (maximum 8 words) for this "
-            "conversation. Output ONLY the title — no quotes, no trailing "
-            "punctuation, no explanation.
-
-"
-            f"User: {user_snippet}
-"
-            f"Assistant: {assistant_snippet}
-"
+            "conversation. Output ONLY the title \u2014 no quotes, no trailing "
+            "punctuation, no explanation.\n\n"
+            f"User: {user_snippet}\n"
+            f"Assistant: {assistant_snippet}\n"
             "Title:"
         )
 
@@ -100,18 +93,16 @@ async def generate_title(
         )
 
         raw = response.choices[0].message.content or ""
-        title = raw.strip().strip(""'").rstrip(".!?").strip()
+        title = raw.strip().strip("\u201c\u201d'").rstrip(".!?").strip()
         return title if title else None
 
     except Exception as e:
         import traceback, os
+
         log_path = os.path.expanduser("~/.local/share/anya/plugin_errors.log")
         with open(log_path, "a") as f:
-            f.write("
---- title_agent error ---
-")
+            f.write("\n--- title_agent error ---\n")
             f.write("".join(traceback.format_exception(type(e), e, e.__traceback__)))
-            f.write("---
-")
+            f.write("---\n")
         logger.warning(f"Title generation failed: {e}")
         return None

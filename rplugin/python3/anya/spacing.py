@@ -241,10 +241,7 @@ class SpacingManager:
                 for marker in marker_list:
                     if marker == "fold_end":
                         is_fold_end = True
-                    if (
-                        marker.startswith("fold_")
-                        or marker.startswith("tool_")
-                    ):
+                    if marker.startswith("fold_") or marker.startswith("tool_"):
                         is_tool_marker = True
                         break
 

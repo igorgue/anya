@@ -48,7 +48,7 @@ class TokenUsage:
     @property
     def context_tokens(self) -> int:
         """Tokens that count toward context window (input + cache.read).
-        
+
         Note: Output tokens don't consume context - they're generated from it.
         """
         return self.input + self.cache_read
@@ -228,14 +228,14 @@ def calculate_context_usage(
 
     Returns:
         Tuple of (percentage, context_window, usable_context, is_overflow)
-        
+
         - percentage: context_tokens / usable_context * 100
         - context_window: full context window size
         - usable_context: context_window - max_output_tokens
         - is_overflow: whether context_tokens exceeds usable_context
     """
     context_window = get_context_window(model)
-    
+
     # Usable context is the portion available for input
     # (reserve space for model output)
     usable_context = context_window - DEFAULT_MAX_OUTPUT

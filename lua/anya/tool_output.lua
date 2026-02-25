@@ -112,7 +112,7 @@ end
 --- @param title string The code title (used in [[title]] reference)
 local function retry_code_with_anya(buf, title)
   local content = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-  local prompt = string.format('Retry this code [[%s]]:\n\n```python\n%s\n```', title, content)
+  local prompt = string.format("Retry this code [[%s]]:\n\n```python\n%s\n```", title, content)
 
   -- Find the prompt buffer
   local prompt_buf = nil
@@ -153,7 +153,9 @@ function M.open_code_at_cursor(override_line, override_col)
   local pos = 1
   while true do
     local s, e, title = line:find("%[%[(.-)%]%]", pos)
-    if not s then break end
+    if not s then
+      break
+    end
     if col >= s and col <= e then
       best_title = title
       break

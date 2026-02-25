@@ -61,7 +61,7 @@ def get_libs_prompt() -> str:
             lines.append(mod_doc)
             lines.append("")
             continue
-        
+
         # Use first line of module docstring as summary
         summary = mod_doc.splitlines()[0] if mod_doc else "No description."
         lines.append(f"### `from anya.libs import {mod_name}`")

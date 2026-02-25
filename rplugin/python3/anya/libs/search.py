@@ -90,6 +90,7 @@ def web(
             # Brave may return gzip-encoded content even without explicit Accept-Encoding
             if resp.headers.get("Content-Encoding") == "gzip":
                 import gzip
+
                 raw = gzip.decompress(raw)
             data = json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as e:
@@ -161,6 +162,7 @@ def news(
             raw = resp.read()
             if resp.headers.get("Content-Encoding") == "gzip":
                 import gzip
+
                 raw = gzip.decompress(raw)
             data = json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as e:

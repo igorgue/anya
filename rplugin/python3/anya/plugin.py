@@ -86,17 +86,26 @@ class AnyaPlugin:
 
         def exception_handler(loop, context):
             import traceback
+
             msg = context.get("message", "")
             exc = context.get("exception")
             task = context.get("future")
-            with open(os.path.expanduser("~/.local/share/anya/plugin_errors.log"), "a") as f:
+            with open(
+                os.path.expanduser("~/.local/share/anya/plugin_errors.log"), "a"
+            ) as f:
                 f.write(f"\n--- Unhandled exception in event loop ---\n")
                 f.write(f"Message: {msg}\n")
                 if task:
                     f.write(f"Task: {task}\n")
                 if exc:
                     f.write(f"Exception: {exc}\n")
-                    f.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+                    f.write(
+                        "".join(
+                            traceback.format_exception(
+                                type(exc), exc, exc.__traceback__
+                            )
+                        )
+                    )
                 f.write(f"---\n")
 
         self._loop.set_exception_handler(exception_handler)
@@ -467,14 +476,21 @@ class AnyaPlugin:
         self._request_cancelled = False  # Reset cancellation flag for new request
         self._current_task = asyncio.run_coroutine_threadsafe(
             self._run_agent_via_daemon(
-                text, conversation_id, chat_buf.number, request_id,
+                text,
+                conversation_id,
+                chat_buf.number,
+                request_id,
                 is_new_conversation=is_new_conversation,
             ),
             loop,
         )
 
     async def _run_agent_via_daemon(
-        self, text, conversation_id, chat_bufnr, request_id,
+        self,
+        text,
+        conversation_id,
+        chat_bufnr,
+        request_id,
         is_new_conversation=False,
     ):
         """Run the agent via the daemon and handle streaming responses."""
@@ -878,7 +894,9 @@ class AnyaPlugin:
                                     f"Anya: Exception sending confirmation: {e}\n",
                                 )
 
-                        async def _poll_result(global_var: str, timeout: float = 300.0) -> str | None:
+                        async def _poll_result(
+                            global_var: str, timeout: float = 300.0
+                        ) -> str | None:
                             """Poll a Neovim global until it becomes non-null."""
                             start = asyncio.get_event_loop().time()
                             while asyncio.get_event_loop().time() - start < timeout:
@@ -887,7 +905,11 @@ class AnyaPlugin:
                                 def _read(s=slot, gv=global_var):
                                     try:
                                         val = self.nvim.eval(f"get(g:, '{gv}', v:null)")
-                                        if val is not None and val != "v:null" and val != "null":
+                                        if (
+                                            val is not None
+                                            and val != "v:null"
+                                            and val != "null"
+                                        ):
                                             s[0] = str(val)
                                     except Exception:
                                         pass
@@ -901,10 +923,12 @@ class AnyaPlugin:
                         # __input__ sentinel: use vim.ui.input
                         # Format: "__input__:<default>:<prompt>"
                         if _prompt.startswith("__input__:"):
-                            rest = _prompt[len("__input__:"):]
+                            rest = _prompt[len("__input__:") :]
                             colon_idx = rest.find(":")
                             inp_default = rest[:colon_idx] if colon_idx >= 0 else ""
-                            inp_prompt = rest[colon_idx + 1:] if colon_idx >= 0 else rest
+                            inp_prompt = (
+                                rest[colon_idx + 1 :] if colon_idx >= 0 else rest
+                            )
                             lua_p = inp_prompt.replace('"', '\\"').replace("\n", "\\n")
                             lua_d = inp_default.replace('"', '\\"')
 
@@ -922,7 +946,9 @@ vim.ui.input(
 
                             self.nvim.async_call(run_input_ui)
                             await asyncio.sleep(0.2)
-                            choice = await _poll_result("anya_confirmation_result") or ""
+                            choice = (
+                                await _poll_result("anya_confirmation_result") or ""
+                            )
                             await _send_choice(choice)
                             return
 
@@ -995,8 +1021,12 @@ vim.ui.select({lua_options},
                             while result is None:
                                 poll = process.poll()
                                 if poll is not None:
-                                    stdout = process.stdout.read() if process.stdout else ""
-                                    stderr = process.stderr.read() if process.stderr else ""
+                                    stdout = (
+                                        process.stdout.read() if process.stdout else ""
+                                    )
+                                    stderr = (
+                                        process.stderr.read() if process.stderr else ""
+                                    )
                                     result = {
                                         "stdout": stdout,
                                         "stderr": stderr,
@@ -1069,6 +1099,7 @@ vim.ui.select({_lo},
                                                     - _t0
                                                     < 300.0
                                                 ):
+
                                                     def _get_sel():
                                                         try:
                                                             v = self.nvim.eval(
@@ -1079,7 +1110,9 @@ vim.ui.select({_lo},
                                                                 and v != "v:null"
                                                                 and v != "null"
                                                             ):
-                                                                _select_result[0] = str(v)
+                                                                _select_result[0] = str(
+                                                                    v
+                                                                )
                                                         except Exception:
                                                             pass
 
@@ -1120,6 +1153,7 @@ vim.ui.input(
                                                     - _t0
                                                     < 300.0
                                                 ):
+
                                                     def _get_inp():
                                                         try:
                                                             v = self.nvim.eval(
@@ -1130,7 +1164,9 @@ vim.ui.input(
                                                                 and v != "v:null"
                                                                 and v != "null"
                                                             ):
-                                                                _input_result[0] = str(v)
+                                                                _input_result[0] = str(
+                                                                    v
+                                                                )
                                                         except Exception:
                                                             pass
 
@@ -1283,7 +1319,9 @@ vim.ui.input(
                     )
                 except Exception as e:
                     try:
-                        self.nvim.err_write(f"Error saving cancelled message to DB: {e}\n")
+                        self.nvim.err_write(
+                            f"Error saving cancelled message to DB: {e}\n"
+                        )
                     except Exception:
                         pass
 
@@ -1303,7 +1341,9 @@ vim.ui.input(
             # Wrap callbacks with error handling
             def _safe_append_error():
                 try:
-                    ui.append_to_chat_buffer(self.nvim, chat_bufnr, f"\n\n**Error:** {e}\n")
+                    ui.append_to_chat_buffer(
+                        self.nvim, chat_bufnr, f"\n\n**Error:** {e}\n"
+                    )
                 except Exception:
                     pass
 
@@ -1371,6 +1411,7 @@ vim.ui.input(
         try:
             loop = asyncio.get_event_loop()
             import functools
+
             await loop.run_in_executor(
                 None,
                 functools.partial(
@@ -1637,7 +1678,8 @@ vim.ui.input(
 
             now = datetime.now(timezone.utc)
             timestamp = (
-                now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+                now.strftime("%Y-%m-%dT%H:%M:%S.")
+                + f"{int(now.microsecond / 1000):03d}Z"
             )
 
             # Use existing conversation ID or generate new one
@@ -1691,12 +1733,17 @@ vim.ui.input(
             }
         except Exception as e:
             import traceback
+
             self.nvim.err_write(f"AnyaSend error: {e}\n")
             # Log to file for debugging
             try:
-                with open(os.path.expanduser("~/.local/share/anya/plugin_errors.log"), "a") as f:
+                with open(
+                    os.path.expanduser("~/.local/share/anya/plugin_errors.log"), "a"
+                ) as f:
                     f.write(f"\n--- AnyaSend exception ---\n")
-                    f.write("".join(traceback.format_exception(type(e), e, e.__traceback__)))
+                    f.write(
+                        "".join(traceback.format_exception(type(e), e, e.__traceback__))
+                    )
                     f.write(f"---\n")
             except Exception:
                 pass

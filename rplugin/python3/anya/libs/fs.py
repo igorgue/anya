@@ -99,10 +99,12 @@ def read_file(path_with_range: str, cwd: str | None = None) -> str:
     )
 
     if is_truncated:
-        display_path = path_with_range.split("@")[0] if "@" in path_with_range else path_with_range
+        display_path = (
+            path_with_range.split("@")[0] if "@" in path_with_range else path_with_range
+        )
         header += (
             f"[FILE TOO LARGE] File has {total_lines} lines total, showing lines {actual_start}-{actual_end}.\n"
-            f"  READ THE FULL FILE: fs.read_file(\'{display_path}@start-end\') to get all {total_lines} lines.\n"
+            f"  READ THE FULL FILE: fs.read_file('{display_path}@start-end') to get all {total_lines} lines.\n"
             f"  Or use specific ranges: @{actual_end + 1}-{min(actual_end + 300, total_lines)} (next 300)\n"
         )
 
@@ -180,7 +182,9 @@ def create_file(path: str, content: str = "", cwd: str | None = None) -> str:
         path = os.path.join(cwd or os.getcwd(), path)
 
     if os.path.exists(path):
-        raise FileExistsError(f"File already exists: {path}. Use write_file() to overwrite.")
+        raise FileExistsError(
+            f"File already exists: {path}. Use write_file() to overwrite."
+        )
 
     parent = os.path.dirname(path)
     if parent:
@@ -237,7 +241,9 @@ def list_files(path: str = ".", max_results: int = 200, cwd: str | None = None) 
     return "\n".join(found)
 
 
-def search_code(query: str, path: str | None = None, max_chars: int = 4000, cwd: str | None = None) -> str:
+def search_code(
+    query: str, path: str | None = None, max_chars: int = 4000, cwd: str | None = None
+) -> str:
     """Search files for a string using ripgrep (or grep as fallback).
 
     Args:

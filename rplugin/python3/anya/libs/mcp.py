@@ -79,8 +79,10 @@ def _build_doc() -> str:
         else:
             lines.append(f"  (run `mcp.list_tools('{name}')` to discover tools)")
         lines.append("")
-    
-    lines.append("When tools are listed above with descriptions, call them directly using `mcp.call(server, tool_name, arguments)`. Only use `mcp.list_tools` if you need to discover tools not shown or need full parameter schemas.")
+
+    lines.append(
+        "When tools are listed above with descriptions, call them directly using `mcp.call(server, tool_name, arguments)`. Only use `mcp.list_tools` if you need to discover tools not shown or need full parameter schemas."
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -101,9 +103,7 @@ def _get_config(server_name: str) -> dict:
         if c.get("name") == server_name:
             return c
     available = ", ".join(_SERVER_NAMES) or "none"
-    raise MCPError(
-        f"MCP server '{server_name}' not found. Available: {available}"
-    )
+    raise MCPError(f"MCP server '{server_name}' not found. Available: {available}")
 
 
 def _format_result(result: Any) -> str:
@@ -158,19 +158,23 @@ class _StdioSession:
 
         # MCP handshake
         init_id = self._next_id()
-        self._send({
-            "jsonrpc": "2.0",
-            "id": init_id,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "anya-libs", "version": "1.0"},
-            },
-        })
+        self._send(
+            {
+                "jsonrpc": "2.0",
+                "id": init_id,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "anya-libs", "version": "1.0"},
+                },
+            }
+        )
         self._recv(init_id, timeout=15)
         # Notify server that we're ready
-        self._send({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+        self._send(
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
+        )
         return self
 
     def __exit__(self, *_):
@@ -233,18 +237,22 @@ class _StdioSession:
 
     def list_tools(self) -> list[dict]:
         req_id = self._next_id()
-        self._send({"jsonrpc": "2.0", "id": req_id, "method": "tools/list", "params": {}})
+        self._send(
+            {"jsonrpc": "2.0", "id": req_id, "method": "tools/list", "params": {}}
+        )
         result = self._recv(req_id)
         return (result or {}).get("tools", [])
 
     def call_tool(self, tool_name: str, arguments: dict) -> Any:
         req_id = self._next_id()
-        self._send({
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "method": "tools/call",
-            "params": {"name": tool_name, "arguments": arguments},
-        })
+        self._send(
+            {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "method": "tools/call",
+                "params": {"name": tool_name, "arguments": arguments},
+            }
+        )
         return self._recv(req_id, timeout=60)
 
 
@@ -279,12 +287,14 @@ class _HttpSession:
 
     def _rpc(self, method: str, params: dict, timeout: int = 30) -> Any:
         req_id = self._next_id()
-        body = json.dumps({
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "method": method,
-            "params": params,
-        }).encode()
+        body = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "method": method,
+                "params": params,
+            }
+        ).encode()
         req = urllib.request.Request(
             self._url, data=body, headers=self._headers, method="POST"
         )

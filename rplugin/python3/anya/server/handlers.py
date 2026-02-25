@@ -293,8 +293,12 @@ class RequestHandler:
                 api_key = settings.api_key
             else:
                 model = os.environ.get("ANYA_MODEL", "gpt-4.1")
-                base_url = os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE")
-                api_key = os.environ.get("ANYA_API_KEY") or os.environ.get("OPENAI_API_KEY")
+                base_url = os.environ.get("ANYA_API_BASE") or os.environ.get(
+                    "OPENAI_API_BASE"
+                )
+                api_key = os.environ.get("ANYA_API_KEY") or os.environ.get(
+                    "OPENAI_API_KEY"
+                )
 
             if not base_url and model and "/" in model:
                 base_url = "https://openrouter.ai/api/v1"
@@ -495,7 +499,9 @@ class RequestHandler:
                 self.logger.error(f"Error waiting for confirmation: {e}")
                 return "Cancel"
 
-        async def exec_callback(command: str, cwd: str, timeout: int, ui_dir: str | None = None) -> dict:
+        async def exec_callback(
+            command: str, cwd: str, timeout: int, ui_dir: str | None = None
+        ) -> dict:
             """Request command execution on the plugin (user's machine).
 
             Sends the command to the plugin which executes it locally and
@@ -559,7 +565,6 @@ class RequestHandler:
             allowed_commands=set(nvim_context.allowed_commands),
             yolo_mode=nvim_context.yolo_mode,
             confirmation_callback=confirmation_callback,
-
             exec_callback=exec_callback,
             cwd=nvim_context.cwd,
             current_buffer=nvim_context.current_buffer,

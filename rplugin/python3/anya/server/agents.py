@@ -185,6 +185,7 @@ class AgentManager:
         if not self._pub_socket:
             return
         from ..protocol import StreamChunk
+
         chunk = StreamChunk(
             request_id="system",
             session_id="system",
@@ -226,8 +227,18 @@ class AgentManager:
                 async with server:
                     tools = await server.list_tools()
                     tool_results[name] = [
-                        {"name": getattr(t, "name", t.get("name", "") if isinstance(t, dict) else ""),
-                         "description": getattr(t, "description", t.get("description", "") if isinstance(t, dict) else "")}
+                        {
+                            "name": getattr(
+                                t,
+                                "name",
+                                t.get("name", "") if isinstance(t, dict) else "",
+                            ),
+                            "description": getattr(
+                                t,
+                                "description",
+                                t.get("description", "") if isinstance(t, dict) else "",
+                            ),
+                        }
                         for t in (tools or [])
                     ]
                     await self._emit_system_event(
@@ -250,7 +261,10 @@ class AgentManager:
         if tool_results:
             import json
             from pathlib import Path
-            cache_path = Path.home() / ".local" / "share" / "anya" / "mcp_tools_cache.json"
+
+            cache_path = (
+                Path.home() / ".local" / "share" / "anya" / "mcp_tools_cache.json"
+            )
             try:
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(cache_path, "w") as f:
@@ -262,7 +276,9 @@ class AgentManager:
             StreamEventType.MCP_INIT_COMPLETE,
             {"success": True, "servers": ready},
         )
-        self.logger.info(f"MCP probe complete: {len(ready)}/{len(servers)} servers ready")
+        self.logger.info(
+            f"MCP probe complete: {len(ready)}/{len(servers)} servers ready"
+        )
 
     async def get_status(self) -> dict:
         """Get the status of the agent manager."""

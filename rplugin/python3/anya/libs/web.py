@@ -37,6 +37,7 @@ def _html_to_markdown(html: str) -> str:
     """Convert HTML to markdown, using html2text if available, otherwise basic stripping."""
     try:
         import html2text  # type: ignore
+
         h = html2text.HTML2Text()
         h.ignore_links = False
         h.ignore_images = True
@@ -46,10 +47,14 @@ def _html_to_markdown(html: str) -> str:
         pass
 
     # Basic fallback: strip tags, decode common entities
-    text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(
+        r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE
+    )
     text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
     # Convert common block elements to newlines
-    text = re.sub(r"<(br|/p|/div|/li|/h[1-6]|/tr)[^>]*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"<(br|/p|/div|/li|/h[1-6]|/tr)[^>]*>", "\n", text, flags=re.IGNORECASE
+    )
     text = re.sub(r"<[^>]+>", "", text)
     # Decode basic HTML entities
     text = (
@@ -121,5 +126,6 @@ def fetch_json(url: str, timeout: int = _DEFAULT_TIMEOUT) -> object:
         Parsed JSON object (dict, list, etc.), or raises on failure.
     """
     import json
+
     raw = _fetch_raw(url, timeout)
     return json.loads(raw)

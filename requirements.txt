@@ -4,3 +4,4 @@ openai-agents
 hashids
 pyzmq
 cbor2
+html2text

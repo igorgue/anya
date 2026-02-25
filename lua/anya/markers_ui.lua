@@ -161,7 +161,7 @@ function M._apply_message_info(bufnr, line_num, meta, end_line_num)
   if is_agent then
     local agent_label = as_string(meta.author) or "assistant"
     local model_label = as_string(meta.model) or "unknown"
-    display_text = agent_label .. " | " .. model_label
+    display_text = model_label
   else
     local start_ts = as_string(meta.created_at)
     if start_ts then
@@ -597,30 +597,30 @@ function M._process_markers(bufnr, messages)
         M._hide_line(bufnr, i)
       end
     elseif markers.is_tool_output_marker(line) then
-       -- Tool output reference marker - hide it and add virtual text
-       local info = markers.parse_tool_output_marker(line)
-       if info then
-         local line_count = info.line_count or 0
-         local is_header_line = line:match("^%*%*")
-         local target_line_idx = i - 1 -- 0-indexed for extmark
+      -- Tool output reference marker - hide it and add virtual text
+      local info = markers.parse_tool_output_marker(line)
+      if info then
+        local line_count = info.line_count or 0
+        local is_header_line = line:match("^%*%*")
+        local target_line_idx = i - 1 -- 0-indexed for extmark
 
-         if is_header_line then
-           -- Header line with inline markers: **header**<!-- at: ... --><!-- ato: ... -->
-           -- Find where the markers start (first <!-- ) and conceal from there
-           local marker_start = line:find("<!%-%-", 1, false)
-           if marker_start then
-             -- Conceal all markers (from <!-- to end of line)
-             vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, target_line_idx, marker_start - 1, {
-               end_col = #line,
-               conceal = "",
-             })
-           end
-           -- No virtual text - just conceal the markers
-         else
-           -- Hide the entire ato: marker line
-           M._hide_line(bufnr, i)
-         end
-       end
+        if is_header_line then
+          -- Header line with inline markers: **header**<!-- at: ... --><!-- ato: ... -->
+          -- Find where the markers start (first <!-- ) and conceal from there
+          local marker_start = line:find("<!%-%-", 1, false)
+          if marker_start then
+            -- Conceal all markers (from <!-- to end of line)
+            vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, target_line_idx, marker_start - 1, {
+              end_col = #line,
+              conceal = "",
+            })
+          end
+          -- No virtual text - just conceal the markers
+        else
+          -- Hide the entire ato: marker line
+          M._hide_line(bufnr, i)
+        end
+      end
     elseif markers.is_marker_line(line) then
       -- Hide the marker line
       M._hide_line(bufnr, i)

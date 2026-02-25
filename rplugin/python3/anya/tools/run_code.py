@@ -87,7 +87,9 @@ def _detect_virtualenv(cwd: str) -> str | None:
     return None
 
 
-def _build_python_command(code: str, cwd: str, use_venv: bool, extra_env: dict | None = None) -> tuple[str, str]:
+def _build_python_command(
+    code: str, cwd: str, use_venv: bool, extra_env: dict | None = None
+) -> tuple[str, str]:
     """Build a shell command to run Python code, detecting virtualenv if needed.
 
     Returns:
@@ -139,9 +141,9 @@ async def _monitor_background_process(
         stdout_bytes, stderr_bytes = await process.communicate()
         stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
         stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
-        
+
         end_time = datetime.now().isoformat()
-        
+
         # Write final output to file
         with open(output_file, "a") as f:
             f.write(f"\n--- PROCESS ENDED: {end_time} ---\n")
@@ -150,20 +152,24 @@ async def _monitor_background_process(
                 f.write(f"\nSTDOUT:\n{stdout}\n")
             if stderr:
                 f.write(f"\nSTDERR:\n{stderr}\n")
-        
+
         # Update registry
         if process_id in _background_processes:
-            _background_processes[process_id].update({
-                "status": "completed" if process.returncode == 0 else "failed",
-                "end_time": end_time,
-                "returncode": process.returncode,
-            })
+            _background_processes[process_id].update(
+                {
+                    "status": "completed" if process.returncode == 0 else "failed",
+                    "end_time": end_time,
+                    "returncode": process.returncode,
+                }
+            )
     except Exception as e:
         if process_id in _background_processes:
-            _background_processes[process_id].update({
-                "status": "error",
-                "error": str(e),
-            })
+            _background_processes[process_id].update(
+                {
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
     finally:
         # Clean up temp script
         try:
@@ -174,7 +180,7 @@ async def _monitor_background_process(
 
 def get_background_process_status(process_id: str) -> dict | None:
     """Get the status of a background process.
-    
+
     Returns:
         Dict with process info, or None if not found.
     """
@@ -183,23 +189,20 @@ def get_background_process_status(process_id: str) -> dict | None:
 
 def list_background_processes() -> list[dict]:
     """List all background processes."""
-    return [
-        {"process_id": pid, **info}
-        for pid, info in _background_processes.items()
-    ]
+    return [{"process_id": pid, **info} for pid, info in _background_processes.items()]
 
 
 def cleanup_completed_processes(max_age_hours: int = 24) -> int:
     """Remove completed processes older than max_age_hours from registry.
-    
+
     Returns:
         Number of processes removed.
     """
     from datetime import datetime, timedelta
-    
+
     to_remove = []
     cutoff = datetime.now() - timedelta(hours=max_age_hours)
-    
+
     for pid, info in _background_processes.items():
         if info.get("status") in ("completed", "failed", "error"):
             end_time_str = info.get("end_time")
@@ -210,12 +213,11 @@ def cleanup_completed_processes(max_age_hours: int = 24) -> int:
                         to_remove.append(pid)
                 except ValueError:
                     pass
-    
+
     for pid in to_remove:
         del _background_processes[pid]
-    
-    return len(to_remove)
 
+    return len(to_remove)
 
 
 async def _run_with_ui_requests(
@@ -299,6 +301,7 @@ async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
                     result = await plugin_context.confirmation_callback(prompt, options)
                 elif plugin_context.has_nvim:
                     from ..utils import nvim_ui_select
+
                     result = await nvim_ui_select(plugin_context.nvim, options, prompt)
             elif kind == "input":
                 default = req.get("default", "")
@@ -343,6 +346,7 @@ vim.ui.input(
 
     start_time = asyncio.get_event_loop().time()
     while asyncio.get_event_loop().time() - start_time < 300.0:
+
         def get_result():
             try:
                 val = nvim.eval("get(g:, 'anya_input_result', v:null)")
@@ -396,18 +400,20 @@ async def run_code(
     ui_dir = os.path.join(cwd, ".anya", "ui", str(uuid.uuid4())[:8])
     os.makedirs(ui_dir, exist_ok=True)
 
-    command, script_path = _build_python_command(code, cwd, use_venv, extra_env={"ANYA_UI_DIR": ui_dir})
+    command, script_path = _build_python_command(
+        code, cwd, use_venv, extra_env={"ANYA_UI_DIR": ui_dir}
+    )
 
     try:
         # Background execution
         if background:
             process_id = str(uuid.uuid4())[:8]
             start_time = datetime.now().isoformat()
-            
+
             # Create output file
             bg_dir = _get_background_dir(cwd)
             output_file = os.path.join(bg_dir, f"{process_id}.log")
-            
+
             # Write initial info to output file
             with open(output_file, "w") as f:
                 f.write(f"Process ID: {process_id}\n")
@@ -416,10 +422,13 @@ async def run_code(
                 f.write(f"CWD: {cwd}\n")
                 f.write(f"Command: {command}\n")
                 f.write("\n--- OUTPUT ---\n")
-            
+
             if plugin_context.exec_callback:
                 # Daemon mode - use background exec callback if available
-                if hasattr(plugin_context, 'background_exec_callback') and plugin_context.background_exec_callback:
+                if (
+                    hasattr(plugin_context, "background_exec_callback")
+                    and plugin_context.background_exec_callback
+                ):
                     result = await plugin_context.background_exec_callback(
                         command, cwd, process_id, output_file
                     )
@@ -438,12 +447,12 @@ async def run_code(
                     result = await plugin_context.exec_callback(
                         f"nohup {command} > {output_file} 2>&1 & echo $!",
                         cwd,
-                        5  # Short timeout just to launch
+                        5,  # Short timeout just to launch
                     )
-                    
+
                     if result.get("error"):
                         return f"Error starting background process:\n{result['error']}"
-                    
+
                     _background_processes[process_id] = {
                         "command": command,
                         "cwd": cwd,
@@ -452,9 +461,9 @@ async def run_code(
                         "status": "running",
                         "title": title,
                     }
-                    
+
                     return f"Background process started. Process ID: {process_id}\nOutput file: {output_file}"
-            
+
             elif plugin_context.has_nvim:
                 # Direct Neovim mode - spawn async process
                 process = await asyncio.create_subprocess_exec(
@@ -463,7 +472,7 @@ async def run_code(
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                
+
                 # Store in registry
                 _background_processes[process_id] = {
                     "process": process,
@@ -474,16 +483,16 @@ async def run_code(
                     "status": "running",
                     "title": title,
                 }
-                
+
                 # Start monitoring task
                 asyncio.create_task(
                     _monitor_background_process(
                         process_id, process, command, cwd, script_path, output_file
                     )
                 )
-                
+
                 return f"Background process started. Process ID: {process_id}\nOutput file: {output_file}"
-            
+
             else:
                 return "Error: No execution mechanism available for background process."
 
@@ -551,6 +560,7 @@ async def run_code(
                 pass
             try:
                 import shutil as _shutil
+
                 _shutil.rmtree(ui_dir, ignore_errors=True)
             except Exception:
                 pass
