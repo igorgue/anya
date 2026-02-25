@@ -8,7 +8,7 @@ from datetime import datetime
 from agents import function_tool, RunContextWrapper
 
 from ..agents.context import NvimPluginContext
-from .utils import create_error_handler
+from ..utils import create_error_handler
 
 # Directory containing the `anya` package (rplugin/python3/).
 # Injected into generated scripts so they can `from anya.libs import ...`.
@@ -298,8 +298,8 @@ async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
                 if plugin_context.confirmation_callback:
                     result = await plugin_context.confirmation_callback(prompt, options)
                 elif plugin_context.has_nvim:
-                    from ..tools.exec import _nvim_ui_select
-                    result = await _nvim_ui_select(plugin_context.nvim, options, prompt)
+                    from ..utils import nvim_ui_select
+                    result = await nvim_ui_select(plugin_context.nvim, options, prompt)
             elif kind == "input":
                 default = req.get("default", "")
                 if plugin_context.has_nvim:

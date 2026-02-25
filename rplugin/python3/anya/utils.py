@@ -118,7 +118,6 @@ def format_tool_header(tool_name: str, tool_args: str) -> str:
         Formatted header like **tool_name | arg**
     """
     import json
-    from .tools.utils import format_tool_header as fmt_header
 
     # Try to extract first argument from JSON args
     first_arg = ""
@@ -131,38 +130,30 @@ def format_tool_header(tool_name: str, tool_args: str) -> str:
             else:
                 args_dict = tool_args
 
-            # Special handling for edit tool - extract filename from edit_blocks
-            if tool_name == "edit" and "edit_blocks" in args_dict:
-                edit_blocks = args_dict["edit_blocks"]
-                # Extract filename from first line or before <<<<<<< SEARCH
-                lines = edit_blocks.strip().split("\n")
-                for line in lines:
-                    line = line.strip()
-                    if line and not line.startswith("<") and not line.startswith("="):
-                        # This looks like a filename
-                        first_arg = line
-                        break
-                if not first_arg:
-                    first_arg = "(edit)"
-            else:
-                # Get the first non-empty value
-                for key, value in args_dict.items():
-                    if isinstance(value, str):
-                        # Don't truncate here - let format_tool_header handle it
-                        first_arg = value
-                        # Remove newlines for display but keep the content
-                        first_arg = first_arg.replace("\n", " ").strip()
-                    else:
-                        first_arg = str(value)
-                    break
+            # Get the first non-empty value
+            for key, value in args_dict.items():
+                if isinstance(value, str):
+                    # Don't truncate here - let format logic below handle it
+                    first_arg = value
+                    # Remove newlines for display but keep the content
+                    first_arg = first_arg.replace("\n", " ").strip()
+                else:
+                    first_arg = str(value)
+                break
     except (json.JSONDecodeError, AttributeError):
         first_arg = tool_args if tool_args else ""
 
     if not first_arg:
         first_arg = "(no args)"
 
-    # Use the utility function with proper truncation (default 60 chars)
-    return fmt_header(tool_name, first_arg)
+    # Inline format logic (max_len=60)
+    if not first_arg or first_arg == "(no args)":
+        return f"running {tool_name}"
+    if len(first_arg) > 60:
+        trimmed = first_arg[:57] + "..."
+    else:
+        trimmed = first_arg
+    return f"running {trimmed}"
 
 
 def format_tool_call(tool_name: str, tool_args: str) -> str:
@@ -194,3 +185,72 @@ def format_tool_call_with_status(tool_name: str, tool_args: str, status: str) ->
     header = format_tool_header(tool_name, tool_args)
 
     return header + "\n" + markers.make_marker(status) + "\n"
+
+
+def create_error_handler(_ctx, error: Exception) -> str:
+    """Custom error handler for tool functions."""
+    return f"Error: {str(error)}"
+
+
+def nvim_call_sync(nvim, func: callable) -> any:
+    """Call a function on the main Neovim thread and wait for result."""
+    import threading
+
+    result = [None]
+    error = [None]
+    event = threading.Event()
+
+    def callback():
+        try:
+            result[0] = func()
+        except Exception as e:
+            error[0] = e
+        finally:
+            event.set()
+
+    nvim.async_call(callback)
+    event.wait()
+
+    if error[0]:
+        raise error[0]
+    return result[0]
+
+
+async def nvim_ui_select(nvim, options: list, prompt: str) -> str:
+    """Ask user to select from options using vim.ui.select."""
+    import asyncio
+
+    lua_options = "{" + ", ".join(f'"{opt}"' for opt in options) + "}"
+    lua_prompt = prompt.replace('"', '\\"').replace("\n", "\\n")
+
+    def run_select():
+        nvim.exec_lua(
+            f"""
+vim.g.anya_select_result = nil
+vim.ui.select({lua_options},
+    {{prompt = "{lua_prompt}"}},
+    function(selection)
+        vim.g.anya_select_result = selection or "Cancel"
+    end)
+"""
+        )
+
+    nvim.async_call(run_select)
+
+    start_time = asyncio.get_event_loop().time()
+    while asyncio.get_event_loop().time() - start_time < 30.0:
+        result = [None]
+
+        def get_result():
+            try:
+                result[0] = nvim.eval("get(g:, 'anya_select_result', v:null)")
+            except Exception:
+                pass
+
+        nvim.async_call(get_result)
+        await asyncio.sleep(0.05)
+
+        if result[0] is not None:
+            return result[0]
+
+    return "Cancel"

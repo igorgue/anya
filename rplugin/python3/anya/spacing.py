@@ -147,6 +147,14 @@ class SpacingManager:
                 self._last_content_type = next_type
                 return "\n"
 
+        # Consecutive TOOL_HEADERs should be tightly grouped (single newline)
+        if (
+            next_type == ContentType.TOOL_HEADER
+            and self._last_content_type == ContentType.TOOL_HEADER
+        ):
+            self._last_content_type = next_type
+            return "\n"
+
         # Default: one newline to separate blocks
         spacing = "\n"
 
@@ -185,11 +193,19 @@ class SpacingManager:
             if isolated.endswith("-->"):
                 result += "\n"
 
+            # TOOL_HEADER must always end with a newline so next content starts on a new line
+            if content_type == ContentType.TOOL_HEADER and not result.endswith("\n"):
+                result += "\n"
+
             # Restore leading newline if it was intended by prefix or isolation
             if not result.startswith("\n") and prefix.startswith("\n"):
                 result = "\n" + result
 
             return result
+
+        # Consecutive TOOL_HEADERs: each one on its own line, tightly grouped
+        if content_type == ContentType.TOOL_HEADER:
+            return delta + "\n"
 
         if "<!--" in delta:
             isolated = self.ensure_marker_isolation(delta)

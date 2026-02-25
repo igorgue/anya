@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, TypeVar
 
-from .tools.utils import nvim_call_sync
+from .utils import nvim_call_sync
 
 T = TypeVar("T")
 
