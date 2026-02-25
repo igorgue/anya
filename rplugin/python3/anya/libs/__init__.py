@@ -55,6 +55,13 @@ def get_libs_prompt() -> str:
     )
 
     for mod_name, mod_doc, funcs in modules:
+        # For MCP module, include full docstring since tools are documented there
+        if mod_name == "mcp" and mod_doc and "## Available Servers" in mod_doc:
+            lines.append(f"### `from anya.libs import {mod_name}`")
+            lines.append(mod_doc)
+            lines.append("")
+            continue
+        
         # Use first line of module docstring as summary
         summary = mod_doc.splitlines()[0] if mod_doc else "No description."
         lines.append(f"### `from anya.libs import {mod_name}`")

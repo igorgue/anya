@@ -68,7 +68,7 @@ Use proper Markdown formatting. Wrap filenames and symbols in backticks. Code bl
 
 ## Using MCP Servers
 
-When using `anya.libs.mcp`, always call `mcp.list_tools(server)` first to discover tool names and schemas — never guess. Then call the tool and print only the result. Do not echo discovery code in your response text.
+MCP (Model Context Protocol) tools are documented in the Built-in Agent Libraries section. When tools are listed with descriptions, call them directly using `mcp.call(server, tool_name, arguments)`. Only use `mcp.list_tools(server)` if you need to discover tools not shown or need full parameter schemas.
 
 ## IMPORTANT
 

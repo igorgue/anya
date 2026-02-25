@@ -47,6 +47,7 @@ _TOOLS_CACHE: dict[str, list[dict]] = _load_tools_cache()
 
 
 def _build_doc() -> str:
+    """Build the module docstring with available MCP servers and their tools."""
     if not _SERVER_NAMES:
         return (
             "Call MCP (Model Context Protocol) servers directly from generated code.\n\n"
@@ -55,18 +56,31 @@ def _build_doc() -> str:
     lines = [
         "Call MCP (Model Context Protocol) servers directly from generated code.",
         "",
-        "Usage:  from anya.libs import mcp",
-        "        result = mcp.call('server', 'tool_name', {'key': 'value'})",
+        "- `mcp.list_servers()`: List the names of all configured MCP servers.",
+        "- `mcp.list_tools(server)`: List available tools on an MCP server.",
+        "- `mcp.call(...)`: Call a tool on an MCP server and return the result as a string.",
         "",
-        "Available servers and tools:",
+        "## Available Servers and Tools",
+        "",
     ]
-    for name in _SERVER_NAMES:
+    for name in sorted(_SERVER_NAMES):
         tools = _TOOLS_CACHE.get(name, [])
+        lines.append(f"### {name}")
         if tools:
-            tool_list = ", ".join(f"`{t['name']}`" for t in tools if t.get("name"))
-            lines.append(f"  {name}: {tool_list}")
+            for t in tools:
+                tool_name = t.get("name", "")
+                tool_desc = t.get("description", "")
+                if tool_name:
+                    # Truncate long descriptions to first paragraph
+                    desc_first = tool_desc.split("\n\n")[0].strip()
+                    if len(desc_first) > 300:
+                        desc_first = desc_first[:297] + "..."
+                    lines.append(f"- `{tool_name}`: {desc_first}")
         else:
-            lines.append(f"  {name}: (run mcp.list_tools('{name}') to discover tools)")
+            lines.append(f"  (run `mcp.list_tools('{name}')` to discover tools)")
+        lines.append("")
+    
+    lines.append("When tools are listed above with descriptions, call them directly using `mcp.call(server, tool_name, arguments)`. Only use `mcp.list_tools` if you need to discover tools not shown or need full parameter schemas.")
     return "\n".join(lines) + "\n"
 
 
