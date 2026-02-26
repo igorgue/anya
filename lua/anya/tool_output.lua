@@ -148,19 +148,29 @@ function M.open_code_at_cursor(override_line, override_col)
   local bufnr = vim.api.nvim_get_current_buf()
   local line = vim.api.nvim_buf_get_lines(bufnr, line_num - 1, line_num, false)[1] or ""
 
-  -- Find the [[title]] occurrence that the cursor is inside (col must be within [s, e])
-  local best_title = nil
+  -- Collect all [[title]] occurrences on this line
+  local all_titles = {}
   local pos = 1
   while true do
     local s, e, title = line:find("%[%[(.-)%]%]", pos)
     if not s then
       break
     end
-    if col >= s and col <= e then
-      best_title = title
+    table.insert(all_titles, { s = s, e = e, title = title })
+    pos = e + 1
+  end
+
+  -- Pick the title whose brackets contain the cursor col; if none, fall back to
+  -- the only title on the line (so pressing <CR> anywhere on a [[title]] line works).
+  local best_title = nil
+  for _, t in ipairs(all_titles) do
+    if col >= t.s and col <= t.e then
+      best_title = t.title
       break
     end
-    pos = e + 1
+  end
+  if not best_title and #all_titles == 1 then
+    best_title = all_titles[1].title
   end
 
   local title = best_title
@@ -175,7 +185,10 @@ function M.open_code_at_cursor(override_line, override_col)
   local pattern = cwd .. "/.anya/code/" .. sanitized .. "-*.py"
   local matches = vim.fn.glob(pattern, false, true)
   if not matches or #matches == 0 then
-    return false
+    -- File not saved yet (tool still running or never executed). Consume the
+    -- keypress so that 'normal! za' is NOT triggered on the message fold.
+    vim.notify("Anya: No code file found for [[" .. title .. "]] yet.", vim.log.levels.INFO)
+    return true
   end
 
   -- Pick the most recently modified file

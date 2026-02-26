@@ -10,6 +10,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 
+import anyio
 import zmq.asyncio
 from agents import Agent
 
@@ -61,8 +62,10 @@ class AgentManager:
         self._pub_socket = pub_socket
         self.logger.info("Agent manager initialized")
 
-        # Probe MCP servers in the background — does not block startup.
-        asyncio.create_task(self._probe_mcp_servers())
+        # MCP probing disabled at startup to avoid 100% CPU issue with
+        # anyio task group cleanup. Servers are initialized lazily on first use.
+        # The MCP tools cache is still used if it exists from a previous session.
+        self._mcp_probe_task = None
 
     async def get_or_create_session(self, session_id: str) -> SessionState:
         """Get or create a session state."""
@@ -197,6 +200,17 @@ class AgentManager:
         except Exception as e:
             self.logger.warning(f"Failed to emit system event: {e}")
 
+    async def _safe_probe_mcp_servers(self):
+        """Wrapper around _probe_mcp_servers that catches all exceptions."""
+        try:
+            await self._probe_mcp_servers()
+        except asyncio.CancelledError:
+            self.logger.info("MCP probe task cancelled")
+            raise
+        except Exception as e:
+            self.logger.error(f"MCP probe task failed with exception: {e}")
+            # Don't re-raise - this is a background task
+
     async def _probe_mcp_servers(self):
         """Background task: probe all configured MCP servers and emit fidget events."""
         from ..mcp_loader import load_mcp_server_configs, create_mcp_servers
@@ -217,45 +231,81 @@ class AgentManager:
 
         tool_results: dict[str, list] = {}
 
-        async def _probe_one_cached(server):
+        async def _probe_one(server):
+            """Probe a single MCP server with timeout.
+            
+            IMPORTANT: We use anyio.fail_after for timeouts because the MCP library
+            uses anyio task groups internally. Using asyncio.timeout causes
+            "Attempted to exit cancel scope in a different task" errors.
+            """
             name = getattr(server, "name", "unknown")
             await self._emit_system_event(
                 StreamEventType.MCP_SERVER_READY,
                 {"server": name, "status": "starting"},
             )
+
             try:
-                async with server:
-                    tools = await server.list_tools()
-                    tool_results[name] = [
-                        {
-                            "name": getattr(
-                                t,
-                                "name",
-                                t.get("name", "") if isinstance(t, dict) else "",
-                            ),
-                            "description": getattr(
-                                t,
-                                "description",
-                                t.get("description", "") if isinstance(t, dict) else "",
-                            ),
-                        }
-                        for t in (tools or [])
-                    ]
-                    await self._emit_system_event(
-                        StreamEventType.MCP_SERVER_READY,
-                        {"server": name, "status": "ready", "tool_count": len(tools)},
-                    )
-                    return name
+                # Use anyio.fail_after for proper anyio task group compatibility
+                with anyio.fail_after(15.0):
+                    async with server:
+                        tools = await server.list_tools()
+                        tool_results[name] = [
+                            {
+                                "name": getattr(
+                                    t,
+                                    "name",
+                                    t.get("name", "") if isinstance(t, dict) else "",
+                                ),
+                                "description": getattr(
+                                    t,
+                                    "description",
+                                    t.get("description", "") if isinstance(t, dict) else "",
+                                ),
+                            }
+                            for t in (tools or [])
+                        ]
+                        await self._emit_system_event(
+                            StreamEventType.MCP_SERVER_READY,
+                            {"server": name, "status": "ready", "tool_count": len(tools)},
+                        )
+                        return name
+            except TimeoutError:
+                self.logger.warning(f"MCP probe timeout for \'{name}\'")
+                await self._emit_system_event(
+                    StreamEventType.MCP_SERVER_READY,
+                    {"server": name, "status": "timeout"},
+                )
+                return None
+            except asyncio.CancelledError:
+                self.logger.info(f"MCP probe cancelled for \'{name}\'")
+                raise
             except Exception as e:
-                self.logger.warning(f"MCP probe failed for '{name}': {e}")
+                self.logger.warning(f"MCP probe failed for \'{name}\': {e}")
                 await self._emit_system_event(
                     StreamEventType.MCP_SERVER_READY,
                     {"server": name, "status": "failed", "error": str(e)},
                 )
                 return None
 
-        results = await asyncio.gather(*[_probe_one_cached(s) for s in servers])
-        ready = [r for r in results if r is not None]
+        # Use return_exceptions=True to prevent one failure from affecting others
+        # and add an overall timeout for the entire probe operation using anyio
+        try:
+            with anyio.fail_after(60):
+                results = await asyncio.gather(
+                    *[_probe_one(s) for s in servers],
+                    return_exceptions=True,
+                )
+        except TimeoutError:
+            self.logger.warning("MCP probe overall timeout exceeded")
+            results = []
+
+        # Filter out None and exceptions
+        ready = []
+        for r in results:
+            if isinstance(r, Exception):
+                self.logger.warning(f"MCP probe exception: {r}")
+            elif r is not None:
+                ready.append(r)
 
         # Persist tool listings so the agent prompt can include them without discovery calls
         if tool_results:
@@ -290,6 +340,17 @@ class AgentManager:
     async def shutdown(self):
         """Shutdown the agent manager and clean up resources."""
         self.logger.info("Shutting down agent manager...")
+
+        # Cancel the MCP probe task if it's still running
+        if hasattr(self, '_mcp_probe_task') and self._mcp_probe_task:
+            if not self._mcp_probe_task.done():
+                self._mcp_probe_task.cancel()
+                try:
+                    await self._mcp_probe_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    self.logger.warning(f"Error cancelling MCP probe task: {e}")
 
         # Clean up all sessions
         for session_id in list(self._sessions.keys()):
