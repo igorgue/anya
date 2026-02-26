@@ -200,23 +200,6 @@ def get_context_window(model: str | None) -> int:
     return result if result is not None else DEFAULT_CONTEXT_WINDOW
 
 
-def calculate_usage_percentage(
-    total_tokens: int, model: str | None
-) -> tuple[float, int]:
-    """Calculate token usage as percentage of context window.
-
-    Args:
-        total_tokens: Total tokens used in this request
-        model: Model name
-
-    Returns:
-        Tuple of (percentage: float, context_window: int)
-    """
-    context_window = get_context_window(model)
-    percentage = (total_tokens / context_window) * 100 if context_window > 0 else 0
-    return percentage, context_window
-
-
 def calculate_context_usage(
     usage: TokenUsage, model: str | None
 ) -> tuple[float, int, int, bool]:
