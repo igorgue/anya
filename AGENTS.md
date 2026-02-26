@@ -212,7 +212,6 @@ plugin/anya.vim     # Vimscript bootstrap, sets load flags
 | `ANYA_API_TYPE`      | responses  | API type: "responses" (default) or "chat_completions" |
 | `ANYA_THINKING_BUDGET`| (unset)   | Reasoning effort for model   |
 | `ANYA_DISABLE_MCP`   | "0"        | Disable MCP agent/tools      |
-| `ANYA_YOLO`          | ""         | Approve (auto-apply) all edits|
 
 ### Client-Side Settings
 Anya supports **per-client settings** that override the daemon's environment. This means you can

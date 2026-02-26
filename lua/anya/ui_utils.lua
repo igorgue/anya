@@ -99,15 +99,6 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, "AnyaWinBar", { link = "Comment" })
 end
 
--- Handle click on YOLO section in winbar
--- @param id: Click region ID (unused)
--- @param clicks: Number of clicks (unused)
--- @param button: Mouse button (unused)
--- @param mods: Modifier keys (unused)
-function M.handle_yolo_click(id, clicks, button, mods)
-  -- Toggle YOLO mode (this function handles winbar refresh internally)
-  require("anya.conversation").toggle_yolo_mode()
-end
 
 -- Handle click on token progress bar
 -- @param id: Click region ID (unused)
@@ -136,9 +127,6 @@ end
 
 -- Global wrapper for winbar click handlers
 -- These must be global for v:lua to work in winbar expressions
-_G.anya_handle_yolo_click = function(id, clicks, button, mods)
-  M.handle_yolo_click(id, clicks, button, mods)
-end
 
 _G.anya_handle_token_click = function(id, clicks, button, mods)
   M.handle_token_click(id, clicks, button, mods)
@@ -254,23 +242,7 @@ function M.get_winbar()
     token_click = "%@v:lua.anya_handle_token_click@" .. token_bar .. "%T"
   end
 
-  -- Try to safely get YOLO mode status
-  local is_yolo_on = false
-  local yolo_ok, yolo_mode = pcall(vim.fn.AnyaGetYoloMode)
-  if yolo_ok and type(yolo_mode) == "boolean" then
-    is_yolo_on = yolo_mode
-  end
-
-  -- Build winbar: left=version, right=token bar + YOLO
-  local yolo_text
-  if is_yolo_on then
-    yolo_text = "%#Type#yolo%*"
-  else
-    yolo_text = "%#Comment#yolo%*"
-  end
-  -- Clickable YOLO
-  local yolo_click = "%@v:lua.anya_handle_yolo_click@" .. yolo_text .. "%T"
-  return string.format("%s%%=%s  %s", version_text, token_click, yolo_click)
+  return string.format("%s%%=%s", version_text, token_click)
 end
 
 return M

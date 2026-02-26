@@ -81,7 +81,6 @@ Set these before launching Neovim (e.g. in your shell profile):
 | `ANYA_API_TYPE` | `responses` | API type: `responses` or `chat_completions` |
 | `ANYA_THINKING_BUDGET` | — | Reasoning effort hint for supported models |
 | `ANYA_DISABLE_MCP` | `0` | Set to `1` to disable MCP tools |
-| `ANYA_YOLO` | — | Set to `true` to auto-apply all file edits |
 
 ### OpenRouter
 
@@ -172,7 +171,6 @@ don't need to manage it manually.
 | `<Tab>` | Normal | Toggle focus to prompt window |
 | `<C-c>` | Normal | Cancel current response |
 | `]]` / `[[` | Normal | Jump to next / previous message header |
-| `<localleader>y` | Normal | Toggle YOLO mode (auto-apply edits) |
 | `<localleader>h` | Normal | Open conversation history |
 | `<C-j>` | Normal | Focus prompt window |
 
@@ -194,7 +192,6 @@ showing the diff. You are prompted to:
 - **Reject** — discard the change
 
 All edit states (pending / applied / rejected) persist across restarts.
-Set `ANYA_YOLO=true` to skip confirmation and apply all edits automatically.
 
 ## Conversation history
 

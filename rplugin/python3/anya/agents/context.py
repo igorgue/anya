@@ -14,7 +14,6 @@ class NvimPluginContext:
     nvim: Any | None  # pynvim.Nvim or None in daemon mode
     session_id: str
     allowed_commands: set[str] = field(default_factory=set)
-    yolo_mode: bool = False
     # Additional context for daemon mode
     cwd: str = ""
     current_buffer: str = ""

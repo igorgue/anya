@@ -242,10 +242,6 @@ vim.keymap.set("n", "<localleader><localleader>", function()
   require("anya.float_focus").toggle_focus()
 end, { buffer = true, desc = "Toggle between chat and prompt" })
 
--- Toggle YOLO mode
-vim.keymap.set("n", "<localleader>y", function()
-  require("anya.conversation").toggle_yolo_mode()
-end, { buffer = true, desc = "Toggle YOLO mode" })
 
 -- toggle history
 vim.keymap.set("n", "<localleader>h", function()

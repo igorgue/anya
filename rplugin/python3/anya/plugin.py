@@ -51,8 +51,6 @@ class AnyaPlugin:
         self.allowed_commands = set()  # Persist allowed commands across agent runs
         self._tool_fold_open = False  # Track if a tool fold is currently open
         self._last_layout = "replace"  # Remember the last layout used
-        # Initialize YOLO mode from environment variable
-        self._yolo_mode = os.environ.get("ANYA_YOLO", "").lower() == "true"
 
         # Daemon client
         self._client = AnyaClient()
@@ -641,7 +639,6 @@ class AnyaPlugin:
             current_buffer=ctx_data["current_buffer"],
             current_buffer_content="",
             open_buffers=ctx_data["open_buffers"],
-            yolo_mode=self._yolo_mode,
             allowed_commands=list(self.allowed_commands),
             agent_settings=request_agent_settings.to_dict(),
         )
@@ -2271,16 +2268,7 @@ Usage:
         except Exception as e:
             return {"success": False, "message": str(e)}
 
-    @pynvim.function("AnyaGetYoloMode", sync=True)
-    def anya_get_yolo_mode(self, args):
-        """Get current YOLO mode state."""
-        return self._yolo_mode
 
-    @pynvim.function("AnyaToggleYoloMode", sync=True)
-    def anya_toggle_yolo_mode(self, args):
-        """Toggle YOLO mode on/off."""
-        self._yolo_mode = not self._yolo_mode
-        return self._yolo_mode
 
     @pynvim.function("AnyaDaemonStatus", sync=True)
     def anya_daemon_status(self, args):

@@ -15,7 +15,6 @@ local M = {
   conversation = conversation,
   picker = picker,
   history = history,
-  toggle_yolo_mode = conversation.toggle_yolo_mode,
 }
 
 function M.setup(opts)

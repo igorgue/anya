@@ -260,7 +260,6 @@ class NvimContext:
     current_buffer: str = ""
     current_buffer_content: str = ""
     open_buffers: list[dict] = field(default_factory=list)
-    yolo_mode: bool = False
     allowed_commands: list[str] = field(default_factory=list)
     agent_settings: dict = field(default_factory=dict)  # AgentSettings as dict
 
@@ -275,7 +274,6 @@ class NvimContext:
             current_buffer=data.get("current_buffer", ""),
             current_buffer_content=data.get("current_buffer_content", ""),
             open_buffers=data.get("open_buffers", []),
-            yolo_mode=data.get("yolo_mode", False),
             allowed_commands=data.get("allowed_commands", []),
             agent_settings=data.get("agent_settings", {}),
         )

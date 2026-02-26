@@ -563,7 +563,6 @@ class RequestHandler:
             nvim=None,  # No nvim in daemon
             session_id=session_id,
             allowed_commands=set(nvim_context.allowed_commands),
-            yolo_mode=nvim_context.yolo_mode,
             confirmation_callback=confirmation_callback,
             exec_callback=exec_callback,
             cwd=nvim_context.cwd,
