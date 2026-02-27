@@ -17,10 +17,10 @@ import subprocess
 
 
 def read_file(path_with_range: str, cwd: str | None = None) -> str:
-    """Read a file with optional line range, returning content with metadata header.
+    """Read a file with optional line range, returning content with line numbers.
 
     Syntax:
-        "filename.py"            - Read first 300 lines
+        "filename.py"            - Read first 300 lines (default limit)
         "filename.py@start-end"  - Read entire file
         "filename.py@32-234"     - Read lines 32 to 234
         "filename.py@start-800"  - Read lines 1 to 800
@@ -31,7 +31,7 @@ def read_file(path_with_range: str, cwd: str | None = None) -> str:
         cwd: Base directory for relative paths (default: os.getcwd()).
 
     Returns:
-        File content as a string with a metadata header, or raises on error.
+        File content with line numbers (format: "123. content") and metadata header.
     """
     path = path_with_range
     start_line = None
@@ -90,7 +90,19 @@ def read_file(path_with_range: str, cwd: str | None = None) -> str:
         actual_end = min(lines_to_show, total_lines)
         is_truncated = total_lines > lines_to_show
 
-    content = "".join(selected_lines)
+    # Calculate line number width for alignment
+    max_line_num = actual_start + len(selected_lines) - 1
+    line_num_width = len(str(max_line_num))
+
+    # Format lines with line numbers
+    numbered_lines = []
+    for i, line in enumerate(selected_lines):
+        line_num = actual_start + i
+        # Strip trailing newline, we'll add our own
+        stripped = line.rstrip("\n")
+        numbered_lines.append(f"{line_num:>{line_num_width}}. {stripped}")
+    
+    content = "\n".join(numbered_lines)
 
     header = (
         f"File: {path}\n"
@@ -102,10 +114,11 @@ def read_file(path_with_range: str, cwd: str | None = None) -> str:
         display_path = (
             path_with_range.split("@")[0] if "@" in path_with_range else path_with_range
         )
+        remaining = total_lines - actual_end
         header += (
-            f"[FILE TOO LARGE] File has {total_lines} lines total, showing lines {actual_start}-{actual_end}.\n"
-            f"  READ THE FULL FILE: fs.read_file('{display_path}@start-end') to get all {total_lines} lines.\n"
-            f"  Or use specific ranges: @{actual_end + 1}-{min(actual_end + 300, total_lines)} (next 300)\n"
+            f"[TRUNCATED] File has {total_lines} lines total.\n"
+            f"  Read full file: fs.read_file('{display_path}@start-end')\n"
+            f"  Next chunk: fs.read_file('{display_path}@{actual_end + 1}-{min(actual_end + 300, total_lines)}')\n"
         )
 
     return header + "\n" + content

@@ -21,14 +21,15 @@ This document details Anya's agent, tool, and infrastructure system. Inside, you
 6. [Database and Persistence](#database-and-persistence)
 7. [The Agent System & Extensibility](#the-agent-system--extensibility)
 8. [The Tooling Interface](#the-tooling-interface)
-9. [Marker System](#marker-system)
-10. [Environment & Dependencies](#environment--dependencies)
+9. [Agent Libraries](#agent-libraries)
+10. [Marker System](#marker-system)
+11. [Environment & Dependencies](#environment--dependencies)
 
 > **Note:** As of 2026, Anya manages all dependencies via `pyproject.toml` only.
 > You no longer need (or should create) a `requirements.txt`. Just use `uv sync --upgrade` whenever you need to update or set up your Python packages.
-11. [Best Practices](#best-practices)
-12. [Advanced Troubleshooting](#advanced-troubleshooting)
-13. [Appendix: Marker Format Reference](#appendix-marker-format-reference)
+12. [Best Practices](#best-practices)
+13. [Advanced Troubleshooting](#advanced-troubleshooting)
+14. [Appendix: Marker Format Reference](#appendix-marker-format-reference)
 
 ---
 
@@ -186,6 +187,84 @@ plugin/anya.vim     # Vimscript bootstrap, sets load flags
     - MCP/remote tools are loaded dynamically via network connection, appearing as a single multiplexed tool
 - **Adding Tools**
     - Write your new tool in Python under the tools/ directory, register in `__init__.py`, and update agent config if optional
+
+
+---
+
+## Agent Libraries
+
+The agent has access to pre-built libraries that provide optimized, context-rich operations.
+**Agents should always prefer these libraries over raw Python operations.**
+
+### File System (`fs`)
+
+```python
+from anya.libs import fs
+```
+
+| Function | Description |
+|----------|-------------|
+| `read_file(path, range_spec)` | Read file with line numbers. Default 300 lines. Supports `@start-end`, `@50-100`. |
+| `read_many_files(paths)` | Read multiple files efficiently in one call. |
+| `list_files(directory)` | List files recursively (respects .gitignore via fd). |
+| `search_code(pattern, directory)` | Search for patterns using ripgrep. |
+| `create_file(path, content)` | Create a new file (raises if exists). |
+| `write_file(path, content)` | Write to file, creating directories as needed. |
+
+### Shell & Git (`shell`)
+
+```python
+from anya.libs import shell
+```
+
+| Function | Description |
+|----------|-------------|
+| `run(command)` | Execute a shell command and return output. |
+| `gh(args)` | Execute GitHub CLI commands. |
+
+### MCP Integration (`mcp`)
+
+```python
+from anya.libs import mcp
+
+# Call tools on MCP servers
+result = mcp.call("server_name", "tool_name", {"arg": "value"})
+```
+
+**Available MCP Servers:**
+- `context7` - Library documentation and examples
+- `sequentialthinking` - Complex problem solving and reasoning
+- `tidewave-phoenix` - Phoenix/Elixir development
+- `time` - Time and timezone operations
+- `zai-vision` - Image and video analysis
+- `zai-web-reader` - Web content fetching
+- `zai-web-search` - Web search
+- `zai-zread` - GitHub repository exploration
+
+### Web Operations (`web`, `search`)
+
+```python
+from anya.libs import web, search
+
+# Fetch web content
+web.fetch_markdown(url)
+web.fetch_text(url)
+web.fetch_json(url)
+
+# Search the web
+search.web(query)
+search.news(query)
+```
+
+### User Interaction (`ui`)
+
+```python
+from anya.libs import ui
+
+ui.ask("Choose:", ["option1", "option2"])  # Pick from options
+ui.confirm("Continue?")                     # Yes/no
+ui.input("Enter value:")                    # Text input
+```
 
 ---
 

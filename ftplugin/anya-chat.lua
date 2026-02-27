@@ -248,6 +248,19 @@ vim.keymap.set("n", "<localleader>h", function()
   vim.cmd("Anya history")
 end, { buffer = true, desc = "Open history" })
 
+-- Daemon management keymaps
+vim.keymap.set("n", "<localleader>s", function()
+  vim.cmd("Anya daemon start")
+end, { buffer = true, desc = "Start Anya daemon" })
+
+vim.keymap.set("n", "<localleader>S", function()
+  vim.cmd("Anya daemon stop")
+end, { buffer = true, desc = "Stop Anya daemon" })
+
+vim.keymap.set("n", "<localleader>r", function()
+  vim.cmd("Anya daemon restart")
+end, { buffer = true, desc = "Restart Anya daemon" })
+
 -- <C-k> in chat does nothing special (stay in chat, no window above)
 -- But we map it to prevent accidental navigation out of Anya
 vim.keymap.set("n", "<C-k>", function()
