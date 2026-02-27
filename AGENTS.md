@@ -23,6 +23,9 @@ This document details Anya's agent, tool, and infrastructure system. Inside, you
 8. [The Tooling Interface](#the-tooling-interface)
 9. [Marker System](#marker-system)
 10. [Environment & Dependencies](#environment--dependencies)
+
+> **Note:** As of 2026, Anya manages all dependencies via `pyproject.toml` only.
+> You no longer need (or should create) a `requirements.txt`. Just use `uv sync --upgrade` whenever you need to update or set up your Python packages.
 11. [Best Practices](#best-practices)
 12. [Advanced Troubleshooting](#advanced-troubleshooting)
 13. [Appendix: Marker Format Reference](#appendix-marker-format-reference)

@@ -36,7 +36,6 @@ These are not required, but enhance the experience:
 ```lua
 {
   "igorkav/anya",
-  build = "pip install -r requirements.txt",
   config = function()
     require("anya").setup({
       start_in_insert = true, -- Enter insert mode when opening the prompt
@@ -55,7 +54,6 @@ Then install Python dependencies manually:
 
 ```bash
 cd ~/.local/share/nvim/plugged/anya  # or wherever vim-plug installs it
-pip install -r requirements.txt
 ```
 
 After installing, register the remote plugin once:

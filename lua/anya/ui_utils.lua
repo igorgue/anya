@@ -178,7 +178,8 @@ local function format_number(num)
   end
 end
 
--- Colored progress bar generator: xx% ███ (compact) or detailed (used/max)
+-- Colored progress bar generator: xx% ▬▬▬ (compact) or detailed (used/max)
+-- Note: We show the actual percentage even if over 100% - let the LLM handle overflow
 function M.token_progress_bar()
   local used, max, percentage = get_token_usage()
   -- Don't show bar if no tokens used yet
@@ -190,11 +191,12 @@ function M.token_progress_bar()
   if pct < 0 then
     pct = 0
   end
-  if pct > 100 then
-    pct = 100
-  end
+  -- NOTE: We intentionally do NOT cap at 100% here
+  -- Let the actual percentage show, even if over 100%
+  -- The LLM will handle any context overflow - we just display the info
 
-  -- Color based on percentage
+  -- Color based on percentage (for bar visualization, cap at 100%)
+  local display_pct = math.min(pct, 100)
   local color_group
   if pct <= 50 then
     color_group = "AnyaTokenGreen"
@@ -206,8 +208,9 @@ function M.token_progress_bar()
 
   -- Return based on view state
   if M._token_view_state == "compact" then
-    -- Compact view: xx% ███
-    local filled = math.floor(pct / 100 * 3 + 0.5)
+    -- Compact view: xx% ▬▬▬
+    -- Bar visual is capped at 100% but percentage shows actual value
+    local filled = math.floor(display_pct / 100 * 3 + 0.5)
     if filled < 1 and pct > 0 then
       filled = 1
     end -- Show at least 1 if any usage
@@ -218,12 +221,13 @@ function M.token_progress_bar()
       string.rep("▬", filled),
       string.rep("▬", unfilled)
     )
-    return string.format("%2d%%%% %s", pct, bar)
+    -- Show actual percentage (may be > 100%)
+    return string.format("%3d%%%% %s", pct, bar)
   else
     -- Detailed view: used/max
     local used_str = format_number(used)
     local max_str = format_number(max)
-    return string.format("%%#%s#%s%%*/%s%%*", color_group, used_str, max_str)
+    return string.format("%%#%s#%s*/%s%%*", color_group, used_str, max_str)
   end
 end
 
