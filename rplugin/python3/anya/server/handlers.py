@@ -303,15 +303,9 @@ class RequestHandler:
             if not base_url and model and "/" in model:
                 base_url = "https://openrouter.ai/api/v1"
 
-            from openai import AsyncOpenAI
-
-            client_kwargs: dict = {}
-            if api_key:
-                client_kwargs["api_key"] = api_key
-            if base_url:
-                client_kwargs["base_url"] = base_url
-
-            client = AsyncOpenAI(**client_kwargs)
+            api_type = (settings.api_type if settings else None) or os.environ.get(
+                "ANYA_API_TYPE", "responses"
+            )
 
             def _clean(text: str, max_chars: int = 400) -> str:
                 text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
@@ -328,17 +322,47 @@ class RequestHandler:
                 "Title:"
             )
 
-            response = await asyncio.wait_for(
-                client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=30,
-                    temperature=0.3,
-                ),
-                timeout=30.0,
-            )
+            if api_type == "anthropic":
+                from anthropic import AsyncAnthropic
 
-            raw = response.choices[0].message.content or ""
+                client_kwargs: dict = {}
+                if api_key:
+                    client_kwargs["api_key"] = api_key
+                if base_url:
+                    client_kwargs["base_url"] = base_url
+
+                client = AsyncAnthropic(**client_kwargs)
+                response = await asyncio.wait_for(
+                    client.messages.create(
+                        model=model,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=30,
+                        temperature=0.3,
+                    ),
+                    timeout=30.0,
+                )
+                raw = response.content[0].text if response.content else ""
+            else:
+                from openai import AsyncOpenAI
+
+                client_kwargs = {}
+                if api_key:
+                    client_kwargs["api_key"] = api_key
+                if base_url:
+                    client_kwargs["base_url"] = base_url
+
+                client = AsyncOpenAI(**client_kwargs)
+                response = await asyncio.wait_for(
+                    client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=30,
+                        temperature=0.3,
+                    ),
+                    timeout=30.0,
+                )
+                raw = response.choices[0].message.content or ""
+
             cleaned = raw.strip().strip("\"'").rstrip(".!?").strip()
             title = cleaned if cleaned else None
 

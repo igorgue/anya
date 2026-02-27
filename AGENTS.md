@@ -1,3 +1,7 @@
+File: /home/igor/Code/anya/AGENTS.md
+Total lines: 298 | File size: 14953 bytes
+Showing lines 1-298
+
 # AGENTS.md
 
 This document details Anya's agent, tool, and infrastructure system. Inside, you’ll find an in-depth reference for users, contributors, and developers—covering technical architecture, extensibility, data flow, plugin/daemon boundaries, marker logic, and best practices for a robust, persistent AI Neovim assistant.
@@ -209,7 +213,7 @@ plugin/anya.vim     # Vimscript bootstrap, sets load flags
 | `ANYA_MODEL`         | gpt-4.1    | Default LLM                  |
 | `ANYA_API_KEY`       | (unset)    | Override API key (for OpenRouter, etc.) |
 | `ANYA_API_BASE`      | (unset)    | Custom API endpoint (auto-detected for OpenRouter models) |
-| `ANYA_API_TYPE`      | responses  | API type: "responses" (default) or "chat_completions" |
+| `ANYA_API_TYPE`      | responses  | API type: "responses" (default), "chat_completions", or "anthropic" |
 | `ANYA_THINKING_BUDGET`| (unset)   | Reasoning effort for model   |
 | `ANYA_DISABLE_MCP`   | "0"        | Disable MCP agent/tools      |
 

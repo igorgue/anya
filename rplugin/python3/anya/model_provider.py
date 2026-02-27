@@ -2,6 +2,8 @@
 
 This is needed for providers like OpenRouter that use model names like 'anthropic/claude-opus-4'
 which contain '/' or ':' characters that the OpenAI Agents SDK doesn't handle directly.
+
+Also supports Anthropic API via the anthropic package.
 """
 
 import os
@@ -14,21 +16,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger("anya.model_provider")
 
 
-def needs_custom_provider(model: str, base_url: str | None = None) -> bool:
+def needs_custom_provider(
+    model: str, base_url: str | None = None, api_type: str = "responses"
+) -> bool:
     """Check if a custom model provider is needed.
 
     Returns True if:
     1. Model name contains '/' (e.g., OpenRouter models like 'anthropic/claude-opus-4')
     2. Model name contains ':' (e.g., OpenRouter variants like 'model:free')
     3. A custom base URL is specified (e.g., custom API endpoints)
+    4. API type is 'anthropic' (native Anthropic API)
     """
-    return "/" in model or ":" in model or base_url is not None
+    return (
+        "/" in model
+        or ":" in model
+        or base_url is not None
+        or api_type == "anthropic"
+    )
 
 
 def get_custom_model_provider(
     settings: "AgentSettings | None" = None,
 ):
-    """Get a custom ModelProvider for OpenRouter or other custom API endpoints.
+    """Get a custom ModelProvider for OpenRouter, Anthropic, or other custom API endpoints.
 
     Args:
         settings: Optional AgentSettings from client. If provided, these override
@@ -42,18 +52,27 @@ def get_custom_model_provider(
         model = settings.model or "gpt-4.1"
         base_url = settings.api_base
         api_key = settings.api_key
+        api_type = settings.api_type or "responses"
     else:
         model = os.environ.get("ANYA_MODEL", "gpt-4.1")
         base_url = os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE")
         api_key = os.environ.get("ANYA_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        api_type = os.environ.get("ANYA_API_TYPE", "responses")
 
-    if not needs_custom_provider(model, base_url):
+    if not needs_custom_provider(model, base_url, api_type):
         return None
 
     if not api_key:
         logger.warning("Custom provider needed but no API key found")
         return None
 
+    # Handle Anthropic API type
+    if api_type == "anthropic":
+        from .anthropic_model import get_anthropic_model_provider
+        
+        return get_anthropic_model_provider(settings)
+
+    # Handle OpenAI-compatible APIs (chat_completions)
     try:
         from agents import Model, ModelProvider, OpenAIChatCompletionsModel
         from openai import AsyncOpenAI
@@ -103,7 +122,7 @@ def get_run_config(settings: "AgentSettings | None" = None):
         base_url = os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE")
         api_type = os.environ.get("ANYA_API_TYPE", "responses")
 
-    if not needs_custom_provider(model, base_url):
+    if not needs_custom_provider(model, base_url, api_type):
         return None
 
     provider = get_custom_model_provider(settings)
@@ -119,8 +138,8 @@ def get_run_config(settings: "AgentSettings | None" = None):
     if os.environ.get("ANYA_DISABLE_TRACING", "1") == "1":
         set_tracing_disabled(True)
 
-    # For chat_completions API, disable nested handoff history as non-OpenAI
-    # providers don't support the nested message format
-    nest_handoff = api_type != "chat_completions"
+    # For chat_completions API or anthropic API, disable nested handoff history
+    # as non-OpenAI providers don't support the nested message format
+    nest_handoff = api_type not in ("chat_completions", "anthropic")
 
     return RunConfig(model_provider=provider, nest_handoff_history=nest_handoff)
