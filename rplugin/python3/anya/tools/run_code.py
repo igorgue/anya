@@ -393,8 +393,12 @@ async def run_code(
     if cwd is None:
         cwd = plugin_context.cwd if plugin_context.cwd else os.getcwd()
 
-    # Save code to project directory for later viewing
-    _save_code_to_project(code, title, cwd)
+    # Save code to project directory for later viewing.
+    # Always use the Neovim cwd (plugin_context.cwd) so the Lua-side
+    # open_code_at_cursor (which globs under vim.fn.getcwd()) can find it,
+    # even when the tool receives a different `cwd` for execution.
+    save_cwd = plugin_context.cwd if plugin_context.cwd else cwd
+    _save_code_to_project(code, title, save_cwd)
 
     # Set up UI rendezvous directory for anya.libs.ui
     ui_dir = os.path.join(cwd, ".anya", "ui", str(uuid.uuid4())[:8])
