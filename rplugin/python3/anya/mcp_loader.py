@@ -85,11 +85,14 @@ def create_mcp_servers(configs: list[MCPServerConfig]) -> list:
                 url = server_config.get("url")
                 url = _expand_env_vars(url)
 
-                params = {"url": url}
+                # Build headers with required Accept header for Streamable HTTP MCP
+                headers = _expand_env_vars(server_config.get("headers", {}))
+                # Streamable HTTP MCP servers require this Accept header.
+                # They may respond with plain JSON or SSE (text/event-stream).
+                headers["Accept"] = "application/json, text/event-stream"
+                headers["Content-Type"] = "application/json"
 
-                headers = server_config.get("headers", {})
-                if headers:
-                    params["headers"] = headers
+                params = {"url": url, "headers": headers}
 
                 server = MCPServerStreamableHttp(
                     name=name,

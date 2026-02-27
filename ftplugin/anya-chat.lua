@@ -42,12 +42,26 @@ vim.keymap.set("n", "<CR>", function()
   end
 end, { buffer = true, desc = "Open code, tool output, or toggle fold" })
 
+-- Open tool output on `go`
+vim.keymap.set("n", "go", function()
+  tool_output.open_output_at_cursor()
+end, { buffer = true, desc = "Open tool output for code at cursor" })
+
 -- Open code or tool output on <Space>
 vim.keymap.set("n", "<Space>", function()
   if not tool_output.open_code_at_cursor() then
     tool_output.open_at_cursor()
   end
 end, { buffer = true, desc = "Open code or tool output" })
+
+-- Right-click to open tool output (suppress default popup menu for this buffer)
+vim.keymap.set("n", "<RightMouse>", "<Nop>", { buffer = true })
+vim.keymap.set("n", "<RightRelease>", function()
+  local mpos = vim.fn.getmousepos()
+  vim.schedule(function()
+    tool_output.open_output_at_cursor(mpos.line, mpos.column)
+  end)
+end, { buffer = true, desc = "Open tool output on right-click" })
 
 -- Single-click to open code or tool output (mouse support)
 -- Capture mouse position immediately (before vim.schedule) for accurate column detection.

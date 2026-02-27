@@ -271,11 +271,32 @@ class _HttpSession:
             # Streamable HTTP MCP servers require this Accept header or they return 406/400.
             # They may respond with plain JSON or SSE (text/event-stream).
             "Accept": "application/json, text/event-stream",
-            **config.get("headers", {}),
+            **_expand_env(config.get("headers", {})),
         }
         self._req_id = 0
+        self._session_id: str | None = None
 
     def __enter__(self) -> "_HttpSession":
+        # MCP handshake — required before any tools/list or tools/call
+        init_result, resp_headers = self._rpc_raw(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "anya-libs", "version": "1.0"},
+            },
+            timeout=15,
+        )
+        # Capture session ID returned by the server
+        if resp_headers:
+            sid = resp_headers.get("Mcp-Session-Id") or resp_headers.get(
+                "mcp-session-id"
+            )
+            if sid:
+                self._session_id = sid
+                self._headers["Mcp-Session-Id"] = sid
+        # Notify server that we're ready
+        self._notify("notifications/initialized", {})
         return self
 
     def __exit__(self, *_):
@@ -285,7 +306,24 @@ class _HttpSession:
         self._req_id += 1
         return self._req_id
 
-    def _rpc(self, method: str, params: dict, timeout: int = 30) -> Any:
+    def _notify(self, method: str, params: dict, timeout: int = 5):
+        """Send a JSON-RPC notification (no id, no response expected)."""
+        body = json.dumps(
+            {"jsonrpc": "2.0", "method": method, "params": params}
+        ).encode()
+        req = urllib.request.Request(
+            self._url, data=body, headers=self._headers, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                resp.read()  # drain
+        except Exception:
+            pass  # notifications are fire-and-forget
+
+    def _rpc_raw(
+        self, method: str, params: dict, timeout: int = 30
+    ) -> tuple[Any, dict | None]:
+        """Send a JSON-RPC request and return (result, response_headers)."""
         req_id = self._next_id()
         body = json.dumps(
             {
@@ -301,16 +339,21 @@ class _HttpSession:
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
+                resp_headers = dict(resp.headers) if resp.headers else None
                 data = self._parse_response(raw)
                 if "error" in data:
                     raise MCPError(f"RPC error: {data['error']}")
-                return data.get("result")
+                return data.get("result"), resp_headers
         except MCPError:
             raise
         except urllib.error.HTTPError as e:
             raise MCPError(f"HTTP {e.code}: {e.reason}")
         except urllib.error.URLError as e:
             raise MCPError(f"Connection failed: {e.reason}")
+
+    def _rpc(self, method: str, params: dict, timeout: int = 30) -> Any:
+        result, _ = self._rpc_raw(method, params, timeout)
+        return result
 
     @staticmethod
     def _parse_response(raw: str) -> dict:

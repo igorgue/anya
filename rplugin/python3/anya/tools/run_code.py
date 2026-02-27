@@ -57,6 +57,27 @@ def _save_code_to_project(code: str, title: str, cwd: str) -> str | None:
         return None
 
 
+def _save_output_to_project(output: str, code: str, title: str, cwd: str) -> str | None:
+    """Save tool output to .anya/output/<sanitized-title>-<hash>.txt in the project directory.
+
+    Uses the same MD5 hash as the code file so they can be correlated.
+
+    Returns:
+        Path to the saved file, or None on failure.
+    """
+    try:
+        sanitized = _sanitize_title(title)
+        code_hash = hashlib.md5(code.encode()).hexdigest()[:8]
+        output_dir = os.path.join(cwd, ".anya", "output")
+        os.makedirs(output_dir, exist_ok=True)
+        file_path = os.path.join(output_dir, f"{sanitized}-{code_hash}.txt")
+        with open(file_path, "w") as f:
+            f.write(output)
+        return file_path
+    except OSError:
+        return None
+
+
 def _detect_virtualenv(cwd: str) -> str | None:
     """Detect the current virtualenv from environment or common locations.
 
@@ -508,6 +529,7 @@ async def run_code(
             result = await _run_with_ui_requests(exec_task, ui_dir, plugin_context)
 
             if result.get("error"):
+                _save_output_to_project(result["error"], code, title, save_cwd)
                 return f"Error executing code:\n{result['error']}"
 
             stdout = result.get("stdout", "")
@@ -515,10 +537,14 @@ async def run_code(
             returncode = result.get("returncode", 0)
 
             if returncode == 0:
-                return stdout if stdout.strip() else "Code executed successfully."
+                output = stdout if stdout.strip() else "Code executed successfully."
+                _save_output_to_project(output, code, title, save_cwd)
+                return output
             else:
                 error_msg = stderr if stderr.strip() else f"Exit code: {returncode}"
-                return f"Error executing code:\n{error_msg}"
+                output = f"Error executing code:\n{error_msg}"
+                _save_output_to_project(output, code, title, save_cwd)
+                return output
 
         elif plugin_context.has_nvim:
             process = await asyncio.create_subprocess_exec(
@@ -542,12 +568,16 @@ async def run_code(
             )
 
             if process.returncode == 0:
-                return stdout if stdout.strip() else "Code executed successfully."
+                output = stdout if stdout.strip() else "Code executed successfully."
+                _save_output_to_project(output, code, title, save_cwd)
+                return output
             else:
                 error_msg = (
                     stderr if stderr.strip() else f"Exit code: {process.returncode}"
                 )
-                return f"Error executing code:\n{error_msg}"
+                output = f"Error executing code:\n{error_msg}"
+                _save_output_to_project(output, code, title, save_cwd)
+                return output
 
         else:
             return "Error: No execution mechanism available. Cannot run code without client connection."
