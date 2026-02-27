@@ -44,6 +44,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
                 title TEXT,
+                cwd TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -105,17 +106,24 @@ def init_db() -> None:
             # Set all existing messages to have empty marker list
             conn.execute("UPDATE messages SET markers = '[]' WHERE markers IS NULL")
             conn.commit()
+
+        # Migration: Add cwd column to conversations if it doesn't exist
+        cursor = conn.execute("PRAGMA table_info(conversations)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "cwd" not in columns:
+            conn.execute("ALTER TABLE conversations ADD COLUMN cwd TEXT")
+            conn.commit()
     finally:
         conn.close()
 
 
-def save_conversation(id: str, timestamp: str) -> bool:
+def save_conversation(id: str, timestamp: str, cwd: str | None = None) -> bool:
     """Insert a new conversation."""
     conn = get_connection()
     try:
         conn.execute(
-            "INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, NULL, ?, ?)",
-            (id, timestamp, timestamp),
+            "INSERT INTO conversations (id, title, cwd, created_at, updated_at) VALUES (?, NULL, ?, ?, ?)",
+            (id, cwd, timestamp, timestamp),
         )
         conn.commit()
         return True
@@ -158,7 +166,7 @@ def get_conversation(id: str) -> dict[str, Any] | None:
     conn = get_connection()
     try:
         cursor = conn.execute(
-            "SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?",
+            "SELECT id, title, cwd, created_at, updated_at FROM conversations WHERE id = ?",
             (id,),
         )
         row = cursor.fetchone()
@@ -174,7 +182,7 @@ def list_conversations(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]
     conn = get_connection()
     try:
         cursor = conn.execute(
-            "SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            "SELECT id, title, cwd, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ? OFFSET ?",
             (limit, offset),
         )
         return [dict(row) for row in cursor.fetchall()]

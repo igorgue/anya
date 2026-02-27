@@ -1690,7 +1690,9 @@ vim.ui.input(
             # Save to database
             self._ensure_db()
             if is_new_conversation:
-                db.save_conversation(conv_id, timestamp)
+                # Store the current working directory with the conversation
+                cwd = self.nvim.call("getcwd")
+                db.save_conversation(conv_id, timestamp, cwd)
             db.save_message_dict(
                 msg_id=msg_id,
                 conversation_id=conv_id,
