@@ -4,6 +4,7 @@
 local dir = vim.fs.dirname(vim.uv.fs_realpath(debug.getinfo(1, "S").source:sub(2)))
 local parent = vim.fs.dirname(vim.fs.dirname(vim.uv.fs_realpath(debug.getinfo(1, "S").source:sub(2))))
 
+vim.opt.runtimepath:prepend(parent)
 vim.opt.runtimepath:append(dir .. "/danger")
 
 package.path = package.path .. ";" .. parent .. "/lua/?.lua;" .. parent .. "/lua/?/init.lua"
@@ -13,11 +14,13 @@ package.path = package.path .. ";" .. dir .. "/danger/lua/?.lua;" .. dir .. "/da
 package.path = package.path .. ";" .. dir .. "/nvim-treesitter/lua/?.lua;" .. dir .. "/nvim-treesitter/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/fidget/lua/?.lua;" .. dir .. "/fidget/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/blink/lua/?.lua;" .. dir .. "/blink/lua/?/init.lua"
+package.path = package.path .. ";" .. dir .. "/blink-cmp/lua/?.lua;" .. dir .. "/blink-cmp/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/noice/lua/?.lua;" .. dir .. "/noice/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/nui/lua/?.lua;" .. dir .. "/nui/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/nvim-notify/lua/?.lua;" .. dir .. "/nvim-notify/lua/?/init.lua"
 
 vim.opt.runtimepath:append(dir .. "/render-markdown")
+vim.opt.runtimepath:append(dir .. "/blink-cmp")
 
 -- opts
 vim.opt.signcolumn = "auto"
@@ -151,6 +154,11 @@ require("nvim-treesitter").install({
   "fish",
   "zsh",
 })
+vim.api.nvim_create_autocmd("FileType", {
+  callback = function(args)
+    pcall(vim.treesitter.start, args.buf)
+  end,
+})
 require("fidget").setup({})
 require("render-markdown").setup({
   file_types = { "anya-chat", "markdown" },
@@ -170,7 +178,9 @@ require("render-markdown").setup({
 })
 require("notify").setup({})
 require("noice").setup({})
-require("blink").setup({
+require("blink").setup({})
+require("blink.cmp").setup({
+  fuzzy = { implementation = "lua" },
   completion = {
     list = {
       selection = {
@@ -190,7 +200,15 @@ require("blink").setup({
           { "kind_icon", "label", gap = 1 },
           { "label_description", "source_id" },
         },
+        treesitter = { "lsp" },
       },
+    },
+    documentation = {
+      auto_show = true,
+      auto_show_delay_ms = 200,
+    },
+    ghost_text = {
+      enabled = vim.g.ai_cmp,
     },
   },
   signature = {
@@ -206,6 +224,7 @@ require("blink").setup({
     ["<S-Tab>"] = { "fallback" },
   },
   sources = {
+    default = { "anya_files", "anya_commands" },
     providers = {
       snippets = {
         opts = {
@@ -214,41 +233,28 @@ require("blink").setup({
           },
         },
       },
+      anya_files = {
+        name = "Anya Files",
+        module = "anya.blink.files",
+        enabled = function()
+          return vim.bo.filetype == "anya-prompt"
+        end,
+      },
+      anya_commands = {
+        name = "Anya Commands",
+        module = "anya.blink.commands",
+        enabled = function()
+          return vim.bo.filetype == "anya-prompt"
+        end,
+      },
     },
   },
   snippets = {
     preset = "default",
   },
-
   appearance = {
-    -- sets the fallback highlight groups to nvim-cmp's highlight groups
-    -- useful for when your theme doesn't support blink.cmp
-    -- will be removed in a future release, assuming themes add support
     use_nvim_cmp_as_default = false,
-    -- set to 'mono' for 'Nerd Font Mono' or 'normal' for 'Nerd Font'
-    -- adjusts spacing to ensure icons are aligned
     nerd_font_variant = "mono",
-  },
-
-  completion = {
-    accept = {
-      -- experimental auto-brackets support
-      auto_brackets = {
-        enabled = true,
-      },
-    },
-    menu = {
-      draw = {
-        treesitter = { "lsp" },
-      },
-    },
-    documentation = {
-      auto_show = true,
-      auto_show_delay_ms = 200,
-    },
-    ghost_text = {
-      enabled = vim.g.ai_cmp,
-    },
   },
   cmdline = {
     enabled = true,
@@ -267,9 +273,6 @@ require("blink").setup({
       ghost_text = { enabled = true },
     },
   },
-  keymap = {
-    preset = "enter",
-  },
 })
 require("anya").setup({})
 
@@ -277,7 +280,7 @@ require("anya").setup({})
 vim.cmd("colorscheme danger")
 
 -- keymaps
-vim.keymap.set("n", "<leader>q", "<cmd>q!<CR>", { desc = "Quit" })
-vim.keymap.set("i", "<C-q>", "<Esc><cmd>q!<CR>", { desc = "Quit" })
+vim.keymap.set("n", "<leader>q", "<cmd>qa!<CR>", { desc = "Quit" })
+vim.keymap.set("i", "<C-q>", "<Esc><cmd>qa!<CR>", { desc = "Quit" })
 
 -- autocommands
