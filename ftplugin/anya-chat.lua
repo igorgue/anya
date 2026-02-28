@@ -273,6 +273,11 @@ vim.keymap.set("n", "<C-k>", function()
   -- No-op: already at top window
 end, { buffer = true, nowait = true, desc = "Stay in chat (top window)" })
 
+-- <C-h> navigates left out of the Anya pane (pane layout) or does nothing
+vim.keymap.set("n", "<C-h>", function()
+  require("anya.float_focus").focus_left()
+end, { buffer = true, nowait = true, desc = "Navigate left out of Anya pane" })
+
 -- Focus toggle between chat and prompt with Tab
 vim.keymap.set("n", "<Tab>", function()
   require("anya.float_focus").focus_prompt()
@@ -303,6 +308,14 @@ end, { buffer = true, desc = "Grow prompt height (Alt CSI)" })
 vim.keymap.set("n", "<Esc>Ob", function()
   resize_prompt_height(-1)
 end, { buffer = true, desc = "Reduce prompt height (Alt CSI)" })
+
+-- Register which-key group for localleader keymaps (forces re-scan after ftplugin sets them)
+local wk_ok, wk = pcall(require, "which-key")
+if wk_ok then
+  wk.add({
+    { "<localleader>", group = "Anya", buffer = vim.api.nvim_get_current_buf() },
+  })
+end
 
 -- Expose globally so streaming can call it
 _G.anya_highlight_chat_file_refs = highlight_refs

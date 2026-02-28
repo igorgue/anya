@@ -194,6 +194,11 @@ vim.keymap.set({ "n", "i" }, "<C-w>h", function()
   require("anya.float_focus").check_and_redirect()
 end, { buffer = true, desc = "Navigate left (trapped)" })
 
+-- Bare <C-h> also navigates left out of the pane
+vim.keymap.set({ "n", "i" }, "<C-h>", function()
+  require("anya.float_focus").focus_left()
+end, { buffer = true, nowait = true, desc = "Navigate left out of Anya pane" })
+
 vim.keymap.set({ "n", "i" }, "<C-w>j", function()
   require("anya.float_focus").check_and_redirect()
 end, { buffer = true, desc = "Navigate down (trapped)" })

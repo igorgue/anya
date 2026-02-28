@@ -421,6 +421,14 @@ def new(
     layout_win = nvim.api.get_current_win()
     _anya_state["layout_win"] = layout_win
 
+    # Store layout info on the window for focus navigation
+    if layout == "pane":
+        try:
+            nvim.api.win_set_var(layout_win, "anya_layout_mode", "pane")
+            nvim.api.win_set_var(layout_win, "anya_layout_direction", direction or "right")
+        except Exception:
+            pass
+
     # Configure layout window (minimal UI)
     nvim.api.win_set_option(layout_win, "number", False)
     nvim.api.win_set_option(layout_win, "relativenumber", False)
@@ -722,14 +730,8 @@ def new(
         buffer = {layout_buf_id},
         group = group,
         callback = function()
-            vim.schedule(function()
-                if vim.api.nvim_get_current_buf() == {layout_buf_id} then
-                    local ok, win = pcall(vim.api.nvim_buf_get_var, {layout_buf_id}, "anya_prompt_win")
-                    if ok and vim.api.nvim_win_is_valid(win) then
-                        pcall(vim.api.nvim_set_current_win, win)
-                    end
-                end
-            end)
+            -- Run synchronously so we grab focus before other WinEnter handlers
+            require("anya.float_focus").on_container_enter()
         end
     }})
     """
