@@ -3,8 +3,8 @@
 Usage:
     from anya.libs import fs
 
-    content = fs.read_file("src/main.py")
-    content = fs.read_file("src/main.py@100-200")   # line range
+    print(fs.read_file("src/main.py"))
+    print(fs.read_file("src/main.py@100-200"))   # line range
     fs.write_file("out.txt", "hello")
     fs.create_file("new.py", "# stub")
     files = fs.list_files(".")
