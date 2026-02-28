@@ -95,21 +95,30 @@ def parse_usage(usage: Any, provider: str | None = None) -> TokenUsage:
     input_tokens = getattr(usage, "input_tokens", 0) or 0
     output_tokens = getattr(usage, "output_tokens", 0) or 0
 
-    # Get detailed breakdown if available
-    details = getattr(usage, "details", None)
     cached_tokens = 0
     reasoning_tokens = 0
 
-    if details:
-        # Check for cached tokens in input_tokens_details
-        input_details = getattr(details, "input_tokens_details", None)
-        if input_details:
-            cached_tokens = getattr(input_details, "cached_tokens", 0) or 0
+    # The SDK Usage class has input_tokens_details and output_tokens_details
+    # as direct attributes (not nested under 'details')
+    input_details = getattr(usage, "input_tokens_details", None)
+    if input_details:
+        cached_tokens = getattr(input_details, "cached_tokens", 0) or 0
 
-        # Check for reasoning tokens in output_tokens_details
-        output_details = getattr(details, "output_tokens_details", None)
-        if output_details:
-            reasoning_tokens = getattr(output_details, "reasoning_tokens", 0) or 0
+    output_details = getattr(usage, "output_tokens_details", None)
+    if output_details:
+        reasoning_tokens = getattr(output_details, "reasoning_tokens", 0) or 0
+
+    # Also check for 'details' wrapper (some API responses use this structure)
+    if not cached_tokens and not reasoning_tokens:
+        details = getattr(usage, "details", None)
+        if details:
+            input_details = getattr(details, "input_tokens_details", None)
+            if input_details:
+                cached_tokens = getattr(input_details, "cached_tokens", 0) or 0
+
+            output_details = getattr(details, "output_tokens_details", None)
+            if output_details:
+                reasoning_tokens = getattr(output_details, "reasoning_tokens", 0) or 0
 
     # Anthropic doesn't subtract cached tokens from input (they're additional)
     # Other providers include cached in input, so we subtract
