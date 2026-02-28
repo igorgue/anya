@@ -19,6 +19,7 @@ package.path = package.path .. ";" .. dir .. "/noice/lua/?.lua;" .. dir .. "/noi
 package.path = package.path .. ";" .. dir .. "/nui/lua/?.lua;" .. dir .. "/nui/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/nvim-notify/lua/?.lua;" .. dir .. "/nvim-notify/lua/?/init.lua"
 
+vim.opt.runtimepath:append(dir .. "/which-key")
 vim.opt.runtimepath:append(dir .. "/render-markdown")
 vim.opt.runtimepath:append(dir .. "/blink-cmp")
 

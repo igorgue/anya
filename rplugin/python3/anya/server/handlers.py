@@ -875,6 +875,7 @@ class RequestHandler:
             try:
                 if hasattr(result, "context_wrapper") and result.context_wrapper:
                     raw_usage = result.context_wrapper.usage
+                    self.logger.debug(f"Raw usage from context_wrapper: {raw_usage}")
                     if raw_usage:
                         # Get model from client settings (not env var, which may differ)
                         model = agent_settings.model or os.environ.get(
@@ -915,7 +916,7 @@ class RequestHandler:
                             f"[in:{usage.input} out:{usage.output} cache:{usage.cache_read}]"
                         )
             except Exception as e:
-                self.logger.debug(f"Error sending token usage: {e}")
+                self.logger.warning(f"Error sending token usage: {e}", exc_info=True)
 
         finally:
             # Ensure thinking is closed even on exception/cancellation
