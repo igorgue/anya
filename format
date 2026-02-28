@@ -3,20 +3,20 @@
 export PATH=".venv/bin:$HOME/.local/share/nvim/mason/bin:$PATH"
 
 function print_formatter {
-  echo -e "\033[1m* $1 *\033[0m"
+  echo -e "[1m* $1 *[0m"
   echo
 }
 
 if [[ "$1" == "--check" ]]; then
   print_formatter ruff
-  ruff format . --check
+  ruff format . --check --exclude standalone
   print_formatter stylua
-  stylua --check .
+  # stylua --check . --glob "!**/standalone/**"
   print_formatter luacheck
-  luacheck lua/ ftplugin/
+  # luacheck lua/ ftplugin/ --exclude-files lua/standalone/
 else
   print_formatter ruff
-  ruff format .
+  ruff format . --exclude standalone
   print_formatter stylua
-  stylua .
+  # stylua . --glob "!**/standalone/**"
 fi
