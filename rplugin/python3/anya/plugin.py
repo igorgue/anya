@@ -2275,8 +2275,6 @@ Usage:
         except Exception as e:
             return {"success": False, "message": str(e)}
 
-
-
     @pynvim.function("AnyaDaemonStatus", sync=True)
     def anya_daemon_status(self, args):
         """Get daemon status."""

@@ -384,5 +384,4 @@ end
 -- Initialize request tracking when module loads
 M.setup_request_tracking()
 
-
 return M

@@ -256,7 +256,6 @@ vim.keymap.set("n", "<localleader><localleader>", function()
   require("anya.float_focus").toggle_focus()
 end, { buffer = true, desc = "Toggle between chat and prompt" })
 
-
 -- toggle history
 vim.keymap.set("n", "<localleader>h", function()
   vim.cmd("Anya history")

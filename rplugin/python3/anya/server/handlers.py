@@ -877,7 +877,9 @@ class RequestHandler:
                     raw_usage = result.context_wrapper.usage
                     if raw_usage:
                         # Get model from client settings (not env var, which may differ)
-                        model = agent_settings.model or os.environ.get("ANYA_MODEL", DEFAULT_MODEL)
+                        model = agent_settings.model or os.environ.get(
+                            "ANYA_MODEL", DEFAULT_MODEL
+                        )
 
                         # Parse usage with detailed breakdown (opencode approach)
                         usage = parse_usage(raw_usage, provider=model)

@@ -240,7 +240,7 @@ class AgentManager:
 
         async def _probe_one(server):
             """Probe a single MCP server with timeout.
-            
+
             IMPORTANT: We use anyio.fail_after for timeouts because the MCP library
             uses anyio task groups internally. Using asyncio.timeout causes
             "Attempted to exit cancel scope in a different task" errors.
@@ -266,28 +266,34 @@ class AgentManager:
                                 "description": getattr(
                                     t,
                                     "description",
-                                    t.get("description", "") if isinstance(t, dict) else "",
+                                    t.get("description", "")
+                                    if isinstance(t, dict)
+                                    else "",
                                 ),
                             }
                             for t in (tools or [])
                         ]
                         await self._emit_system_event(
                             StreamEventType.MCP_SERVER_READY,
-                            {"server": name, "status": "ready", "tool_count": len(tools)},
+                            {
+                                "server": name,
+                                "status": "ready",
+                                "tool_count": len(tools),
+                            },
                         )
                         return name
             except TimeoutError:
-                self.logger.warning(f"MCP probe timeout for \'{name}\'")
+                self.logger.warning(f"MCP probe timeout for '{name}'")
                 await self._emit_system_event(
                     StreamEventType.MCP_SERVER_READY,
                     {"server": name, "status": "timeout"},
                 )
                 return None
             except asyncio.CancelledError:
-                self.logger.info(f"MCP probe cancelled for \'{name}\'")
+                self.logger.info(f"MCP probe cancelled for '{name}'")
                 raise
             except Exception as e:
-                self.logger.warning(f"MCP probe failed for \'{name}\': {e}")
+                self.logger.warning(f"MCP probe failed for '{name}': {e}")
                 await self._emit_system_event(
                     StreamEventType.MCP_SERVER_READY,
                     {"server": name, "status": "failed", "error": str(e)},
@@ -349,7 +355,7 @@ class AgentManager:
         self.logger.info("Shutting down agent manager...")
 
         # Cancel the MCP probe task if it's still running
-        if hasattr(self, '_mcp_probe_task') and self._mcp_probe_task:
+        if hasattr(self, "_mcp_probe_task") and self._mcp_probe_task:
             if not self._mcp_probe_task.done():
                 self._mcp_probe_task.cancel()
                 try:

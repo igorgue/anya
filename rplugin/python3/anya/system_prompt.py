@@ -196,7 +196,9 @@ def get_current_date_utc() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
-def read_agent_md_from_cwd(nvim: Any | None = None, cwd: str | None = None) -> str | None:
+def read_agent_md_from_cwd(
+    nvim: Any | None = None, cwd: str | None = None
+) -> str | None:
     """Read AGENTS.md from the current working directory if it exists.
 
     Returns the file contents as a string, or None if the file doesn't exist.
@@ -229,7 +231,9 @@ def read_agent_md_from_cwd(nvim: Any | None = None, cwd: str | None = None) -> s
         return None
 
 
-def build_system_prompt_context(nvim: Any | None = None, cwd: str | None = None) -> SystemPromptContext:
+def build_system_prompt_context(
+    nvim: Any | None = None, cwd: str | None = None
+) -> SystemPromptContext:
     return SystemPromptContext(
         os=get_os_info(),
         kernel=get_kernel_info(),
@@ -241,7 +245,9 @@ def build_system_prompt_context(nvim: Any | None = None, cwd: str | None = None)
     )
 
 
-def expand_placeholders(template: str, nvim: Any | None = None, cwd: str | None = None) -> str:
+def expand_placeholders(
+    template: str, nvim: Any | None = None, cwd: str | None = None
+) -> str:
     ctx = build_system_prompt_context(nvim, cwd=cwd)
 
     # Mirror the Lua :gsub chain with simple replacements.
@@ -276,7 +282,9 @@ def system_context_block(nvim: Any | None = None, cwd: str | None = None) -> str
     )
 
 
-def apply_system_prompt(template: str, nvim: Any | None = None, cwd: str | None = None) -> str:
+def apply_system_prompt(
+    template: str, nvim: Any | None = None, cwd: str | None = None
+) -> str:
     """Expand known placeholders, then append the system context block and AGENTS.md if present."""
     expanded = expand_placeholders(template, nvim, cwd=cwd)
 

@@ -28,10 +28,7 @@ def needs_custom_provider(
     4. API type is 'anthropic' (native Anthropic API)
     """
     return (
-        "/" in model
-        or ":" in model
-        or base_url is not None
-        or api_type == "anthropic"
+        "/" in model or ":" in model or base_url is not None or api_type == "anthropic"
     )
 
 
@@ -69,7 +66,7 @@ def get_custom_model_provider(
     # Handle Anthropic API type
     if api_type == "anthropic":
         from .anthropic_model import get_anthropic_model_provider
-        
+
         return get_anthropic_model_provider(settings)
 
     # Handle OpenAI-compatible APIs (chat_completions)

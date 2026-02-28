@@ -156,24 +156,20 @@ local function show_cwd_confirmation(item, callback)
   }
 
   -- Use vim.ui.select for the choice
-  vim.ui.select(
-    { "Switch to project and load", "Load anyway", "Cancel" },
-    {
-      prompt = "",
-      format_item = function(choice)
-        return choice
-      end,
-    },
-    function(choice, idx)
-      if not choice or idx == 3 then
-        callback("cancel")
-      elseif idx == 1 then
-        callback("switch")
-      elseif idx == 2 then
-        callback("load")
-      end
+  vim.ui.select({ "Switch to project and load", "Load anyway", "Cancel" }, {
+    prompt = "",
+    format_item = function(choice)
+      return choice
+    end,
+  }, function(choice, idx)
+    if not choice or idx == 3 then
+      callback("cancel")
+    elseif idx == 1 then
+      callback("switch")
+    elseif idx == 2 then
+      callback("load")
     end
-  )
+  end)
 end
 
 --- Open the conversation picker

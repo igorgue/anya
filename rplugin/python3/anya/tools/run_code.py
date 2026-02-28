@@ -150,7 +150,6 @@ def _get_background_dir(cwd: str) -> str:
     return bg_dir
 
 
-
 def _write_job_meta(cwd: str, process_id: str, data: dict) -> None:
     """Write job metadata to .anya/background/<process_id>.meta.json."""
     bg_dir = _get_background_dir(cwd)
@@ -168,7 +167,6 @@ def _write_job_meta(cwd: str, process_id: str, data: dict) -> None:
         except OSError:
             pass
         raise
-
 
 
 async def _monitor_background_process(
@@ -211,17 +209,23 @@ async def _monitor_background_process(
             )
 
         # Write metadata file for persistence
-        _write_job_meta(cwd, process_id, {
-            "process_id": process_id,
-            "title": title,
-            "command": command,
-            "cwd": cwd,
-            "start_time": _background_processes.get(process_id, {}).get("start_time", ""),
-            "end_time": end_time,
-            "status": final_status,
-            "returncode": process.returncode,
-            "pid": process.pid,
-        })
+        _write_job_meta(
+            cwd,
+            process_id,
+            {
+                "process_id": process_id,
+                "title": title,
+                "command": command,
+                "cwd": cwd,
+                "start_time": _background_processes.get(process_id, {}).get(
+                    "start_time", ""
+                ),
+                "end_time": end_time,
+                "status": final_status,
+                "returncode": process.returncode,
+                "pid": process.pid,
+            },
+        )
 
     except Exception as e:
         if process_id in _background_processes:
@@ -233,18 +237,24 @@ async def _monitor_background_process(
             )
         # Write error metadata
         try:
-            _write_job_meta(cwd, process_id, {
-                "process_id": process_id,
-                "title": title,
-                "command": command,
-                "cwd": cwd,
-                "start_time": _background_processes.get(process_id, {}).get("start_time", ""),
-                "end_time": datetime.now().isoformat(),
-                "status": "error",
-                "returncode": None,
-                "pid": getattr(process, 'pid', None),
-                "error": str(e),
-            })
+            _write_job_meta(
+                cwd,
+                process_id,
+                {
+                    "process_id": process_id,
+                    "title": title,
+                    "command": command,
+                    "cwd": cwd,
+                    "start_time": _background_processes.get(process_id, {}).get(
+                        "start_time", ""
+                    ),
+                    "end_time": datetime.now().isoformat(),
+                    "status": "error",
+                    "returncode": None,
+                    "pid": getattr(process, "pid", None),
+                    "error": str(e),
+                },
+            )
         except Exception:
             pass
     finally:
@@ -253,7 +263,6 @@ async def _monitor_background_process(
             os.unlink(script_path)
         except OSError:
             pass
-
 
 
 def get_background_process_status(process_id: str) -> dict | None:
@@ -527,17 +536,21 @@ async def run_code(
                         "status": "running",
                         "title": title,
                     }
-                    _write_job_meta(cwd, process_id, {
-                        "process_id": process_id,
-                        "title": title,
-                        "command": command,
-                        "cwd": cwd,
-                        "start_time": start_time,
-                        "end_time": None,
-                        "status": "running",
-                        "returncode": None,
-                        "pid": None,
-                    })
+                    _write_job_meta(
+                        cwd,
+                        process_id,
+                        {
+                            "process_id": process_id,
+                            "title": title,
+                            "command": command,
+                            "cwd": cwd,
+                            "start_time": start_time,
+                            "end_time": None,
+                            "status": "running",
+                            "returncode": None,
+                            "pid": None,
+                        },
+                    )
                     return f"Background process started. Process ID: {process_id}\nOutput file: {output_file}"
                 else:
                     # Fallback: start via normal exec but tell it to run in background
@@ -559,17 +572,21 @@ async def run_code(
                         "status": "running",
                         "title": title,
                     }
-                    _write_job_meta(cwd, process_id, {
-                        "process_id": process_id,
-                        "title": title,
-                        "command": command,
-                        "cwd": cwd,
-                        "start_time": start_time,
-                        "end_time": None,
-                        "status": "running",
-                        "returncode": None,
-                        "pid": None,
-                    })
+                    _write_job_meta(
+                        cwd,
+                        process_id,
+                        {
+                            "process_id": process_id,
+                            "title": title,
+                            "command": command,
+                            "cwd": cwd,
+                            "start_time": start_time,
+                            "end_time": None,
+                            "status": "running",
+                            "returncode": None,
+                            "pid": None,
+                        },
+                    )
 
                     return f"Background process started. Process ID: {process_id}\nOutput file: {output_file}"
 
@@ -592,23 +609,32 @@ async def run_code(
                     "status": "running",
                     "title": title,
                 }
-                _write_job_meta(cwd, process_id, {
-                    "process_id": process_id,
-                    "title": title,
-                    "command": command,
-                    "cwd": cwd,
-                    "start_time": start_time,
-                    "end_time": None,
-                    "status": "running",
-                    "returncode": None,
-                    "pid": process.pid,
-                })
+                _write_job_meta(
+                    cwd,
+                    process_id,
+                    {
+                        "process_id": process_id,
+                        "title": title,
+                        "command": command,
+                        "cwd": cwd,
+                        "start_time": start_time,
+                        "end_time": None,
+                        "status": "running",
+                        "returncode": None,
+                        "pid": process.pid,
+                    },
+                )
 
                 # Start monitoring task
                 asyncio.create_task(
                     _monitor_background_process(
-                        process_id, process, command, cwd, script_path, output_file,
-                        title
+                        process_id,
+                        process,
+                        command,
+                        cwd,
+                        script_path,
+                        output_file,
+                        title,
                     )
                 )
 

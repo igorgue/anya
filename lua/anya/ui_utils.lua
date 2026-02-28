@@ -99,7 +99,6 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, "AnyaWinBar", { link = "Comment" })
 end
 
-
 -- Handle click on token progress bar
 -- @param id: Click region ID (unused)
 -- @param clicks: Number of clicks (unused)

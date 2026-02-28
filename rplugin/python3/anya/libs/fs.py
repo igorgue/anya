@@ -101,7 +101,7 @@ def read_file(path_with_range: str, cwd: str | None = None) -> str:
         # Strip trailing newline, we'll add our own
         stripped = line.rstrip("\n")
         numbered_lines.append(f"{line_num:>{line_num_width}}. {stripped}")
-    
+
     content = "\n".join(numbered_lines)
 
     header = (

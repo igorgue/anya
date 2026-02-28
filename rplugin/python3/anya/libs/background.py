@@ -42,9 +42,7 @@ def _write_meta_file(meta_path: str, data: dict) -> None:
     data["updated_at"] = datetime.now().isoformat()
     # Write to temp file then rename for atomicity
     fd, temp_path = tempfile.mkstemp(
-        dir=os.path.dirname(meta_path),
-        prefix=".tmp_meta_",
-        suffix=".json"
+        dir=os.path.dirname(meta_path), prefix=".tmp_meta_", suffix=".json"
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -153,10 +151,7 @@ def tail_logs(process_id: str, lines: int = 50, cwd: str | None = None) -> str:
 
 
 def read_logs(
-    process_id: str,
-    start: int = 0,
-    end: int | None = None,
-    cwd: str | None = None
+    process_id: str, start: int = 0, end: int | None = None, cwd: str | None = None
 ) -> str:
     """Read a range of lines from a background job's output log.
 
@@ -224,10 +219,16 @@ def stop_job(process_id: str, cwd: str | None = None) -> dict:
 
     meta = get_job(process_id, cwd)
     if not meta:
-        return {"success": False, "message": f"No job found with process_id: {process_id}"}
+        return {
+            "success": False,
+            "message": f"No job found with process_id: {process_id}",
+        }
 
     if meta.get("status") != "running":
-        return {"success": False, "message": f"Job {process_id} is not running (status: {meta.get('status')})"}
+        return {
+            "success": False,
+            "message": f"Job {process_id} is not running (status: {meta.get('status')})",
+        }
 
     pid = meta.get("pid")
     if not pid:
@@ -241,7 +242,10 @@ def stop_job(process_id: str, cwd: str | None = None) -> dict:
         meta["status"] = "stopping"
         meta["stop_requested_at"] = datetime.now().isoformat()
         _write_meta_file(meta_path, meta)
-        return {"success": True, "message": f"Sent SIGTERM to process {pid} (job {process_id})"}
+        return {
+            "success": True,
+            "message": f"Sent SIGTERM to process {pid} (job {process_id})",
+        }
     except ProcessLookupError:
         return {"success": False, "message": f"Process {pid} no longer exists"}
     except PermissionError:
@@ -254,7 +258,7 @@ def wait_for_job(
     process_id: str,
     timeout_seconds: float = 30.0,
     poll_interval: float = 0.5,
-    cwd: str | None = None
+    cwd: str | None = None,
 ) -> dict:
     """Wait for a background job to complete, returning its final status.
 

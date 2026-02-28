@@ -39,7 +39,9 @@ class AnthropicModel:
 
         messages = self._convert_input(input)
         anthropic_tools = self._convert_tools(tools, handoffs)
-        params = self._build_params(model_settings, messages, system_instructions, anthropic_tools)
+        params = self._build_params(
+            model_settings, messages, system_instructions, anthropic_tools
+        )
 
         response = await self.client.messages.create(**params)
         output = self._convert_output(response)
@@ -87,9 +89,12 @@ class AnthropicModel:
 
         messages = self._convert_input(input)
         anthropic_tools = self._convert_tools(tools, handoffs)
-        params = self._build_params(model_settings, messages, system_instructions, anthropic_tools)
+        params = self._build_params(
+            model_settings, messages, system_instructions, anthropic_tools
+        )
 
         seq = [0]
+
         def next_seq():
             n = seq[0]
             seq[0] += 1
@@ -346,7 +351,10 @@ class AnthropicModel:
         anthropic_tools: list,
     ) -> dict:
         import json
-        logger.debug("_build_params messages:\n%s", json.dumps(messages, indent=2, default=str))
+
+        logger.debug(
+            "_build_params messages:\n%s", json.dumps(messages, indent=2, default=str)
+        )
         params: dict = {
             "model": self.model,
             "max_tokens": (getattr(model_settings, "max_tokens", None) or 4096),
@@ -397,7 +405,9 @@ class AnthropicModel:
 
             # Handle items with type="message" OR simple {"role": ..., "content": ...}
             # dicts (the agents SDK passes history items without a type field)
-            if item_type == "message" or (item_type is None and _get("role") is not None):
+            if item_type == "message" or (
+                item_type is None and _get("role") is not None
+            ):
                 role = _get("role", "user")
                 content = _get("content", "")
                 if isinstance(content, str):
@@ -409,26 +419,34 @@ class AnthropicModel:
             elif item_type == "function_call":
                 # Assistant tool call -> tool_use block in assistant message
                 call_id = _get("call_id") or _get("id") or ""
-                raw.append({
-                    "role": "assistant",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": call_id,
-                        "name": _get("name", ""),
-                        "input": self._parse_json(_get("arguments", "{}")),
-                    }],
-                })
+                raw.append(
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": call_id,
+                                "name": _get("name", ""),
+                                "input": self._parse_json(_get("arguments", "{}")),
+                            }
+                        ],
+                    }
+                )
 
             elif item_type == "function_call_output":
                 # Tool result -> tool_result block in user message
-                raw.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": _get("call_id", ""),
-                        "content": str(_get("output", "")),
-                    }],
-                })
+                raw.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": _get("call_id", ""),
+                                "content": str(_get("output", "")),
+                            }
+                        ],
+                    }
+                )
 
             # Ignore unknown item types (reasoning, mcp, etc.)
 
@@ -451,8 +469,16 @@ class AnthropicModel:
     def _convert_content_blocks(self, blocks: list) -> list:
         result = []
         for block in blocks:
-            btype = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
-            text = block.get("text") if isinstance(block, dict) else getattr(block, "text", "")
+            btype = (
+                block.get("type")
+                if isinstance(block, dict)
+                else getattr(block, "type", None)
+            )
+            text = (
+                block.get("text")
+                if isinstance(block, dict)
+                else getattr(block, "text", "")
+            )
 
             if btype in ("text", "output_text"):
                 result.append({"type": "text", "text": text or ""})
@@ -468,21 +494,29 @@ class AnthropicModel:
         result = []
         for tool in tools:
             try:
-                schema = tool.params_json_schema if hasattr(tool, "params_json_schema") else {}
-                result.append({
-                    "name": tool.name,
-                    "description": getattr(tool, "description", "") or "",
-                    "input_schema": schema or {"type": "object", "properties": {}},
-                })
+                schema = (
+                    tool.params_json_schema
+                    if hasattr(tool, "params_json_schema")
+                    else {}
+                )
+                result.append(
+                    {
+                        "name": tool.name,
+                        "description": getattr(tool, "description", "") or "",
+                        "input_schema": schema or {"type": "object", "properties": {}},
+                    }
+                )
             except Exception as e:
                 logger.warning(f"Failed to convert tool {tool}: {e}")
         for handoff in handoffs:
             try:
-                result.append({
-                    "name": handoff.tool_name,
-                    "description": getattr(handoff, "tool_description", "") or "",
-                    "input_schema": {"type": "object", "properties": {}},
-                })
+                result.append(
+                    {
+                        "name": handoff.tool_name,
+                        "description": getattr(handoff, "tool_description", "") or "",
+                        "input_schema": {"type": "object", "properties": {}},
+                    }
+                )
             except Exception as e:
                 logger.warning(f"Failed to convert handoff {handoff}: {e}")
         return result
@@ -501,7 +535,11 @@ class AnthropicModel:
 
     def _convert_output(self, response: Any) -> list:
         """Convert Anthropic response content to SDK output items."""
-        from openai.types.responses import ResponseOutputMessage, ResponseOutputText, ResponseFunctionToolCall
+        from openai.types.responses import (
+            ResponseOutputMessage,
+            ResponseOutputText,
+            ResponseFunctionToolCall,
+        )
 
         output = []
         text_blocks = []
@@ -510,10 +548,13 @@ class AnthropicModel:
         for block in response.content:
             if block.type == "text":
                 text_blocks.append(
-                    ResponseOutputText(text=block.text, type="output_text", annotations=[])
+                    ResponseOutputText(
+                        text=block.text, type="output_text", annotations=[]
+                    )
                 )
             elif block.type == "tool_use":
                 import json
+
                 tool_blocks.append(
                     ResponseFunctionToolCall(
                         id=response.id,
@@ -540,6 +581,7 @@ class AnthropicModel:
     @staticmethod
     def _parse_json(s: str) -> dict:
         import json
+
         try:
             return json.loads(s)
         except Exception:
