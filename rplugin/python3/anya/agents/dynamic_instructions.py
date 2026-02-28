@@ -1,6 +1,6 @@
 """Dynamic instruction generation for agents based on available MCP servers."""
 
-from typing import Any, Dict, List
+from typing import Any, List
 import asyncio
 
 
@@ -45,7 +45,7 @@ def _extract_tool_info(tool: Any) -> tuple[str, str, dict]:
                         import json
 
                         input_schema = json.loads(schema)
-                    except:
+                    except (json.JSONDecodeError, TypeError):
                         pass
                 break
 

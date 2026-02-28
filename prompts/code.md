@@ -160,6 +160,10 @@ result = mcp.call("zai-vision", "diagnose_error_screenshot", {"imagePath": "/pat
 | List directory contents | `fs.list_files()` |
 | Search code in project | `fs.search_code()` |
 | Run shell command | `shell.run()` |
+| Run long-running process | `run_code` with `background=True` |
+| Check background job logs | `background.tail_logs()` |
+| Stop a background job | `background.stop_job()` |
+| List background jobs | `background.list_jobs()` |
 | GitHub CLI | `shell.gh()` |
 | Get library docs | `mcp.call("context7", ...)` |
 | Search the web | `mcp.call("zai-web-search", ...)` or `search.web()` |
@@ -184,17 +188,50 @@ content = fs.read_file("src/main.py")
 print(open("src/main.py").read())
 ```
 
-### Background Execution
+### Background Jobs: `from anya.libs import background`
 
-For long-running processes, use `background=True`:
+**ALWAYS use `background=True` on `run_code` for long-running processes.
+NEVER use `shell.run()` or `subprocess.Popen` for processes that should run in the background.**
 
+You MUST proactively decide to use `background=True` whenever the command is expected to run indefinitely
+or for a long time. This includes but is not limited to:
+- Servers (`mix phx.server`, `npm run dev`, `python -m http.server`, `rails server`, etc.)
+- File watchers (`mix test --watch`, `npm run watch`, `inotifywait`, etc.)
+- Long-running builds or CI jobs
+- Any process that listens on a port or runs in a loop
+
+Do NOT wait for the user to say "in the background" -- if the command would block the agent, run it in the background automatically.
+
+To start a background job, pass `background=True` to `run_code`. The tool returns a process ID immediately.
+
+To inspect, monitor, or manage background jobs, use the `background` library:
+
+- `background.list_jobs()` - List all background jobs in the project.
+- `background.get_job(process_id)` - Get metadata for a specific job.
+- `background.tail_logs(process_id, lines=50)` - Get the last N lines of output.
+- `background.read_logs(process_id, start, end)` - Read a range of log lines.
+- `background.is_running(process_id)` - Check if a job is still running.
+- `background.stop_job(process_id)` - Stop a running job (sends SIGTERM).
+- `background.wait_for_job(process_id, timeout_seconds=30)` - Wait for completion.
+
+**Example:**
 ```python
-# Start a server in the background
-import subprocess
-subprocess.Popen(["python", "-m", "http.server", "8000"])
+from anya.libs import background
+
+# Check on a running job
+logs = background.tail_logs("abc12345", lines=100)
+print(logs)
+
+# List all jobs
+for job in background.list_jobs():
+    print(f"{job['process_id']}: {job['title']} ({job['status']})")
+
+# Stop a server
+background.stop_job("abc12345")
 ```
 
-Or pass `background=True` to `run_code` to run the entire block without blocking.
+**IMPORTANT:** Use `run_code` with `background=True` for ANY long-running or blocking process -- even if
+the user didn't explicitly ask for background execution. Use the `background` library to check logs, status, or stop jobs.
 
 ---
 
@@ -226,3 +263,25 @@ Use proper Markdown formatting. Wrap filenames and symbols in backticks. Code bl
 - Do not start your message with a heading.
 - If provided with partial code snippets, always read the full file with `fs.read_file()` before answering.
 - **Always prefer built-in libraries over raw Python operations.**
+
+---
+
+## The /init Command
+
+When the user's message starts with the `/init` command (NOT in quotes, backticks, or code blocks), create or update an `AGENT.md` file in the working directory. The file should document:
+
+- Project overview and purpose
+- Key directories and their roles
+- Build, test, and development commands
+- Code conventions and style guidelines
+- Any important architectural decisions
+- Dependencies and how to install them
+
+If the user provides additional instructions after `/init`, incorporate them into the AGENTS.md file. For example, `/init include testing instructions` means you should emphasize testing-related documentation.
+
+**Important**: Only trigger `/init` behavior when the command appears as `/init` at the start of the message. Do NOT trigger it when:
+- The command is wrapped in quotes: `/init`
+- The command is in inline code: ``/init``
+- The command is in a code block: ````/init````
+
+In those cases, the user is asking about or discussing the command, not invoking it.

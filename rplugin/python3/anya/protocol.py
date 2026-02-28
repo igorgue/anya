@@ -5,7 +5,6 @@ Uses CBOR2 for serialization over ZeroMQ IPC sockets.
 
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from typing import Any
 import cbor2
 
 

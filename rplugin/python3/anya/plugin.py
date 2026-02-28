@@ -91,7 +91,7 @@ class AnyaPlugin:
             with open(
                 os.path.expanduser("~/.local/share/anya/plugin_errors.log"), "a"
             ) as f:
-                f.write(f"\n--- Unhandled exception in event loop ---\n")
+                f.write("\n--- Unhandled exception in event loop ---\n")
                 f.write(f"Message: {msg}\n")
                 if task:
                     f.write(f"Task: {task}\n")
@@ -104,7 +104,7 @@ class AnyaPlugin:
                             )
                         )
                     )
-                f.write(f"---\n")
+                f.write("---\n")
 
         self._loop.set_exception_handler(exception_handler)
         self._loop.run_forever()
@@ -1334,19 +1334,22 @@ vim.ui.input(
                 },
             )
 
-        except Exception as e:
+        except Exception as err:
+            # Capture error for use in closures
+            error_msg = str(err)
+
             # Wrap callbacks with error handling
-            def _safe_append_error():
+            def _safe_append_error(msg=error_msg):
                 try:
                     ui.append_to_chat_buffer(
-                        self.nvim, chat_bufnr, f"\n\n**Error:** {e}\n"
+                        self.nvim, chat_bufnr, f"\n\n**Error:** {msg}\n"
                     )
                 except Exception:
                     pass
 
-            def _safe_write_error():
+            def _safe_write_error(msg=error_msg):
                 try:
-                    self.nvim.err_write(f"Agent error: {e}\n")
+                    self.nvim.err_write(f"Agent error: {msg}\n")
                 except Exception:
                     pass
 
@@ -1739,11 +1742,11 @@ vim.ui.input(
                 with open(
                     os.path.expanduser("~/.local/share/anya/plugin_errors.log"), "a"
                 ) as f:
-                    f.write(f"\n--- AnyaSend exception ---\n")
+                    f.write("\n--- AnyaSend exception ---\n")
                     f.write(
                         "".join(traceback.format_exception(type(e), e, e.__traceback__))
                     )
-                    f.write(f"---\n")
+                    f.write("---\n")
             except Exception:
                 pass
             return None
@@ -1753,7 +1756,7 @@ vim.ui.input(
         parts = command.split()
         cmd = parts[0].lower()
 
-        if cmd == "/clear":
+        if cmd == "/clear" or cmd == "/new":
             self.nvim.async_call(self._clear_command)
         elif cmd == "/cancel":
             self.cancel_agent()
@@ -1777,10 +1780,12 @@ vim.ui.input(
 
 Available slash commands:
   /clear     Clear the current conversation
+  /new       Clear the current conversation (alias for /clear)
   /cancel    Cancel the current agent response
   /help      Show this help message
   /file      Open file picker to add files to prompt
   /compact   Compact conversation context
+  /init      Create or update AGENTS.md with project instructions
 
 Usage:
   Type a message in the prompt buffer and press Enter to send.

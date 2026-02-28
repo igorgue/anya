@@ -266,6 +266,35 @@ ui.confirm("Continue?")                     # Yes/no
 ui.input("Enter value:")                    # Text input
 ```
 
+### Background Jobs (`background`)
+
+```python
+from anya.libs import background
+
+# List all background jobs
+jobs = background.list_jobs()
+
+# Get specific job info
+job = background.get_job("process_id")
+
+# Tail last N lines of output
+logs = background.tail_logs("process_id", lines=50)
+
+# Read log range
+logs = background.read_logs("process_id", start=0, end=100)
+
+# Check if job is still running
+running = background.is_running("process_id")
+
+# Stop a running job
+result = background.stop_job("process_id")
+
+# Wait for job completion (with timeout)
+final_status = background.wait_for_job("process_id", timeout_seconds=30)
+```
+
+
+
 ---
 
 ## Marker System

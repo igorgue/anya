@@ -14,7 +14,7 @@ import anyio
 import zmq.asyncio
 from agents import Agent
 
-from ..agents import CodeAgent, MAIN_AGENT_NAME
+from ..agents import CodeAgent
 from ..protocol import AgentSettings
 
 
@@ -81,17 +81,19 @@ class AgentManager:
         self,
         session_id: str,
         settings: AgentSettings | None = None,
+        cwd: str | None = None,
     ) -> Agent:
         """Get or create the Code agent for a session with specific settings.
 
-        Agents are cached by (session_id, settings_hash). If a session uses
-        different settings (e.g., different model), a new agent is created
-        and cached for those settings.
+        Agents are cached by (session_id, settings_hash, cwd). If a session uses
+        different settings (e.g., different model) or a different working directory,
+        a new agent is created and cached.
 
         Args:
             session_id: The session ID
             settings: Optional AgentSettings from client. If not provided,
                       uses daemon's default environment settings.
+            cwd: Optional working directory for this session's project.
 
         Returns:
             The Code agent for this session and settings combination.
@@ -113,28 +115,33 @@ class AgentManager:
 
         settings_hash = settings.settings_hash()
 
+        # Include CWD in cache key so each project directory gets its own agent
+        # with correct system prompt and AGENTS.md
+        cache_key = f"{settings_hash}:{cwd or ''}"
+
         # Check if we have a cached agent for these settings
-        if settings_hash in session.agents:
+        if cache_key in session.agents:
             self.logger.debug(
-                f"Reusing cached agent for session {session_id}, settings_hash={settings_hash}"
+                f"Reusing cached agent for session {session_id}, cache_key={cache_key}"
             )
             session.current_settings_hash = settings_hash
-            return session.agents[settings_hash]
+            return session.agents[cache_key]
 
         # Create new agent for these settings
         self.logger.info(
             f"Creating Code agent for session {session_id}, "
-            f"model={settings.model}, settings_hash={settings_hash}"
+            f"model={settings.model}, cwd={cwd}, cache_key={cache_key}"
         )
 
         agent = await CodeAgent(
             thinking_budget=settings.thinking_budget or self._thinking_budget,
             nvim=None,  # No nvim in daemon context
             settings=settings,
+            cwd=cwd,
         )
 
         # Cache the agent
-        session.agents[settings_hash] = agent
+        session.agents[cache_key] = agent
         session.current_settings_hash = settings_hash
         self.logger.info(
             f"Code agent created for session {session_id}, model={settings.model}"

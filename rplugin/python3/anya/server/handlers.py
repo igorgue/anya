@@ -6,7 +6,6 @@ Handles agent execution and streams responses via ZeroMQ PUB socket.
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
 
 import zmq.asyncio
 from agents import Runner
@@ -17,7 +16,6 @@ from ..protocol import (
     Request,
     RequestType,
     Response,
-    ResponseType,
     StreamChunk,
     StreamEventType,
     SendMessagePayload,
@@ -27,17 +25,15 @@ from ..protocol import (
     make_error_response,
     make_success_response,
 )
-from ..agents import MAIN_AGENT_NAME
 from ..token_tracker import (
     calculate_context_usage,
     format_context_window,
     parse_usage,
 )
 from ..agents.context import NvimPluginContext
-from .. import markers
 from .. import utils
 from .. import tools as tools_module
-from ..spacing import SpacingManager, ContentType
+from ..spacing import SpacingManager
 from .agents import AgentManager
 
 
@@ -480,20 +476,13 @@ class RequestHandler:
             f"api_base={agent_settings.api_base}, api_type={agent_settings.api_type}"
         )
 
-        # Get or create agent for this session with the specified settings
+        # Get or create agent for this session with the specified settings and CWD.
+        # CWD is part of the cache key so each project directory gets its own agent
+        # with the correct system prompt and AGENTS.md.
         agent = await self.agent_manager.get_agent_for_session(
-            session_id, settings=agent_settings
+            session_id, settings=agent_settings, cwd=nvim_context.cwd
         )
         self.logger.info(f"Got agent for session {session_id}")
-
-        # Update daemon's CWD to match client's CWD when a request comes in
-        # This ensures tools that use os.getcwd() get the correct directory
-        if nvim_context.cwd:
-            try:
-                os.chdir(nvim_context.cwd)
-                self.logger.debug(f"Changed daemon CWD to: {nvim_context.cwd}")
-            except Exception as e:
-                self.logger.warning(f"Failed to change CWD to {nvim_context.cwd}: {e}")
 
         # Create confirmation callback that sends requests to the plugin
         import uuid
@@ -598,7 +587,6 @@ class RequestHandler:
         llm_history = payload.history
 
         # Tracking state
-        spacing_manager = SpacingManager()
         thinking_started = False
         thinking_finalized = False
         thinking_source = None

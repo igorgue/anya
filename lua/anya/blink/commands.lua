@@ -27,6 +27,16 @@ local AVAILABLE_COMMANDS = {
     description = "Show help message",
     kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Keyword or 14,
   },
+  {
+    label = "/init",
+    description = "Create or update AGENTS.md with project instructions",
+    kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Keyword or 14,
+  },
+  {
+    label = "/new",
+    description = "Clear chat history (alias for /clear)",
+    kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Keyword or 14,
+  },
 }
 
 function commands.new(opts)

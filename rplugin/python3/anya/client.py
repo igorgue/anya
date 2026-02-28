@@ -8,11 +8,10 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Callable, Any
+from collections.abc import AsyncIterator
 
 import zmq
 import zmq.asyncio
-import cbor2
 
 from .protocol import (
     Request,

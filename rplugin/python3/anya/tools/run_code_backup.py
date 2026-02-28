@@ -465,11 +465,6 @@ async def run_code(
 
     Returns:
         str: The output of the code execution, or process ID if background=True.
-            Use `from anya.libs import background` to monitor background jobs:
-            - background.list_jobs() - list all jobs
-            - background.tail_logs(process_id) - get last N lines of output
-            - background.is_running(process_id) - check if job is still running
-            - background.stop_job(process_id) - stop a running job
     """
     plugin_context = ctx.context
 
@@ -526,7 +521,8 @@ async def run_code(
                         "output_file": output_file,
                         "status": "running",
                         "title": title,
-                    }
+
+                    # Write metadata file for persistence
                     _write_job_meta(cwd, process_id, {
                         "process_id": process_id,
                         "title": title,
@@ -536,8 +532,9 @@ async def run_code(
                         "end_time": None,
                         "status": "running",
                         "returncode": None,
-                        "pid": None,
+                        "pid": None,  # Not available in daemon mode
                     })
+                    }
                     return f"Background process started. Process ID: {process_id}\nOutput file: {output_file}"
                 else:
                     # Fallback: start via normal exec but tell it to run in background
@@ -558,7 +555,8 @@ async def run_code(
                         "output_file": output_file,
                         "status": "running",
                         "title": title,
-                    }
+
+                    # Write metadata file for persistence
                     _write_job_meta(cwd, process_id, {
                         "process_id": process_id,
                         "title": title,
@@ -568,8 +566,9 @@ async def run_code(
                         "end_time": None,
                         "status": "running",
                         "returncode": None,
-                        "pid": None,
+                        "pid": None,  # Not available in daemon mode
                     })
+                    }
 
                     return f"Background process started. Process ID: {process_id}\nOutput file: {output_file}"
 
@@ -591,24 +590,25 @@ async def run_code(
                     "output_file": output_file,
                     "status": "running",
                     "title": title,
+
+                    # Write metadata file for persistence
+                    _write_job_meta(cwd, process_id, {
+                        "process_id": process_id,
+                        "title": title,
+                        "command": command,
+                        "cwd": cwd,
+                        "start_time": start_time,
+                        "end_time": None,
+                        "status": "running",
+                        "returncode": None,
+                        "pid": process.pid,
+                    })
                 }
-                _write_job_meta(cwd, process_id, {
-                    "process_id": process_id,
-                    "title": title,
-                    "command": command,
-                    "cwd": cwd,
-                    "start_time": start_time,
-                    "end_time": None,
-                    "status": "running",
-                    "returncode": None,
-                    "pid": process.pid,
-                })
 
                 # Start monitoring task
                 asyncio.create_task(
                     _monitor_background_process(
-                        process_id, process, command, cwd, script_path, output_file,
-                        title
+                        process_id, process, command, cwd, script_path, output_file
                     )
                 )
 

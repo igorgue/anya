@@ -10,7 +10,6 @@ Usage:
 import re
 import urllib.request
 import urllib.error
-from typing import Optional
 
 
 _DEFAULT_TIMEOUT = 15
@@ -27,7 +26,6 @@ def _fetch_raw(url: str, timeout: int = _DEFAULT_TIMEOUT) -> str:
     req = urllib.request.Request(url, headers=_DEFAULT_HEADERS)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         charset = "utf-8"
-        content_type = resp.headers.get_content_type() or ""
         if "charset=" in resp.headers.get("Content-Type", ""):
             charset = resp.headers.get_param("charset") or "utf-8"
         return resp.read().decode(charset, errors="replace")

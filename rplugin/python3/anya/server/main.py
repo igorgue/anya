@@ -22,9 +22,6 @@ from ..protocol import (
     Request,
     RequestType,
     Response,
-    ResponseType,
-    StreamChunk,
-    StreamEventType,
     make_error_response,
     make_success_response,
 )

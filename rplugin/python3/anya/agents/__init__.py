@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING
 
 from agents import Agent
 from agents.models.default_models import get_default_model_settings
-from openai.types.shared import Reasoning
 
 from .dynamic_instructions import (
     generate_dynamic_code_instructions,
@@ -36,6 +35,7 @@ async def CodeAgent(
     thinking_budget=None,
     nvim=None,
     settings: "AgentSettings | None" = None,
+    cwd: str | None = None,
 ) -> Agent:
     """Create a code agent with only the run_code tool.
 
@@ -43,6 +43,7 @@ async def CodeAgent(
         thinking_budget: Optional thinking budget for reasoning models.
         nvim: Optional nvim instance (not used in daemon context)
         settings: Optional AgentSettings from client.
+        cwd: Optional explicit working directory (used in daemon mode).
 
     Returns:
         Configured Agent instance
@@ -61,7 +62,7 @@ async def CodeAgent(
     instructions = update_agent_instructions(instructions, libs_instructions)
 
     # Expand placeholders and append environment context at the end.
-    instructions = apply_system_prompt(instructions, nvim=nvim)
+    instructions = apply_system_prompt(instructions, nvim=nvim, cwd=cwd)
 
     # ------
     # Configuration from settings or environment

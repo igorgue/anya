@@ -178,7 +178,9 @@ def get_nvidia_info() -> str:
     return "N/A"
 
 
-def get_cwd(nvim: Any | None = None) -> str:
+def get_cwd(nvim: Any | None = None, cwd: str | None = None) -> str:
+    if cwd:
+        return cwd
     if nvim is not None:
         try:
             return str(_nvim_call_sync_safe(nvim, lambda: nvim.call("getcwd")))
@@ -194,21 +196,20 @@ def get_current_date_utc() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
-def read_agent_md_from_cwd(nvim: Any | None = None) -> str | None:
+def read_agent_md_from_cwd(nvim: Any | None = None, cwd: str | None = None) -> str | None:
     """Read AGENTS.md from the current working directory if it exists.
 
     Returns the file contents as a string, or None if the file doesn't exist.
-    Uses Neovim's working directory (vim.cwd) if nvim is provided, otherwise falls back to os.getcwd().
+    Uses explicit cwd if provided, then Neovim's working directory (vim.cwd),
+    otherwise falls back to os.getcwd().
     """
-    # Try to get CWD from Neovim first, fallback to os.getcwd()
-    cwd = None
-    if nvim is not None:
+    # Use explicit cwd first, then Neovim, then os.getcwd()
+    if not cwd and nvim is not None:
         try:
             cwd = str(_nvim_call_sync_safe(nvim, lambda: nvim.call("getcwd")))
         except Exception:
             pass
 
-    # Fallback to OS CWD if Neovim call failed or nvim not provided
     if not cwd:
         try:
             cwd = os.getcwd()
@@ -228,20 +229,20 @@ def read_agent_md_from_cwd(nvim: Any | None = None) -> str | None:
         return None
 
 
-def build_system_prompt_context(nvim: Any | None = None) -> SystemPromptContext:
+def build_system_prompt_context(nvim: Any | None = None, cwd: str | None = None) -> SystemPromptContext:
     return SystemPromptContext(
         os=get_os_info(),
         kernel=get_kernel_info(),
         neovim=get_neovim_info(nvim),
         de=get_de_info(),
         nvidia_version_info=get_nvidia_info(),
-        cwd=get_cwd(nvim),
+        cwd=get_cwd(nvim, cwd=cwd),
         current_date=get_current_date_utc(),
     )
 
 
-def expand_placeholders(template: str, nvim: Any | None = None) -> str:
-    ctx = build_system_prompt_context(nvim)
+def expand_placeholders(template: str, nvim: Any | None = None, cwd: str | None = None) -> str:
+    ctx = build_system_prompt_context(nvim, cwd=cwd)
 
     # Mirror the Lua :gsub chain with simple replacements.
     # Use exact placeholder spellings to avoid unintended substitutions.
@@ -256,8 +257,8 @@ def expand_placeholders(template: str, nvim: Any | None = None) -> str:
     )
 
 
-def system_context_block(nvim: Any | None = None) -> str:
-    ctx = build_system_prompt_context(nvim)
+def system_context_block(nvim: Any | None = None, cwd: str | None = None) -> str:
+    ctx = build_system_prompt_context(nvim, cwd=cwd)
     # Keep this compact and purely informational.
     return "\n".join(
         [
@@ -275,19 +276,19 @@ def system_context_block(nvim: Any | None = None) -> str:
     )
 
 
-def apply_system_prompt(template: str, nvim: Any | None = None) -> str:
+def apply_system_prompt(template: str, nvim: Any | None = None, cwd: str | None = None) -> str:
     """Expand known placeholders, then append the system context block and AGENTS.md if present."""
-    expanded = expand_placeholders(template, nvim)
+    expanded = expand_placeholders(template, nvim, cwd=cwd)
 
     # Ensure we append at the end of the instructions.
     # Avoid adding excessive blank lines.
     if not expanded.endswith("\n"):
         expanded += "\n"
 
-    result = expanded.rstrip() + system_context_block(nvim) + "\n"
+    result = expanded.rstrip() + system_context_block(nvim, cwd=cwd) + "\n"
 
     # Append AGENTS.md from current working directory if it exists
-    agent_md_content = read_agent_md_from_cwd(nvim)
+    agent_md_content = read_agent_md_from_cwd(nvim, cwd=cwd)
     if agent_md_content:
         result += "\n---\n"
         result += agent_md_content

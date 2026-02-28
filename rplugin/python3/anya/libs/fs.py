@@ -114,7 +114,6 @@ def read_file(path_with_range: str, cwd: str | None = None) -> str:
         display_path = (
             path_with_range.split("@")[0] if "@" in path_with_range else path_with_range
         )
-        remaining = total_lines - actual_end
         header += (
             f"[TRUNCATED] File has {total_lines} lines total.\n"
             f"  Read full file: fs.read_file('{display_path}@start-end')\n"
@@ -237,7 +236,7 @@ def list_files(path: str = ".", max_results: int = 200, cwd: str | None = None) 
             text=True,
         )
         if result.returncode == 0:
-            lines = [l for l in result.stdout.strip().splitlines() if l]
+            lines = [line for line in result.stdout.strip().splitlines() if line]
             if len(lines) > max_results:
                 lines = lines[:max_results]
                 lines.append(f"... (truncated at {max_results} results)")

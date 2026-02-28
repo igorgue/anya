@@ -199,7 +199,7 @@ def start_daemon(foreground: bool = False, debug: bool = False) -> bool:
             log_file = get_log_file()
 
             with open(log_file, "a") as log:
-                process = subprocess.Popen(
+                _daemon_process = subprocess.Popen(
                     cmd,
                     stdout=log,
                     stderr=log,
