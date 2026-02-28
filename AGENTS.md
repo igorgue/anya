@@ -1,7 +1,3 @@
-File: /home/igor/Code/anya/AGENTS.md
-Total lines: 298 | File size: 14953 bytes
-Showing lines 1-298
-
 # AGENTS.md
 
 This document details Anya's agent, tool, and infrastructure system. Inside, you’ll find an in-depth reference for users, contributors, and developers—covering technical architecture, extensibility, data flow, plugin/daemon boundaries, marker logic, and best practices for a robust, persistent AI Neovim assistant.
