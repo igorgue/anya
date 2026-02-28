@@ -130,13 +130,9 @@ def get_run_config(settings: "AgentSettings | None" = None):
         return None
 
     try:
-        from agents import RunConfig, set_tracing_disabled
+        from agents import RunConfig
     except ImportError:
         return None
-
-    # Disable tracing for custom providers by default
-    if os.environ.get("ANYA_DISABLE_TRACING", "1") == "1":
-        set_tracing_disabled(True)
 
     # For chat_completions API or anthropic API, disable nested handoff history
     # as non-OpenAI providers don't support the nested message format

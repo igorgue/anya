@@ -13,6 +13,11 @@ from pathlib import Path
 import zmq
 import zmq.asyncio
 
+# Disable OpenAI tracing globally - prevents hitting their tracing API servers
+# This must be done before any agent operations
+from agents import set_tracing_disabled
+set_tracing_disabled(True)
+
 from ..protocol import (
     Request,
     RequestType,

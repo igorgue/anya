@@ -47,10 +47,6 @@ async def CodeAgent(
     Returns:
         Configured Agent instance
     """
-    from agents.run import RunConfig
-
-    RunConfig.tracing_disabled = True
-
     # Get base instructions
     base_instructions = get_instructions("code.md")
 
