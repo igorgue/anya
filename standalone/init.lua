@@ -20,7 +20,6 @@ package.path = package.path .. ";" .. dir .. "/nui/lua/?.lua;" .. dir .. "/nui/l
 package.path = package.path .. ";" .. dir .. "/nvim-notify/lua/?.lua;" .. dir .. "/nvim-notify/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/mini-surround/lua/?.lua;" .. dir .. "/mini-surround/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/marks-nvim/lua/?.lua;" .. dir .. "/marks-nvim/lua/?/init.lua"
-package.path = package.path .. ";" .. dir .. "/undotree/lua/?.lua;" .. dir .. "/undotree/lua/?/init.lua"
 
 vim.opt.runtimepath:append(dir .. "/which-key")
 vim.opt.runtimepath:append(dir .. "/render-markdown")
@@ -29,7 +28,6 @@ vim.opt.runtimepath:append(dir .. "/vim-indent-object")
 vim.opt.runtimepath:append(dir .. "/mini-surround")
 vim.opt.runtimepath:append(dir .. "/marks-nvim")
 vim.opt.runtimepath:append(dir .. "/vim-matchup")
-vim.opt.runtimepath:append(dir .. "/undotree")
 
 -- opts
 vim.opt.signcolumn = "auto"
@@ -297,33 +295,6 @@ require("marks").setup({})
 vim.g.matchup_surround_enabled = 1
 vim.g.matchup_transmute_enabled = 1
 
--- undotree
-require("undotree").setup({
-  float_diff = false,
-  layout = "left_bottom",
-  position = "left",
-  ignore_filetype = {
-    "undotree",
-    "undotreeDiff",
-    "codecompanion",
-    "qf",
-  },
-  keymaps = {
-    j = "move_next",
-    k = "move_prev",
-    gj = "move2parent",
-    J = "move_change_next",
-    K = "move_change_prev",
-    ["<cr>"] = "action_enter",
-    p = "enter_diffbuf",
-    q = "quit",
-  },
-  window = {
-    winblend = 5,
-    border = "none",
-  },
-})
-
 -- keymaps for new plugins
 -- mini-surround visual mode
 vim.keymap.set("x", "S", [[:<C-u>lua MiniSurround.add('visual')<CR>]], { desc = "Add Surrounding" })
@@ -341,17 +312,6 @@ vim.keymap.set("n", "<leader>mm", function()
 end, { desc = "Search marks" })
 vim.keymap.set("n", "<leader>md", "<cmd>delmarks!<cr>", { desc = "Delete local marks" })
 vim.keymap.set("n", "<leader>mD", "<cmd>delmarks!<cr><cmd>delmarks A-Z<cr>", { desc = "Delete all marks" })
-
--- undotree keymap
-vim.keymap.set("n", "<leader>U", "<cmd>lua require('undotree').toggle()<cr>", { desc = "Toggle Undotree" })
-
--- undotree FileType autocommand
-vim.api.nvim_create_autocmd("FileType", {
-  pattern = "undotreeDiff",
-  callback = function()
-    vim.opt.cursorline = false
-  end,
-})
 
 -- indent-object keymaps
 vim.keymap.set("n", "<c-space>", "<cmd>normal viI<cr>", { desc = "Inner Indent Level" })
