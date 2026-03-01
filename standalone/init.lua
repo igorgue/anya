@@ -18,10 +18,18 @@ package.path = package.path .. ";" .. dir .. "/blink-cmp/lua/?.lua;" .. dir .. "
 package.path = package.path .. ";" .. dir .. "/noice/lua/?.lua;" .. dir .. "/noice/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/nui/lua/?.lua;" .. dir .. "/nui/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/nvim-notify/lua/?.lua;" .. dir .. "/nvim-notify/lua/?/init.lua"
+package.path = package.path .. ";" .. dir .. "/mini-surround/lua/?.lua;" .. dir .. "/mini-surround/lua/?/init.lua"
+package.path = package.path .. ";" .. dir .. "/marks-nvim/lua/?.lua;" .. dir .. "/marks-nvim/lua/?/init.lua"
+package.path = package.path .. ";" .. dir .. "/undotree/lua/?.lua;" .. dir .. "/undotree/lua/?/init.lua"
 
 vim.opt.runtimepath:append(dir .. "/which-key")
 vim.opt.runtimepath:append(dir .. "/render-markdown")
 vim.opt.runtimepath:append(dir .. "/blink-cmp")
+vim.opt.runtimepath:append(dir .. "/vim-indent-object")
+vim.opt.runtimepath:append(dir .. "/mini-surround")
+vim.opt.runtimepath:append(dir .. "/marks-nvim")
+vim.opt.runtimepath:append(dir .. "/vim-matchup")
+vim.opt.runtimepath:append(dir .. "/undotree")
 
 -- opts
 vim.opt.signcolumn = "auto"
@@ -79,6 +87,8 @@ vim.opt.isfname:append(":")
 vim.opt.smoothscroll = false
 
 vim.opt.clipboard = "unnamedplus"
+
+vim.opt.shortmess:append("I")
 
 if vim.o.diff ~= false then
   vim.opt.list = false
@@ -275,6 +285,78 @@ require("blink.cmp").setup({
     },
   },
 })
+-- vim-indent-object (no setup needed, just load via runtimepath)
+
+-- mini-surround
+require("mini.surround").setup({})
+
+-- marks.nvim
+require("marks").setup({})
+
+-- vim-matchup
+vim.g.matchup_surround_enabled = 1
+vim.g.matchup_transmute_enabled = 1
+
+-- undotree
+require("undotree").setup({
+  float_diff = false,
+  layout = "left_bottom",
+  position = "left",
+  ignore_filetype = {
+    "undotree",
+    "undotreeDiff",
+    "codecompanion",
+    "qf",
+  },
+  keymaps = {
+    j = "move_next",
+    k = "move_prev",
+    gj = "move2parent",
+    J = "move_change_next",
+    K = "move_change_prev",
+    ["<cr>"] = "action_enter",
+    p = "enter_diffbuf",
+    q = "quit",
+  },
+  window = {
+    winblend = 5,
+    border = "none",
+  },
+})
+
+-- keymaps for new plugins
+-- mini-surround visual mode
+vim.keymap.set("x", "S", [[:<C-u>lua MiniSurround.add('visual')<CR>]], { desc = "Add Surrounding" })
+
+-- marks.nvim keymaps
+vim.keymap.set("n", "<leader>M", function()
+  local input = vim.fn.input("Mark to delete:")
+  if input:gsub("^%s*(.-)%s*$", "%1") == "" then
+    return
+  end
+  vim.cmd("delmarks " .. input)
+end, { desc = "Delete mark" })
+vim.keymap.set("n", "<leader>mm", function()
+  Snacks.picker.marks()
+end, { desc = "Search marks" })
+vim.keymap.set("n", "<leader>md", "<cmd>delmarks!<cr>", { desc = "Delete local marks" })
+vim.keymap.set("n", "<leader>mD", "<cmd>delmarks!<cr><cmd>delmarks A-Z<cr>", { desc = "Delete all marks" })
+
+-- undotree keymap
+vim.keymap.set("n", "<leader>U", "<cmd>lua require('undotree').toggle()<cr>", { desc = "Toggle Undotree" })
+
+-- undotree FileType autocommand
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "undotreeDiff",
+  callback = function()
+    vim.opt.cursorline = false
+  end,
+})
+
+-- indent-object keymaps
+vim.keymap.set("n", "<c-space>", "<cmd>normal viI<cr>", { desc = "Inner Indent Level" })
+vim.keymap.set("x", "<c-space>", "<cmd>normal iI<cr>", { desc = "Inner Indent Level" })
+
 require("anya").setup({})
 
 -- colorscheme
@@ -283,5 +365,3 @@ vim.cmd("colorscheme danger")
 -- keymaps
 vim.keymap.set("n", "<leader>q", "<cmd>qa!<CR>", { desc = "Quit" })
 vim.keymap.set("i", "<C-q>", "<Esc><cmd>qa!<CR>", { desc = "Quit" })
-
--- autocommands
