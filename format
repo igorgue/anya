@@ -13,10 +13,11 @@ if [[ "$1" == "--check" ]]; then
   print_formatter stylua
   stylua --check .
   print_formatter luacheck
-  luacheck lua/ ftplugin/
+  luacheck lua/ ftplugin/ standalone/init.lua
 else
   print_formatter ruff
   ruff format . --exclude standalone
   print_formatter stylua
   stylua .
+  stylua standalone/init.lua
 fi

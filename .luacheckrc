@@ -3,6 +3,7 @@
 -- Recognize vim as a read/write global (Neovim's API)
 globals = {
   "vim",
+  "Snacks",
 }
 
 -- Ignore unused self warnings (common in OOP-style Lua)
