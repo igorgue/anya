@@ -13,7 +13,6 @@ package.path = package.path .. ";" .. dir .. "/snacks/lua/?.lua;" .. dir .. "/sn
 package.path = package.path .. ";" .. dir .. "/danger/lua/?.lua;" .. dir .. "/danger/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/nvim-treesitter/lua/?.lua;" .. dir .. "/nvim-treesitter/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/fidget/lua/?.lua;" .. dir .. "/fidget/lua/?/init.lua"
-package.path = package.path .. ";" .. dir .. "/blink/lua/?.lua;" .. dir .. "/blink/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/blink-cmp/lua/?.lua;" .. dir .. "/blink-cmp/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/noice/lua/?.lua;" .. dir .. "/noice/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/nui/lua/?.lua;" .. dir .. "/nui/lua/?/init.lua"
@@ -187,7 +186,6 @@ require("render-markdown").setup({
 })
 require("notify").setup({})
 require("noice").setup({})
-require("blink").setup({})
 require("blink.cmp").setup({
   fuzzy = { implementation = "lua" },
   completion = {
