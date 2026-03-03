@@ -249,6 +249,44 @@ function M:init()
       end
     end,
   })
+
+  -- :Anya do (headless buffer modification) events
+  vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AnyaDoStarted",
+    group = group,
+    callback = function(event)
+      local handle = fidget_progress.handle.create({
+        title = "",
+        message = "working",
+        lsp_client = {
+          name = M:get_model_name(event.data),
+        },
+      })
+      M:store_progress_handle(event.data.id, handle)
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AnyaDoFinished",
+    group = group,
+    callback = function(event)
+      local handle = M:get_progress_handle(event.data.id)
+      if handle then
+        if event.data.status == "success" then
+          handle.message = "done"
+        elseif event.data.status == "cancelled" then
+          handle.message = "cancelled"
+        else
+          handle.message = "error"
+        end
+        vim.defer_fn(function()
+          M:pop_progress_handle(event.data.id)
+          handle:finish()
+        end, 1000)
+      end
+    end,
+  })
+
 end
 
 function M:store_progress_handle(id, handle)

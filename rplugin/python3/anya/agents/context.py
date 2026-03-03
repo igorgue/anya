@@ -17,6 +17,7 @@ class NvimPluginContext:
     # Additional context for daemon mode
     cwd: str = ""
     current_buffer: str = ""
+    current_buffer_content: str = ""  # Content of the current buffer
     open_buffers: list[dict] = field(default_factory=list)
     # Confirmation callback for requesting user confirmation in daemon mode (exec tool)
     confirmation_callback: Callable[[str, list[str]], Awaitable[str]] | None = None
@@ -25,6 +26,11 @@ class NvimPluginContext:
     exec_callback: Callable[[str, str, int], Awaitable[dict[str, Any]]] | None = (
         None  # (command, cwd, timeout, ui_dir=None)
     )
+    # Background exec callback for running long commands without blocking
+    background_exec_callback: Callable[[str, str, str, str], Awaitable[str]] | None = None
+    # Modify buffer callback for modifying Neovim buffers in daemon mode
+    # Takes (path: str, content: str, mode: str) and returns success message or error
+    modify_buffer_callback: Callable[[str, str, str], Awaitable[str]] | None = None
 
     @property
     def has_nvim(self) -> bool:

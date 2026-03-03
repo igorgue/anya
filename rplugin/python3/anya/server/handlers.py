@@ -572,12 +572,43 @@ class RequestHandler:
                     "error": str(e),
                 }
 
+        async def modify_buffer_callback(
+            buf_path: str, content: str, mode: str
+        ) -> str:
+            """Request buffer modification on the plugin (user's machine).
+
+            Sends the modification request to the plugin which executes it locally.
+            """
+            confirmation_id = str(uuid.uuid4())
+
+            # Send modify buffer request to plugin
+            await self._send_stream_chunk(
+                session_id,
+                request_id,
+                StreamEventType.MODIFY_BUFFER_REQUEST,
+                {
+                    "confirmation_id": confirmation_id,
+                    "buf_path": buf_path,
+                    "content": content,
+                    "mode": mode,
+                },
+            )
+
+            # Wait for result
+            try:
+                result = await self.wait_for_confirmation(confirmation_id, timeout=30.0)
+                return result
+            except Exception as e:
+                self.logger.error(f"Error waiting for modify buffer result: {e}")
+                return f"Error: {e}"
+
         context = NvimPluginContext(
             nvim=None,  # No nvim in daemon
             session_id=session_id,
             allowed_commands=set(nvim_context.allowed_commands),
             confirmation_callback=confirmation_callback,
             exec_callback=exec_callback,
+            modify_buffer_callback=modify_buffer_callback,
             cwd=nvim_context.cwd,
             current_buffer=nvim_context.current_buffer,
             open_buffers=nvim_context.open_buffers,

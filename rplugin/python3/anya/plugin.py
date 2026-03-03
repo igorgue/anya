@@ -52,6 +52,12 @@ class AnyaPlugin:
         self._tool_fold_open = False  # Track if a tool fold is currently open
         self._last_layout = "replace"  # Remember the last layout used
 
+        # State for :Anya do command (headless buffer modification)
+        self._do_task = None
+        self._do_request_id = None
+        self._do_cancelled = False
+        self._do_running = False
+
         # Daemon client
         self._client = AnyaClient()
         # Separate client for confirmations (to avoid blocking on main request socket)
@@ -295,6 +301,12 @@ class AnyaPlugin:
                 return
             text = " ".join(args[1:])
             self.send(text)
+        elif subcommand == "do":
+            if len(args) < 2:
+                self.nvim.err_write("'do' command requires an instruction argument.\n")
+                return
+            instruction = " ".join(args[1:])
+            self.nvim.async_call(self._do_command, instruction)
         elif subcommand == "tab":
             self.nvim.async_call(self._open_interface, "tab")
         elif subcommand == "pane":
@@ -413,6 +425,7 @@ class AnyaPlugin:
             self.nvim.command("lua require('anya.picker').open()")
         elif subcommand == "cancel":
             self.cancel_agent()
+            self._cancel_do_command()
         elif subcommand == "daemon":
             # Daemon management subcommands
             if len(args) < 2:
@@ -1575,6 +1588,392 @@ vim.ui.input(
 
         ui.process_markers(self.nvim, chat_bufnr, messages)
 
+
+    def _do_command(self, instruction: str):
+        """Handle :Anya do <instruction> - headless buffer modification."""
+        if self._do_running:
+            self.nvim.err_write("Anya: A 'do' operation is already in progress. Use :Anya cancel to stop it.\n")
+            return
+
+        # Grab current buffer info synchronously (we're on the main thread here)
+        try:
+            buf = self.nvim.api.get_current_buf()
+            buf_path = self.nvim.api.buf_get_name(buf)
+            buf_lines = self.nvim.api.buf_get_lines(buf, 0, -1, False)
+            buf_content = "\n".join(buf_lines)
+            ft = self.nvim.api.buf_get_option(buf, "filetype")
+            cwd = self.nvim.call("getcwd")
+            open_buffers = []
+            for b in self.nvim.buffers:
+                if b.valid and b.name:
+                    open_buffers.append({"name": b.name, "bufnr": b.number})
+        except Exception as e:
+            self.nvim.err_write(f"Anya: Failed to read buffer: {e}\n")
+            return
+
+        if not buf_path:
+            self.nvim.err_write("Anya: No current buffer to modify.\n")
+            return
+
+        request_agent_settings = self._get_agent_settings()
+        request_id = ids.new()
+        self._do_request_id = request_id
+        self._do_cancelled = False
+        self._do_running = True
+
+        # Install temporary <C-c> mapping that cancels the do operation
+        try:
+            self.nvim.exec_lua("""
+local rid = select(1, ...)
+vim.g.anya_do_active_request_id = rid
+-- Map <C-c> in normal mode to cancel while do is running
+vim.keymap.set("n", "<C-c>", function()
+    vim.g.anya_do_active_request_id = nil
+    vim.keymap.del("n", "<C-c>")
+    vim.cmd("Anya cancel")
+end, { noremap = true, silent = true, desc = "Cancel Anya do" })
+""", request_id)
+        except Exception:
+            pass
+
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaDoStarted",
+            {"id": request_id, "model": request_agent_settings.model},
+        )
+
+        loop = self._ensure_loop()
+        self._do_task = asyncio.run_coroutine_threadsafe(
+            self._run_do_via_daemon(
+                instruction=instruction,
+                buf_path=buf_path,
+                buf_content=buf_content,
+                ft=ft,
+                cwd=cwd,
+                open_buffers=open_buffers,
+                request_id=request_id,
+                buf_number=buf.number,
+            ),
+            loop,
+        )
+
+    def _cancel_do_command(self):
+        """Cancel an in-progress :Anya do operation."""
+        if not self._do_running:
+            return
+        self._do_cancelled = True
+
+        if self._do_request_id:
+            try:
+                self._client.cancel_request(self.session_id, self._do_request_id)
+            except Exception:
+                pass
+
+        if self._do_task:
+            try:
+                self._do_task.cancel()
+            except Exception:
+                pass
+
+        # Remove temporary keymap
+        try:
+            self.nvim.exec_lua("""
+vim.g.anya_do_active_request_id = nil
+pcall(vim.keymap.del, "n", "<C-c>")
+""")
+        except Exception:
+            pass
+
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaDoFinished",
+            {"id": self._do_request_id or "cancelled", "status": "cancelled"},
+        )
+
+        self._do_running = False
+        self._do_task = None
+        self._do_request_id = None
+
+    async def _run_do_via_daemon(
+        self,
+        instruction: str,
+        buf_path: str,
+        buf_content: str,
+        ft: str,
+        cwd: str,
+        open_buffers: list,
+        request_id: str,
+        buf_number: int,
+    ):
+        """Run :Anya do headlessly via the daemon, then write result back to buffer."""
+        import concurrent.futures as cfutures
+
+        loop = asyncio.get_event_loop()
+        is_running = await loop.run_in_executor(None, daemon_mgmt.is_daemon_running)
+
+        if not is_running:
+            started = await loop.run_in_executor(None, daemon_mgmt.start_daemon)
+            if not started:
+                self.nvim.async_call(
+                    self.nvim.err_write,
+                    "Anya: Failed to start daemon.\n",
+                )
+                self.nvim.async_call(self._finish_do, request_id, "error")
+                return
+
+        request_agent_settings = self._get_agent_settings()
+
+        # Build a focused instruction that includes the buffer content
+        rel_path = buf_path
+        try:
+            import os
+            rel_path = os.path.relpath(buf_path, cwd) if cwd else buf_path
+        except Exception:
+            pass
+
+        user_message = (
+            f"{instruction}\n\n"
+            f"Current file: `{rel_path}` (filetype: {ft})\n\n"
+            f"File content:\n```{ft}\n{buf_content}\n```\n\n"
+            f"Use the `modify_buffer` tool to write the result directly to the buffer.\n"
+            f"The `modify_buffer` tool's `content` argument must be the COMPLETE new file content.\n"
+            f"Do not add any explanation — just call `modify_buffer` with the full result."
+        )
+
+        nvim_context = NvimContext(
+            session_id=self.session_id,
+            cwd=cwd,
+            current_buffer=buf_path,
+            current_buffer_content=buf_content,
+            open_buffers=open_buffers,
+            allowed_commands=[],
+            agent_settings=request_agent_settings.to_dict(),
+        )
+
+        subscriber = StreamSubscriber(self.session_id, request_id)
+
+        try:
+            await subscriber.connect()
+            await asyncio.sleep(0.1)
+
+            send_task = asyncio.create_task(
+                self._send_to_daemon(
+                    request_id,
+                    user_message,
+                    None,   # no conversation
+                    [{'role': 'user', 'content': user_message}],
+                    nvim_context,
+                )
+            )
+
+            while True:
+                if self._do_cancelled:
+                    raise asyncio.CancelledError()
+
+                chunk = await subscriber.receive(timeout=0.2)
+                if chunk is None:
+                    continue
+
+                if chunk.event_type == StreamEventType.MODIFY_BUFFER_REQUEST:
+                    await self._handle_do_modify_buffer(chunk, request_id, buf_number)
+
+                elif chunk.event_type == StreamEventType.EXEC_REQUEST:
+                    # Allow exec during do (for any shell tools the agent might use)
+                    asyncio.create_task(self._handle_do_exec_request(chunk))
+
+                elif chunk.event_type == StreamEventType.MESSAGE_END:
+                    break
+
+                elif chunk.event_type == StreamEventType.ERROR:
+                    error = chunk.data.get("error", "Unknown error")
+                    self.nvim.async_call(
+                        self.nvim.err_write,
+                        f"Anya do: Error: {error}\n",
+                    )
+                    break
+
+            try:
+                await send_task
+            except Exception:
+                pass
+
+            self.nvim.async_call(self._finish_do, request_id, "success")
+
+        except asyncio.CancelledError:
+            self.nvim.async_call(self._finish_do, request_id, "cancelled")
+
+        except Exception as err:
+            self.nvim.async_call(
+                self.nvim.err_write,
+                f"Anya do: {err}\n",
+            )
+            self.nvim.async_call(self._finish_do, request_id, "error")
+
+        finally:
+            try:
+                await subscriber.disconnect()
+            except Exception:
+                pass
+
+    async def _handle_do_modify_buffer(self, chunk, request_id: str, buf_number: int):
+        """Handle MODIFY_BUFFER_REQUEST during an :Anya do operation."""
+        import functools
+
+        confirmation_id = chunk.data.get("confirmation_id")
+        content = chunk.data.get("content", "")
+        mode = chunk.data.get("mode", "replace")
+
+        result_container = [None]
+
+        def apply_modification():
+            try:
+                if not self.nvim.api.buf_is_valid(buf_number):
+                    result_container[0] = "Error: Buffer is no longer valid"
+                    return
+
+                lines = content.split("\n")
+                was_modifiable = self.nvim.api.buf_get_option(buf_number, "modifiable")
+                self.nvim.api.buf_set_option(buf_number, "modifiable", True)
+
+                if mode == "replace":
+                    self.nvim.api.buf_set_lines(buf_number, 0, -1, False, lines)
+                elif mode == "append":
+                    lc = self.nvim.api.buf_line_count(buf_number)
+                    self.nvim.api.buf_set_lines(buf_number, lc, lc, False, lines)
+                elif mode == "prepend":
+                    self.nvim.api.buf_set_lines(buf_number, 0, 0, False, lines)
+
+                self.nvim.api.buf_set_option(buf_number, "modifiable", was_modifiable)
+                # Mark buffer modified and redraw so changes are visible immediately
+                self.nvim.api.buf_set_option(buf_number, "modified", True)
+                result_container[0] = "ok"
+                self.nvim.command("redraw")
+            except Exception as e:
+                result_container[0] = f"Error: {e}"
+
+        self.nvim.async_call(apply_modification)
+
+        # Wait for the async call to complete
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if result_container[0] is not None:
+                break
+
+        result_str = result_container[0] or "Error: timeout"
+
+        # Send result back to daemon
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                functools.partial(
+                    self._confirmation_client.send_request,
+                    RequestType.TOOL_CONFIRMATION_RESPONSE,
+                    self.session_id,
+                    confirmation_id,
+                    {
+                        "confirmation_id": confirmation_id,
+                        "choice": result_str,
+                    },
+                    5.0,
+                ),
+            )
+        except Exception as e:
+            self.nvim.async_call(
+                self.nvim.err_write,
+                f"Anya: Error sending modify-buffer result: {e}\n",
+            )
+
+    async def _handle_do_exec_request(self, chunk):
+        """Handle EXEC_REQUEST during :Anya do (reuses existing exec logic)."""
+        import functools
+        import subprocess
+
+        confirmation_id = chunk.data.get("confirmation_id")
+        exec_command = chunk.data.get("command", "")
+        exec_cwd = chunk.data.get("cwd", "")
+        exec_timeout = chunk.data.get("timeout", 30)
+
+        try:
+            cwd_val = [None]
+
+            def get_cwd():
+                cwd_val[0] = self.nvim.call("getcwd")
+
+            self.nvim.async_call(get_cwd)
+            for _ in range(20):
+                await asyncio.sleep(0.05)
+                if cwd_val[0] is not None:
+                    break
+
+            cwd = exec_cwd or cwd_val[0] or ""
+            process = subprocess.Popen(
+                exec_command,
+                shell=True,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            deadline = asyncio.get_event_loop().time() + exec_timeout
+            result = None
+            while result is None:
+                poll = process.poll()
+                if poll is not None:
+                    stdout = process.stdout.read() if process.stdout else ""
+                    stderr = process.stderr.read() if process.stderr else ""
+                    result = {"stdout": stdout, "stderr": stderr, "returncode": process.returncode}
+                    break
+                if asyncio.get_event_loop().time() > deadline:
+                    process.kill()
+                    result = {"stdout": "", "stderr": "", "returncode": -1, "error": "timeout"}
+                    break
+                await asyncio.sleep(0.05)
+        except Exception as e:
+            result = {"stdout": "", "stderr": "", "returncode": -1, "error": str(e)}
+
+        try:
+            import json
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                functools.partial(
+                    self._confirmation_client.send_request,
+                    RequestType.TOOL_CONFIRMATION_RESPONSE,
+                    self.session_id,
+                    confirmation_id,
+                    {
+                        "confirmation_id": confirmation_id,
+                        "choice": json.dumps(result),
+                    },
+                    5.0,
+                ),
+            )
+        except Exception:
+            pass
+
+    def _finish_do(self, request_id: str, status: str):
+        """Clean up after :Anya do completes."""
+        # Remove temporary <C-c> mapping
+        try:
+            self.nvim.exec_lua("""
+vim.g.anya_do_active_request_id = nil
+pcall(vim.keymap.del, "n", "<C-c>")
+""")
+        except Exception:
+            pass
+
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaDoFinished",
+            {"id": request_id, "status": status},
+        )
+
+        self._do_running = False
+        self._do_task = None
+        self._do_request_id = None
+        self._do_cancelled = False
+
     def cancel_agent(self):
         """Cancel the current agent response and flush the queue."""
         # Only allow cancellation if streaming has actually started
@@ -1791,6 +2190,11 @@ Usage:
   Type a message in the prompt buffer and press Enter to send.
   Use slash commands at the beginning of a line to execute them.
 
+Headless buffer modification:
+  :Anya do <instruction>   Apply an instruction to the current buffer.
+  While running, press <C-c> or :Anya cancel to stop it.
+  Example: :Anya do "write a good commit message for this diff"
+
 Examples:
   /clear
   /help
@@ -1869,6 +2273,21 @@ For more help, see :h anya"""
         """Get the plugin version."""
         return VERSION
 
+
+    @pynvim.function("AnyaDo", sync=False)
+    def anya_do(self, args):
+        """Run :Anya do programmatically from Lua."""
+        if not args:
+            self.nvim.err_write("AnyaDo requires an instruction argument.\n")
+            return
+        instruction = args[0]
+        self.nvim.async_call(self._do_command, instruction)
+
+    @pynvim.function("AnyaDoCancel", sync=False)
+    def anya_do_cancel(self, args):
+        """Cancel a running :Anya do operation."""
+        self._cancel_do_command()
+
     def _help_text(self):
         return f"""anya v{VERSION}
 
@@ -1879,6 +2298,7 @@ Usage:
     :Anya tab                Open the Anya interface in a new tab (floating layout)
     :Anya pane [right|left]  Toggle Anya in a pane (blocked if open in different layout)
     :Anya send <prompt>      Send a prompt to the agent
+    :Anya do <instruction>   Apply an instruction to the current buffer (headless)
     :Anya history            Open the conversation history picker
     :Anya cancel             Cancel the current agent response (Ctrl+C)
     :Anya daemon [status|start|stop|restart]  Manage the daemon process

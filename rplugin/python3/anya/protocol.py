@@ -59,6 +59,8 @@ class StreamEventType(Enum):
     TOKEN_USAGE = "token_usage"
     # Title generation result (system event)
     TITLE_GENERATED = "title_generated"
+    # Buffer modification request
+    MODIFY_BUFFER_REQUEST = "modify_buffer_request"
 
 
 @dataclass
