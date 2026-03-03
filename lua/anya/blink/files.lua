@@ -133,13 +133,13 @@ local function collect_files(root, collected, limit)
   end
 
   local function collect_recursive(dir)
-    local handle = uv.fs_scandir(dir)
-    if not handle then
+    local scan_handle = uv.fs_scandir(dir)
+    if not scan_handle then
       return
     end
 
     while #collected < limit do
-      local name, type = uv.fs_scandir_next(handle)
+      local name, type = uv.fs_scandir_next(scan_handle)
       if not name then
         break
       end
@@ -171,7 +171,7 @@ local function collect_files(root, collected, limit)
   collect_recursive(root)
 end
 
-function files.new(opts)
+function files.new(_opts)
   -- Cache for project files
   local file_cache = nil
   local cache_root = nil
@@ -185,7 +185,7 @@ function files.new(opts)
       return { "@", "." }
     end,
 
-    get_completions = function(self, ctx, callback)
+    get_completions = function(_self, ctx, callback)
       local line = vim.api.nvim_buf_get_lines(ctx.bufnr, ctx.cursor[1] - 1, ctx.cursor[1], false)[1]
       local cursor_col = ctx.cursor[2]
 

@@ -336,10 +336,10 @@ vim.opt_local.completeopt = "menu,menuone,noselect"
 -- Prompt history navigation with <C-p> and <C-n>
 local function cycle_history(direction)
   local history = require("anya.history")
-  local bufnr = vim.api.nvim_get_current_buf()
+  local current_bufnr = vim.api.nvim_get_current_buf()
 
   -- Get current buffer content
-  local current_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local current_lines = vim.api.nvim_buf_get_lines(current_bufnr, 0, -1, false)
   local current_content = table.concat(current_lines, "\n")
 
   if not history.is_navigating() then
@@ -360,7 +360,7 @@ local function cycle_history(direction)
     local lines = vim.split(prompt, "\n", { plain = true })
     -- Set flag to prevent autocmds from stopping navigation
     _G._anya_set_navigating_programmatically(true)
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    vim.api.nvim_buf_set_lines(current_bufnr, 0, -1, false, lines)
     -- Move cursor to end of buffer
     local last_line = #lines
     local last_col = #lines[last_line]

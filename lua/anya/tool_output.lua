@@ -255,7 +255,11 @@ function M.open_at_cursor()
   if current_line_idx >= 1 and current_line_idx <= #lines then
     local line = lines[current_line_idx]
     -- DEBUG: uncomment to see what line is being checked
-    -- vim.notify("open_at_cursor: line_num=" .. line_num .. " idx=" .. current_line_idx .. " line='" .. line:sub(1, 80) .. "'", vim.log.levels.INFO)
+    -- vim.notify(
+    --   "open_at_cursor: line_num=" .. line_num .. " idx=" .. current_line_idx
+    --     .. " line='" .. line:sub(1, 80) .. "'",
+    --   vim.log.levels.INFO
+    -- )
     if markers.is_tool_output_marker(line) then
       local info = markers.parse_tool_output_marker(line)
       if info then

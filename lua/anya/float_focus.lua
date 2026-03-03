@@ -163,7 +163,6 @@ function M.focus_left()
         local cfg = vim.api.nvim_win_get_config(win_id)
         -- Only non-floating windows are container windows
         if cfg.relative == "" then
-          local cur = vim.api.nvim_get_current_win()
           -- Signal to on_container_enter that we want to navigate out
           vim.g.anya_left_float = true
           -- Enter the container; on_container_enter fires synchronously and
@@ -206,6 +205,5 @@ function M.check_and_redirect()
   -- In non-pane layout, redirect back to float
   M.redirect_to_float()
 end
-
 
 return M

@@ -181,14 +181,10 @@ vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
   desc = "Highlight @filepath and /command references immediately on buffer enter",
 })
 
--- Track last Anya window for navigation redirection
-local last_anya_win = nil
-
 vim.api.nvim_create_autocmd("WinLeave", {
   buffer = bufnr,
   callback = function()
     vim.g.anya_left_anya_win = true
-    last_anya_win = vim.api.nvim_get_current_win()
   end,
   desc = "Track leaving Anya chat window",
 })
@@ -196,7 +192,6 @@ vim.api.nvim_create_autocmd("WinLeave", {
 vim.api.nvim_create_autocmd("WinEnter", {
   buffer = bufnr,
   callback = function()
-    last_anya_win = vim.api.nvim_get_current_win()
     vim.g.anya_left_anya_win = false
 
     -- Re-apply our highlights after render-markdown finishes re-rendering

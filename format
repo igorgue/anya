@@ -11,12 +11,12 @@ if [[ "$1" == "--check" ]]; then
   print_formatter ruff
   ruff format . --check --exclude standalone
   print_formatter stylua
-  # stylua --check . --glob "!**/standalone/**"
+  stylua --check .
   print_formatter luacheck
-  # luacheck lua/ ftplugin/ --exclude-files lua/standalone/
+  luacheck lua/ ftplugin/
 else
   print_formatter ruff
   ruff format . --exclude standalone
   print_formatter stylua
-  # stylua . --glob "!**/standalone/**"
+  stylua .
 fi

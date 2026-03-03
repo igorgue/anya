@@ -147,17 +147,10 @@ local function show_cwd_confirmation(item, callback)
   local conv_path = shorten_path(item.cwd)
   local current_path = shorten_path(vim.loop.cwd() or "")
 
-  local lines = {
-    "This conversation is from a different project:",
-    "  " .. conv_path,
-    "",
-    "Current directory:",
-    "  " .. current_path,
-  }
-
   -- Use vim.ui.select for the choice
+  local prompt = "Different project: " .. conv_path .. "  (current: " .. current_path .. ")"
   vim.ui.select({ "Switch to project and load", "Load anyway", "Cancel" }, {
-    prompt = "",
+    prompt = prompt,
     format_item = function(choice)
       return choice
     end,

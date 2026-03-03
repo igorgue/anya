@@ -39,7 +39,7 @@ local AVAILABLE_COMMANDS = {
   },
 }
 
-function commands.new(opts)
+function commands.new(_opts)
   return {
     -- Check if this source should be enabled for the current buffer
     enabled = function()
@@ -51,7 +51,7 @@ function commands.new(opts)
       return { "/" }
     end,
 
-    get_completions = function(self, ctx, callback)
+    get_completions = function(_self, ctx, callback)
       -- Get full line content using vim API since ctx.line only contains the keyword bounds
       local line = vim.api.nvim_buf_get_lines(ctx.bufnr, ctx.cursor[1] - 1, ctx.cursor[1], false)[1]
 
@@ -60,8 +60,6 @@ function commands.new(opts)
 
       -- Find the / symbol and get the base text after it
       local slash_pos = nil
-      local base = ""
-
       for i = cursor_col, 1, -1 do -- Include cursor position
         local char = line:sub(i, i)
         if char == "/" then
@@ -94,7 +92,7 @@ function commands.new(opts)
       end
 
       -- Extract base text after /
-      base = line:sub(slash_pos + 1, cursor_col - 1):lower()
+      local base = line:sub(slash_pos + 1, cursor_col - 1):lower()
 
       local items = {}
 

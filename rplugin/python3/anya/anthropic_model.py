@@ -143,8 +143,12 @@ class AnthropicModel:
                     response_id = event.message.id
                     usage = event.message.usage
                     input_tokens = usage.input_tokens
-                    cache_read_tokens = getattr(usage, "cache_read_input_tokens", 0) or 0
-                    cache_creation_tokens = getattr(usage, "cache_creation_input_tokens", 0) or 0
+                    cache_read_tokens = (
+                        getattr(usage, "cache_read_input_tokens", 0) or 0
+                    )
+                    cache_creation_tokens = (
+                        getattr(usage, "cache_creation_input_tokens", 0) or 0
+                    )
 
                 elif etype == "content_block_start":
                     block = event.content_block
@@ -265,8 +269,18 @@ class AnthropicModel:
                         usage = event.usage
                         output_tokens = usage.output_tokens
                         # Update cache tokens if present in delta
-                        cache_read_tokens = getattr(usage, "cache_read_input_tokens", cache_read_tokens) or cache_read_tokens
-                        cache_creation_tokens = getattr(usage, "cache_creation_input_tokens", cache_creation_tokens) or cache_creation_tokens
+                        cache_read_tokens = (
+                            getattr(usage, "cache_read_input_tokens", cache_read_tokens)
+                            or cache_read_tokens
+                        )
+                        cache_creation_tokens = (
+                            getattr(
+                                usage,
+                                "cache_creation_input_tokens",
+                                cache_creation_tokens,
+                            )
+                            or cache_creation_tokens
+                        )
 
                 elif etype == "message_stop":
                     pass
@@ -323,12 +337,12 @@ class AnthropicModel:
 
         # Total cache tokens (read + creation)
         total_cache_tokens = cache_read_tokens + cache_creation_tokens
-        
+
         logger.debug(
             f"Anthropic usage: input={input_tokens}, output={output_tokens}, "
             f"cache_read={cache_read_tokens}, cache_creation={cache_creation_tokens}"
         )
-        
+
         usage = ResponseUsage(
             input_tokens=input_tokens,
             output_tokens=output_tokens,

@@ -159,7 +159,6 @@ function M._apply_message_info(bufnr, line_num, meta, end_line_num)
   local is_agent = meta.role == "assistant"
 
   if is_agent then
-    local agent_label = as_string(meta.author) or "assistant"
     local model_label = as_string(meta.model) or "unknown"
     display_text = model_label
   else
@@ -600,7 +599,7 @@ function M._process_markers(bufnr, messages)
       -- Tool output reference marker - hide it and add virtual text
       local info = markers.parse_tool_output_marker(line)
       if info then
-        local line_count = info.line_count or 0
+        local _line_count = info.line_count or 0
         local is_header_line = line:match("^%*%*")
         local target_line_idx = i - 1 -- 0-indexed for extmark
 

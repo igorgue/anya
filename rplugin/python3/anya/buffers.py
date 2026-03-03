@@ -425,7 +425,9 @@ def new(
     if layout == "pane":
         try:
             nvim.api.win_set_var(layout_win, "anya_layout_mode", "pane")
-            nvim.api.win_set_var(layout_win, "anya_layout_direction", direction or "right")
+            nvim.api.win_set_var(
+                layout_win, "anya_layout_direction", direction or "right"
+            )
         except Exception:
             pass
 

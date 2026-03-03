@@ -104,7 +104,7 @@ end
 -- @param clicks: Number of clicks (unused)
 -- @param button: Mouse button (unused)
 -- @param mods: Modifier keys (unused)
-function M.handle_token_click(id, clicks, button, mods)
+function M.handle_token_click(_id, _clicks, _button, _mods)
   -- Toggle between compact and detailed views
   if M._token_view_state == "compact" then
     M._token_view_state = "detailed"
