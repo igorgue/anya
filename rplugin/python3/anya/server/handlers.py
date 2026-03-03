@@ -572,9 +572,7 @@ class RequestHandler:
                     "error": str(e),
                 }
 
-        async def modify_buffer_callback(
-            buf_path: str, content: str, mode: str
-        ) -> str:
+        async def modify_buffer_callback(buf_path: str, content: str, mode: str) -> str:
             """Request buffer modification on the plugin (user's machine).
 
             Sends the modification request to the plugin which executes it locally.

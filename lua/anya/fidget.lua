@@ -286,7 +286,6 @@ function M:init()
       end
     end,
   })
-
 end
 
 function M:store_progress_handle(id, handle)

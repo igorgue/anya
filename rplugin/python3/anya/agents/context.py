@@ -27,7 +27,9 @@ class NvimPluginContext:
         None  # (command, cwd, timeout, ui_dir=None)
     )
     # Background exec callback for running long commands without blocking
-    background_exec_callback: Callable[[str, str, str, str], Awaitable[str]] | None = None
+    background_exec_callback: Callable[[str, str, str, str], Awaitable[str]] | None = (
+        None
+    )
     # Modify buffer callback for modifying Neovim buffers in daemon mode
     # Takes (path: str, content: str, mode: str) and returns success message or error
     modify_buffer_callback: Callable[[str, str, str], Awaitable[str]] | None = None

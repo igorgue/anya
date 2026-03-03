@@ -1588,11 +1588,12 @@ vim.ui.input(
 
         ui.process_markers(self.nvim, chat_bufnr, messages)
 
-
     def _do_command(self, instruction: str):
         """Handle :Anya do <instruction> - headless buffer modification."""
         if self._do_running:
-            self.nvim.err_write("Anya: A 'do' operation is already in progress. Use :Anya cancel to stop it.\n")
+            self.nvim.err_write(
+                "Anya: A 'do' operation is already in progress. Use :Anya cancel to stop it.\n"
+            )
             return
 
         # Grab current buffer info synchronously (we're on the main thread here)
@@ -1623,7 +1624,8 @@ vim.ui.input(
 
         # Install temporary <C-c> mapping that cancels the do operation
         try:
-            self.nvim.exec_lua("""
+            self.nvim.exec_lua(
+                """
 local rid = select(1, ...)
 vim.g.anya_do_active_request_id = rid
 -- Map <C-c> in normal mode to cancel while do is running
@@ -1632,7 +1634,9 @@ vim.keymap.set("n", "<C-c>", function()
     vim.keymap.del("n", "<C-c>")
     vim.cmd("Anya cancel")
 end, { noremap = true, silent = true, desc = "Cancel Anya do" })
-""", request_id)
+""",
+                request_id,
+            )
         except Exception:
             pass
 
@@ -1727,6 +1731,7 @@ pcall(vim.keymap.del, "n", "<C-c>")
         rel_path = buf_path
         try:
             import os
+
             rel_path = os.path.relpath(buf_path, cwd) if cwd else buf_path
         except Exception:
             pass
@@ -1760,8 +1765,8 @@ pcall(vim.keymap.del, "n", "<C-c>")
                 self._send_to_daemon(
                     request_id,
                     user_message,
-                    None,   # no conversation
-                    [{'role': 'user', 'content': user_message}],
+                    None,  # no conversation
+                    [{"role": "user", "content": user_message}],
                     nvim_context,
                 )
             )
@@ -1922,11 +1927,20 @@ pcall(vim.keymap.del, "n", "<C-c>")
                 if poll is not None:
                     stdout = process.stdout.read() if process.stdout else ""
                     stderr = process.stderr.read() if process.stderr else ""
-                    result = {"stdout": stdout, "stderr": stderr, "returncode": process.returncode}
+                    result = {
+                        "stdout": stdout,
+                        "stderr": stderr,
+                        "returncode": process.returncode,
+                    }
                     break
                 if asyncio.get_event_loop().time() > deadline:
                     process.kill()
-                    result = {"stdout": "", "stderr": "", "returncode": -1, "error": "timeout"}
+                    result = {
+                        "stdout": "",
+                        "stderr": "",
+                        "returncode": -1,
+                        "error": "timeout",
+                    }
                     break
                 await asyncio.sleep(0.05)
         except Exception as e:
@@ -1934,6 +1948,7 @@ pcall(vim.keymap.del, "n", "<C-c>")
 
         try:
             import json
+
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
@@ -2272,7 +2287,6 @@ For more help, see :h anya"""
     def version(self, args):
         """Get the plugin version."""
         return VERSION
-
 
     @pynvim.function("AnyaDo", sync=False)
     def anya_do(self, args):
