@@ -481,7 +481,54 @@ class AnthropicModel:
             else:
                 messages.append({"role": msg["role"], "content": msg["content"]})
 
+        # Anthropic requires every tool_result to reference a tool_use in the
+        # immediately preceding assistant message.  After merging and dropping
+        # unknown item types, orphaned tool_results can appear.  Strip them.
+        messages = self._strip_orphaned_tool_results(messages)
+
         return messages
+
+    @staticmethod
+    def _strip_orphaned_tool_results(messages: list[dict]) -> list[dict]:
+        """Remove tool_result blocks whose tool_use_id has no matching tool_use.
+
+        Anthropic requires that every tool_result in a user message references a
+        tool_use block from the *immediately preceding* assistant message.  When
+        items are dropped (e.g. reasoning) or history is reconstructed
+        imperfectly, orphaned tool_results cause a 400 error.
+        """
+        cleaned: list[dict] = []
+        for i, msg in enumerate(messages):
+            if msg["role"] != "user" or isinstance(msg["content"], str):
+                cleaned.append(msg)
+                continue
+
+            # Collect tool_use IDs from the preceding assistant message
+            prev_tool_ids: set[str] = set()
+            if cleaned and cleaned[-1]["role"] == "assistant":
+                prev_content = cleaned[-1]["content"]
+                if isinstance(prev_content, list):
+                    for block in prev_content:
+                        if isinstance(block, dict) and block.get("type") == "tool_use":
+                            prev_tool_ids.add(block.get("id", ""))
+
+            # Filter content blocks
+            filtered = []
+            for block in msg["content"]:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    if block.get("tool_use_id", "") not in prev_tool_ids:
+                        logger.warning(
+                            "Dropping orphaned tool_result for tool_use_id=%s",
+                            block.get("tool_use_id"),
+                        )
+                        continue
+                filtered.append(block)
+
+            if filtered:
+                cleaned.append({"role": "user", "content": filtered})
+            # else: drop empty user message entirely
+
+        return cleaned
 
     def _convert_content_blocks(self, blocks: list) -> list:
         result = []
