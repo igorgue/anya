@@ -260,7 +260,9 @@ function M:init()
     group = group,
     callback = function(event)
       local bufnr = event.data and event.data.bufnr
-      if not bufnr then return end
+      if not bufnr then
+        return
+      end
       for _, win in ipairs(vim.api.nvim_list_wins()) do
         if vim.api.nvim_win_get_buf(win) == bufnr then
           vim.api.nvim_win_call(win, function()
