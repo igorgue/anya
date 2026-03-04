@@ -37,7 +37,7 @@ async def CodeAgent(
     settings: "AgentSettings | None" = None,
     cwd: str | None = None,
 ) -> Agent:
-    """Create a code agent with the run_code tool.
+    """Create a code agent with the execute tool.
 
     Args:
         thinking_budget: Optional thinking budget for reasoning models.
@@ -110,14 +110,14 @@ async def CodeAgent(
         model_settings_obj.reasoning.effort = effort
         model_settings_obj.reasoning.summary = "auto"
 
-    from ..tools import run_code
+    from ..tools import execute
 
     config = {
         "name": MAIN_AGENT_NAME,
         "instructions": instructions,
         "model": model_name,
         "model_settings": model_settings_obj,
-        "tools": [run_code],
+        "tools": [execute],
     }
 
     return Agent(**config)

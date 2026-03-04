@@ -16,7 +16,7 @@ Usage:
     # Prepend to buffer
     buffer.modify("# Header", mode="prepend")
 
-Note: This lib only works inside run_code() calls when a current buffer
+Note: This lib only works inside execute() calls when a current buffer
 context is available (e.g., during :Anya do operations).
 """
 
@@ -27,7 +27,7 @@ import uuid
 
 
 def _ui_dir() -> str | None:
-    """Return the UI rendezvous directory injected by run_code, or None."""
+    """Return the UI rendezvous directory injected by execute, or None."""
     return os.environ.get("ANYA_UI_DIR")
 
 
@@ -49,7 +49,7 @@ def modify(content: str, mode: str = "replace", timeout: float = 30.0) -> str:
         Success message or error description.
 
     Raises:
-        RuntimeError: If not running inside a run_code call (no ANYA_UI_DIR).
+        RuntimeError: If not running inside an execute call (no ANYA_UI_DIR).
         TimeoutError: If the plugin doesn't respond within *timeout* seconds.
         ValueError: If mode is invalid.
 
@@ -66,7 +66,7 @@ def modify(content: str, mode: str = "replace", timeout: float = 30.0) -> str:
     ui_dir = _ui_dir()
     if not ui_dir:
         raise RuntimeError(
-            "anya.libs.buffer is only available inside run_code() calls. "
+            "anya.libs.buffer is only available inside execute() calls. "
             "ANYA_UI_DIR is not set."
         )
 

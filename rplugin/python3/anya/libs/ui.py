@@ -1,4 +1,4 @@
-"""Interactive prompts for asking the user questions from within run_code.
+"""Interactive prompts for asking the user questions from within execute.
 
 Uses vim.ui.select and vim.ui.input, routed through a temp-file rendezvous
 that the plugin monitors while the subprocess is running.  Works in both
@@ -25,7 +25,7 @@ import uuid
 
 
 def _ui_dir() -> str | None:
-    """Return the UI rendezvous directory injected by run_code, or None."""
+    """Return the UI rendezvous directory injected by execute, or None."""
     return os.environ.get("ANYA_UI_DIR")
 
 
@@ -44,13 +44,13 @@ def _send_request(kind: str, payload: dict, timeout: float = 300.0) -> str:
         The user's answer as a string.
 
     Raises:
-        RuntimeError: If not running inside a run_code call (no ANYA_UI_DIR).
+        RuntimeError: If not running inside an execute call (no ANYA_UI_DIR).
         TimeoutError: If the user doesn't respond within *timeout* seconds.
     """
     ui_dir = _ui_dir()
     if not ui_dir:
         raise RuntimeError(
-            "anya.libs.ui is only available inside run_code() calls. "
+            "anya.libs.ui is only available inside execute() calls. "
             "ANYA_UI_DIR is not set."
         )
 

@@ -3,7 +3,7 @@
 All modules under this package are automatically available via:
     from anya.libs import <module>
 
-Each module provides utilities the agent can use directly in run_code() calls
+Each module provides utilities the agent can use directly in execute() calls
 without needing to install anything or write boilerplate.
 """
 
@@ -50,7 +50,7 @@ def get_libs_prompt() -> str:
 
     lines = ["\n## Built-in Agent Libraries\n"]
     lines.append(
-        "These modules are pre-installed and importable in any `run_code` call "
+        "These modules are pre-installed and importable in any `execute` call "
         "via `from anya.libs import <module>`:\n"
     )
 

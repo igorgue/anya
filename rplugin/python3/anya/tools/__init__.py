@@ -1,5 +1,5 @@
-from .run_code import run_code
+from .execute import execute
 
 __all__ = [
-    "run_code",
+    "execute",
 ]

@@ -795,7 +795,7 @@ class AnyaPlugin:
 
                     # Display tool action header in buffer
                     if tool_name and not self._request_cancelled:
-                        # For run_code, use the title argument as the display name
+                        # For execute, use the title argument as the display name
                         display_name = tool_name
                         if tool_args_raw:
                             try:
@@ -804,7 +804,7 @@ class AnyaPlugin:
                                     if isinstance(tool_args_raw, str)
                                     else tool_args_raw
                                 )
-                                if tool_name == "run_code":
+                                if tool_name == "execute":
                                     title = args_dict.get("title", "")
                                     if title:
                                         display_name = title

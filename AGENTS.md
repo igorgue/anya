@@ -277,7 +277,7 @@ buffer.modify("# End of file", mode="append")
 buffer.modify("# Header", mode="prepend")
 ```
 
-**Note:** The `buffer` lib only works inside `run_code()` calls when a current buffer
+**Note:** The `buffer` lib only works inside `execute()` calls when a current buffer
 context is available (e.g., during `:Anya do` operations). Use `fs.write_file()` for
 writing to arbitrary files.
 
