@@ -213,6 +213,8 @@ def list_files(path: str = ".", max_results: int = 200, cwd: str | None = None) 
 
     Falls back to os.walk if fd is not installed.
 
+    When using the output of this function, do not print char by char, just print the whole string.
+
     Args:
         path: Directory to list (default: current directory).
         max_results: Maximum number of files to return (default 200).
