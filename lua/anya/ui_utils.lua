@@ -226,7 +226,7 @@ function M.token_progress_bar()
     -- Detailed view: used/max
     local used_str = format_number(used)
     local max_str = format_number(max)
-    return string.format("%%#%s#%s*/%s%%*", color_group, used_str, max_str)
+    return string.format("%%#%s#%s/%s%%*", color_group, used_str, max_str)
   end
 end
 

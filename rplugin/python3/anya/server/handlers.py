@@ -11,6 +11,14 @@ import zmq.asyncio
 from agents import Runner
 from openai.types.responses import ResponseTextDeltaEvent
 
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
+
 from ..model_provider import get_run_config
 from ..protocol import (
     Request,
@@ -28,9 +36,10 @@ from ..protocol import (
 from ..token_tracker import (
     calculate_context_usage,
     format_context_window,
-    parse_usage,
+    choose_context_usage,
 )
 from ..agents.context import NvimPluginContext
+from .. import db
 from .. import utils
 from .. import tools as tools_module
 from ..spacing import SpacingManager
@@ -92,6 +101,49 @@ def _detect_filetype(tool_name: str, content: str) -> str | None:
     elif tool_name == "gh":
         return "text"
     return "text"
+
+
+
+
+def _is_retryable_error(exception: Exception) -> bool:
+    """Check if an exception represents a retryable API error."""
+    # Check for dict-style errors (like the one in the issue)
+    if isinstance(exception, dict):
+        error = exception.get("error", {})
+        code = str(error.get("code", ""))
+        # Retry on 5xx errors
+        return code.startswith("5")
+    
+    # Check for string representation of dict errors
+    error_str = str(exception)
+    if "'code': '5" in error_str or '"code": "5' in error_str:
+        return True
+    if "'code': 5" in error_str or '"code": 5' in error_str:
+        return True
+    
+    # Check for OpenAI API errors
+    try:
+        from openai import APIError, APIConnectionError, APITimeoutError, RateLimitError
+        if isinstance(exception, (APIConnectionError, APITimeoutError, RateLimitError)):
+            return True
+        # Retry on 5xx API errors
+        if isinstance(exception, APIError) and hasattr(exception, "status_code"):
+            return exception.status_code >= 500
+    except ImportError:
+        pass
+    
+    # Check for common network/timeout errors
+    import asyncio
+    import httpx
+    if isinstance(exception, (asyncio.TimeoutError, httpx.TimeoutException, httpx.NetworkError)):
+        return True
+    
+    return False
+
+
+def _should_retry(exception: Exception) -> bool:
+    """Determine if we should retry based on the exception type."""
+    return _is_retryable_error(exception)
 
 
 class RequestHandler:
@@ -256,10 +308,12 @@ class RequestHandler:
         """Handle a GENERATE_TITLE request.
 
         Returns immediately; title is generated in a background task and
-        the result is emitted as a TITLE_GENERATED system event.
+        the result is emitted as a TITLE_GENERATED event to the requesting session.
         """
         asyncio.create_task(
             self._generate_title_background(
+                session_id=request.session_id,
+                request_id=request.request_id,
                 conversation_id=request.payload.get("conversation_id", ""),
                 user_message=request.payload.get("user_message", ""),
                 assistant_message=request.payload.get("assistant_message", ""),
@@ -270,12 +324,23 @@ class RequestHandler:
 
     async def _generate_title_background(
         self,
+        session_id: str,
+        request_id: str,
         conversation_id: str,
         user_message: str,
         assistant_message: str,
         settings_dict: dict,
     ):
         """Generate a conversation title using the same API client as the coding agent."""
+        # Skip if the conversation already has a title
+        try:
+            conv = db.get_conversation(conversation_id)
+            if conv and conv.get("title"):
+                self.logger.info(f"Conversation {conversation_id} already has title, skipping generation")
+                return
+        except Exception as e:
+            self.logger.warning(f"Failed to check existing title: {e}")
+
         import re
 
         title = None
@@ -366,14 +431,17 @@ class RequestHandler:
             self.logger.warning(f"Title generation failed: {e}")
 
         # Always emit result so the plugin can finish the fidget
+        # Use system topic so all instances receive it, but include session_id
+        # so each instance can filter appropriately
         result_chunk = StreamChunk(
-            request_id="system",
+            request_id=request_id,
             session_id="system",
             event_type=StreamEventType.TITLE_GENERATED,
             data={
                 "conversation_id": conversation_id,
                 "title": title or "",
                 "success": bool(title),
+                "originating_session_id": session_id,
             },
         )
         try:
@@ -911,16 +979,19 @@ class RequestHandler:
                             "ANYA_MODEL", DEFAULT_MODEL
                         )
 
-                        # Parse usage with detailed breakdown (opencode approach)
-                        usage = parse_usage(raw_usage, provider=model)
+                        # Parse usage with detailed breakdown.
+                        # Use per-request entries when available to avoid inflated
+                        # run-aggregate context usage after tool/retry loops.
+                        usage, aggregate_usage, request_count = choose_context_usage(
+                            raw_usage, provider=model
+                        )
 
                         # Calculate context usage with usable context consideration
                         percentage, context_window, usable_context, is_overflow = (
                             calculate_context_usage(usage, model)
                         )
 
-                        # Use context_tokens for the "used" display
-                        # This is input + cache.read + output (what actually fills context)
+                        # Use effective single-request context_tokens for display
                         context_tokens = usage.context_tokens
 
                         await self._send_stream_chunk(
@@ -938,11 +1009,14 @@ class RequestHandler:
                                 "context_window": context_window,
                                 "usable_context": usable_context,
                                 "is_overflow": is_overflow,
+                                "aggregate_context_tokens": aggregate_usage.context_tokens,
+                                "request_usage_entries": request_count,
                             },
                         )
                         self.logger.info(
                             f"Token usage: {context_tokens}/{format_context_window(usable_context)} ({percentage:.1f}%) "
-                            f"[in:{usage.input} out:{usage.output} cache:{usage.cache_read}]"
+                            f"[in:{usage.input} out:{usage.output} cache:{usage.cache_read}] "
+                            f"aggregate_ctx={aggregate_usage.context_tokens} entries={request_count}"
                         )
             except Exception as e:
                 self.logger.warning(f"Error sending token usage: {e}", exc_info=True)

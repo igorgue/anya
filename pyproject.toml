@@ -12,6 +12,7 @@ dependencies = [
     "cbor2",
     "html2text",
     "anthropic",
+    "tenacity",
 ]
 
 [project.scripts]

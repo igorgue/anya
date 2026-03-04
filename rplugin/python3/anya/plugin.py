@@ -7,6 +7,7 @@ import json
 import threading
 import os
 import uuid
+import time
 from datetime import datetime, timezone
 
 from . import buffers
@@ -220,6 +221,11 @@ class AnyaPlugin:
 
     def _handle_title_generated(self, data: dict):
         """Handle TITLE_GENERATED system event from daemon."""
+        # Only process if this event originated from our session
+        originating_session = data.get("originating_session_id", "")
+        if originating_session and originating_session != self.session_id:
+            return
+
         conversation_id = data.get("conversation_id", "")
         title = data.get("title", "")
         success = data.get("success", False)
@@ -667,6 +673,10 @@ class AnyaPlugin:
 
         # Collected content for saving
         collected_content: list[str] = []
+        last_save_time = time.monotonic()
+        last_save_char_count = 0
+        save_interval = 2.0  # Save every 2 seconds
+        save_char_threshold = 1000  # Also save every 1000 chars
         thinking_started = False
         thinking_finalized = False
         tool_was_called = False
@@ -720,6 +730,27 @@ class AnyaPlugin:
                             ui.stream_text_to_buffer, self.nvim, chat_bufnr, formatted
                         )
 
+                    # Incremental save: persist partial content periodically
+                    current_char_count = sum(len(s) for s in collected_content)
+                    current_time = time.monotonic()
+                    if (
+                        conversation_id
+                        and msg_id
+                        and (
+                            current_time - last_save_time >= save_interval
+                            or current_char_count - last_save_char_count >= save_char_threshold
+                        )
+                    ):
+                        last_save_time = current_time
+                        last_save_char_count = current_char_count
+                        # Save in background to not block streaming
+                        partial_content = "".join(collected_content)
+                        asyncio.create_task(
+                            self._save_partial_message(
+                                msg_id, conversation_id, partial_content
+                            )
+                        )
+
                     # Early title generation: trigger after ~300 chars of content
                     # This provides a title mid-stream instead of waiting for completion
                     if (
@@ -761,6 +792,26 @@ class AnyaPlugin:
                     if not self._request_cancelled:
                         self.nvim.async_call(
                             ui.stream_text_to_buffer, self.nvim, chat_bufnr, formatted
+                        )
+
+                    # Incremental save during thinking (same logic as TEXT_DELTA)
+                    current_char_count = sum(len(s) for s in collected_content)
+                    current_time = time.monotonic()
+                    if (
+                        conversation_id
+                        and msg_id
+                        and (
+                            current_time - last_save_time >= save_interval
+                            or current_char_count - last_save_char_count >= save_char_threshold
+                        )
+                    ):
+                        last_save_time = current_time
+                        last_save_char_count = current_char_count
+                        partial_content = "".join(collected_content)
+                        asyncio.create_task(
+                            self._save_partial_message(
+                                msg_id, conversation_id, partial_content
+                            )
                         )
 
                 elif chunk.event_type == StreamEventType.THINKING_END:
@@ -1550,6 +1601,27 @@ end
                 f"Anya: Failed to send to daemon: {e}\n",
             )
             return None
+
+
+    async def _save_partial_message(
+        self, msg_id: str, conversation_id: str, partial_content: str
+    ):
+        """Save partial message content to database during streaming.
+
+        This ensures that if the daemon crashes or power is lost mid-stream,
+        we don't lose all the accumulated content.
+        """
+        try:
+            self._ensure_db()
+            # Use update_message to save the partial content
+            # We don't set ended_at since the message is still being streamed
+            db.update_message(msg_id, content=partial_content, ended_at=None)
+        except Exception as e:
+            # Log but don't fail - this is a best-effort save
+            try:
+                self.logger.warning(f"Failed to save partial message: {e}")
+            except Exception:
+                pass
 
     def _save_agent_message_to_db(
         self,

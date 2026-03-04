@@ -110,6 +110,9 @@ async def CodeAgent(
         model_settings_obj.reasoning.effort = effort
         model_settings_obj.reasoning.summary = "auto"
 
+    # Enable parallel tool calls by default for explicit control
+    model_settings_obj.parallel_tool_calls = True
+
     from ..tools import execute
 
     config = {

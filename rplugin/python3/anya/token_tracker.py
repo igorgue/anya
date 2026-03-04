@@ -91,34 +91,39 @@ def parse_usage(usage: Any, provider: str | None = None) -> TokenUsage:
     if not usage:
         return TokenUsage()
 
+    def _get(obj: Any, key: str, default: Any = 0) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
     # Get base values
-    input_tokens = getattr(usage, "input_tokens", 0) or 0
-    output_tokens = getattr(usage, "output_tokens", 0) or 0
+    input_tokens = _get(usage, "input_tokens", 0) or 0
+    output_tokens = _get(usage, "output_tokens", 0) or 0
 
     cached_tokens = 0
     reasoning_tokens = 0
 
     # The SDK Usage class has input_tokens_details and output_tokens_details
     # as direct attributes (not nested under 'details')
-    input_details = getattr(usage, "input_tokens_details", None)
+    input_details = _get(usage, "input_tokens_details", None)
     if input_details:
-        cached_tokens = getattr(input_details, "cached_tokens", 0) or 0
+        cached_tokens = _get(input_details, "cached_tokens", 0) or 0
 
-    output_details = getattr(usage, "output_tokens_details", None)
+    output_details = _get(usage, "output_tokens_details", None)
     if output_details:
-        reasoning_tokens = getattr(output_details, "reasoning_tokens", 0) or 0
+        reasoning_tokens = _get(output_details, "reasoning_tokens", 0) or 0
 
     # Also check for 'details' wrapper (some API responses use this structure)
     if not cached_tokens and not reasoning_tokens:
-        details = getattr(usage, "details", None)
+        details = _get(usage, "details", None)
         if details:
-            input_details = getattr(details, "input_tokens_details", None)
+            input_details = _get(details, "input_tokens_details", None)
             if input_details:
-                cached_tokens = getattr(input_details, "cached_tokens", 0) or 0
+                cached_tokens = _get(input_details, "cached_tokens", 0) or 0
 
-            output_details = getattr(details, "output_tokens_details", None)
+            output_details = _get(details, "output_tokens_details", None)
             if output_details:
-                reasoning_tokens = getattr(output_details, "reasoning_tokens", 0) or 0
+                reasoning_tokens = _get(output_details, "reasoning_tokens", 0) or 0
 
     # Anthropic doesn't subtract cached tokens from input (they're additional)
     # Other providers include cached in input, so we subtract
@@ -133,6 +138,57 @@ def parse_usage(usage: Any, provider: str | None = None) -> TokenUsage:
         cache_read=cached_tokens,
         cache_write=0,  # Not typically reported in usage
     )
+
+
+def extract_request_usages(usage: Any, provider: str | None = None) -> list[TokenUsage]:
+    """Extract per-request usage entries from aggregate usage when available."""
+    if not usage:
+        return []
+
+    entries = None
+
+    if isinstance(usage, dict):
+        entries = usage.get("request_usage_entries")
+    else:
+        entries = getattr(usage, "request_usage_entries", None)
+
+    if not entries:
+        return []
+
+    parsed: list[TokenUsage] = []
+    for entry in entries:
+        if not entry:
+            continue
+
+        entry_usage = entry
+        if isinstance(entry, dict):
+            entry_usage = entry.get("usage", entry)
+        else:
+            nested_usage = getattr(entry, "usage", None)
+            if nested_usage is not None:
+                entry_usage = nested_usage
+
+        parsed_usage = parse_usage(entry_usage, provider=provider)
+        if parsed_usage.total > 0 or parsed_usage.context_tokens > 0:
+            parsed.append(parsed_usage)
+
+    return parsed
+
+
+def choose_context_usage(usage: Any, provider: str | None = None) -> tuple[TokenUsage, TokenUsage, int]:
+    """Return (effective, aggregate, request_count) token usage.
+
+    - effective: best single-request context usage (max context_tokens)
+    - aggregate: run-aggregated usage from context_wrapper.usage
+    """
+    aggregate = parse_usage(usage, provider=provider)
+    request_usages = extract_request_usages(usage, provider=provider)
+
+    if not request_usages:
+        return aggregate, aggregate, 0
+
+    effective = max(request_usages, key=lambda u: u.context_tokens)
+    return effective, aggregate, len(request_usages)
 
 
 PROVIDER_PREFIXES = [
