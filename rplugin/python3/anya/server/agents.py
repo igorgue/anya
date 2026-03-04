@@ -15,6 +15,7 @@ import zmq.asyncio
 from agents import Agent
 
 from ..agents import CodeAgent
+from ..skills import discover_skills, skills_fingerprint
 from ..protocol import AgentSettings
 
 
@@ -115,9 +116,11 @@ class AgentManager:
 
         settings_hash = settings.settings_hash()
 
-        # Include CWD in cache key so each project directory gets its own agent
-        # with correct system prompt and AGENTS.md
-        cache_key = f"{settings_hash}:{cwd or ''}"
+        # Include CWD and skills fingerprint in cache key so each project
+        # gets its own agent, and the agent is recreated if skills change on disk
+        skills = discover_skills(cwd=cwd)
+        skill_fp = skills_fingerprint(skills)
+        cache_key = f"{settings_hash}:{cwd or ''}:{skill_fp}"
 
         # Check if we have a cached agent for these settings
         if cache_key in session.agents:

@@ -210,6 +210,26 @@ function M._apply_message_info(bufnr, line_num, meta, end_line_num)
           local lines = vim.api.nvim_buf_get_lines(bufnr, end_line_idx, end_line_idx + 1, false)
           if #lines > 0 then
             local line_content = lines[1]
+            -- Remove any pre-existing duration extmarks on this line to avoid duplicate time badges.
+            local existing = vim.api.nvim_buf_get_extmarks(
+              bufnr,
+              ui_utils.ns_id,
+              { end_line_idx, 0 },
+              { end_line_idx, -1 },
+              { details = true }
+            )
+            for _, mark in ipairs(existing) do
+              local details = mark[4]
+              local virt_text = details and details.virt_text
+              if virt_text and type(virt_text) == "table" then
+                local first = virt_text[1]
+                local text = first and first[1]
+                if type(text) == "string" and text:find("󰾩", 1, true) then
+                  pcall(vim.api.nvim_buf_del_extmark, bufnr, ui_utils.ns_id, mark[1])
+                end
+              end
+            end
+
             vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, end_line_idx, #line_content, {
               virt_text = { { duration .. " 󰾩  ", "Comment" } },
               virt_text_pos = "eol",

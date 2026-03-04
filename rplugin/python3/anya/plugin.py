@@ -966,11 +966,13 @@ class AnyaPlugin:
                                 self.nvim.exec_lua(
                                     f"""
 vim.g.anya_confirmation_result = nil
-vim.ui.input(
-    {{prompt = "{lua_p}", default = "{lua_d}"}},
-    function(val)
-        vim.g.anya_confirmation_result = val or ""
-    end)
+vim.schedule(function()
+    vim.ui.input(
+        {{prompt = "{lua_p}", default = "{lua_d}"}},
+        function(val)
+            vim.g.anya_confirmation_result = val or ""
+        end)
+end)
 """
                                 )
 
@@ -992,11 +994,13 @@ vim.ui.input(
                             self.nvim.exec_lua(
                                 f"""
 vim.g.anya_confirmation_result = nil
-vim.ui.select({lua_options},
-    {{prompt = "{lua_prompt}"}},
-    function(selection)
-        vim.g.anya_confirmation_result = selection or "Cancel"
-    end)
+vim.schedule(function()
+    vim.ui.select({lua_options},
+        {{prompt = "{lua_prompt}"}},
+        function(selection)
+            vim.g.anya_confirmation_result = selection or "Cancel"
+        end)
+end)
 """
                             )
 

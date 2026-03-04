@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, TypeVar
 
 from .utils import nvim_call_sync
+from .skills import discover_skills, format_skills_for_prompt
 
 T = TypeVar("T")
 
@@ -231,6 +232,33 @@ def read_agent_md_from_cwd(
         return None
 
 
+def read_skills_from_cwd(
+    nvim: Any | None = None, cwd: str | None = None
+) -> str | None:
+    """Discover Agent Skills and format them as a system prompt block.
+
+    Scans ~/.claude/skills/ (global) and <cwd>/.claude/skills/ (project-local).
+    Returns the formatted skills metadata block, or None if no skills found.
+    """
+    if not cwd and nvim is not None:
+        try:
+            cwd = str(_nvim_call_sync_safe(nvim, lambda: nvim.call("getcwd")))
+        except Exception:
+            pass
+
+    if not cwd:
+        try:
+            cwd = os.getcwd()
+        except Exception:
+            return None
+
+    skills = discover_skills(cwd=cwd)
+    if not skills:
+        return None
+
+    return format_skills_for_prompt(skills)
+
+
 def build_system_prompt_context(
     nvim: Any | None = None, cwd: str | None = None
 ) -> SystemPromptContext:
@@ -301,5 +329,10 @@ def apply_system_prompt(
         result += "\n---\n"
         result += agent_md_content
         result += "\n"
+
+    # Append Agent Skills metadata if any skills are discovered
+    skills_block = read_skills_from_cwd(nvim, cwd=cwd)
+    if skills_block:
+        result += skills_block + "\n"
 
     return result

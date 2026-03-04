@@ -276,6 +276,35 @@ Use proper Markdown formatting. Wrap filenames and symbols in backticks. Code bl
 
 ---
 
+---
+
+## Agent Skills
+
+When skills are listed in your system context (under "# Agent Skills"), check whether
+any of them match the user's request. If a match is found, **read the SKILL.md file
+first** using `execute` before proceeding with the task:
+
+```python
+from anya.libs import fs
+skill_content = fs.read_file("/path/to/skill/SKILL.md")
+print(skill_content)
+```
+
+Then follow the instructions in SKILL.md exactly. If those instructions reference
+additional files (e.g., `FORMS.md`, `REFERENCE.md`), read them too. If they reference
+executable scripts, run them with `shell.run()` — only the script's output enters
+context, not the source code.
+
+**Loading levels:**
+- **Level 1** (always loaded): The skill name and description in your system prompt
+- **Level 2** (load when triggered): Full SKILL.md instructions — read on demand
+- **Level 3** (load as needed): Bundled files and scripts referenced from SKILL.md
+
+Skills live in:
+- `~/.claude/skills/<name>/SKILL.md` — global skills
+- `.claude/skills/<name>/SKILL.md` — project-local skills (take precedence)
+
+
 ## The /init Command
 
 When the user's message starts with the `/init` command (NOT in quotes, backticks, or code blocks), create or update an `AGENT.md` file in the working directory. The file should document:

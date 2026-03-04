@@ -387,6 +387,85 @@ export ANYA_MODEL=your-model-name
 
 ---
 
+## Agent Skills
+
+Anya supports Claude Code-compatible **Agent Skills** — modular, filesystem-based capabilities that extend the agent with domain-specific instructions, workflows, and resources.
+
+### Directory Layout
+
+Skills are directories containing a `SKILL.md` file, placed in one of two locations:
+
+| Location | Scope |
+|---|---|
+| `~/.claude/skills/<name>/` | Global — available in all projects |
+| `.claude/skills/<name>/` | Project-local — available only in this project |
+
+Project-local skills take precedence over global skills with the same name.
+
+### Creating a Skill
+
+Every skill requires a `SKILL.md` with YAML frontmatter:
+
+```markdown
+---
+name: my-skill
+description: What this skill does and when to use it. Use when the user asks about X.
+---
+
+# My Skill
+
+## Instructions
+
+Step-by-step guidance for the agent.
+
+## Examples
+
+Concrete examples of using this skill.
+```
+
+**`name`** rules:
+- Maximum 64 characters
+- Only lowercase letters, numbers, and hyphens
+- Cannot contain "anthropic" or "claude"
+
+**`description`** rules:
+- Non-empty, maximum 1024 characters
+- Should describe both *what* it does and *when* to use it
+
+### Skill Content Levels
+
+| Level | Content | When Loaded |
+|---|---|---|
+| **1: Metadata** | `name` + `description` from frontmatter | Always (injected into system prompt at startup) |
+| **2: Instructions** | Full `SKILL.md` body | When agent reads the file on demand |
+| **3: Resources** | Bundled files, scripts, templates | When referenced from SKILL.md |
+
+The agent sees only the name/description at startup (~100 tokens per skill). When a request matches, it reads the full `SKILL.md` using `execute`. Additional files and scripts referenced in `SKILL.md` are loaded or executed as needed.
+
+### Example Skill with Bundled Resources
+
+```text
+.claude/skills/deploy/
+├── SKILL.md          # main instructions
+├── CHECKLIST.md      # pre-deploy checklist (read on demand)
+└── scripts/
+    └── validate.sh   # validation script (executed, output only in context)
+```
+
+### How the Agent Uses Skills
+
+1. At startup, skills metadata is injected into the system prompt automatically
+2. When a user request matches a skill's description, the agent reads `SKILL.md`
+3. The agent follows the instructions, reading bundled files or running scripts as needed
+4. Scripts are run via `shell.run()` — only their output enters context, not source code
+
+### Cache Invalidation
+
+The agent is recreated whenever skills change on disk (files added, removed, or `SKILL.md` modified). No manual restart required.
+
+
+---
+
 ## Best Practices
 
 - All commands under `:Anya` (no command pollution!)
