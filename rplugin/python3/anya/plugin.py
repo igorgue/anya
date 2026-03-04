@@ -58,6 +58,7 @@ class AnyaPlugin:
         self._do_request_id = None
         self._do_cancelled = False
         self._do_running = False
+        self._do_buf_number = None
 
         # Daemon client
         self._client = AnyaClient()
@@ -1762,6 +1763,7 @@ end
         self._do_request_id = request_id
         self._do_cancelled = False
         self._do_running = True
+        self._do_buf_number = buf.number
 
         # Install temporary <C-c> mapping that cancels the do operation
         try:
@@ -2052,12 +2054,15 @@ end)
     async def _handle_do_exec_request(self, chunk):
         """Handle EXEC_REQUEST during :Anya do (reuses existing exec logic)."""
         import functools
+        import glob
+        import json
         import subprocess
 
         confirmation_id = chunk.data.get("confirmation_id")
         exec_command = chunk.data.get("command", "")
         exec_cwd = chunk.data.get("cwd", "")
         exec_timeout = chunk.data.get("timeout", 30)
+        exec_ui_dir = chunk.data.get("ui_dir", "")
 
         try:
             cwd_val = [None]
@@ -2102,13 +2107,91 @@ end)
                         "error": "timeout",
                     }
                     break
+
+                # Serve any pending ui_dir requests from the subprocess
+                # (e.g. buffer.modify() writes a modify_buffer request here)
+                if exec_ui_dir and os.path.isdir(exec_ui_dir):
+                    for req_file in glob.glob(
+                        os.path.join(exec_ui_dir, "*.request.json")
+                    ):
+                        try:
+                            with open(req_file) as _f:
+                                req = json.load(_f)
+                            os.unlink(req_file)
+                        except Exception:
+                            continue
+
+                        req_id = req.get("id", "")
+                        kind = req.get("kind", "select")
+                        resp_file = os.path.join(
+                            exec_ui_dir, f"{req_id}.response.json"
+                        )
+
+                        ui_result = ""
+                        try:
+                            if kind == "modify_buffer":
+                                buf_content = req.get("content", "")
+                                buf_mode = req.get("mode", "replace")
+                                # Apply the buffer modification directly using
+                                # the current do operation's buffer number.
+                                result_container = [None]
+
+                                def _apply_modification(
+                                    _content=buf_content,
+                                    _mode=buf_mode,
+                                    _buf=self._do_buf_number,
+                                ):
+                                    try:
+                                        if not self.nvim.api.buf_is_valid(_buf):
+                                            result_container[0] = "Error: Buffer is no longer valid"
+                                            return
+                                        _lines = _content.split("\n")
+                                        was_modifiable = self.nvim.api.buf_get_option(_buf, "modifiable")
+                                        self.nvim.api.buf_set_option(_buf, "modifiable", True)
+                                        if _mode == "replace":
+                                            self.nvim.api.buf_set_lines(_buf, 0, -1, False, _lines)
+                                        elif _mode == "append":
+                                            lc = self.nvim.api.buf_line_count(_buf)
+                                            self.nvim.api.buf_set_lines(_buf, lc, lc, False, _lines)
+                                        elif _mode == "prepend":
+                                            self.nvim.api.buf_set_lines(_buf, 0, 0, False, _lines)
+                                        self.nvim.api.buf_set_option(_buf, "modifiable", was_modifiable)
+                                        self.nvim.api.buf_set_option(_buf, "modified", True)
+                                        result_container[0] = "ok"
+                                        self.nvim.exec_lua("""
+local bufnr = select(1, ...)
+vim.schedule(function()
+    vim.cmd("checktime")
+    vim.api.nvim_exec_autocmds("User", {
+        pattern = "AnyaDoBufferModified",
+        data = { bufnr = bufnr },
+    })
+    vim.cmd("redraw!")
+end)
+""", _buf)
+                                    except Exception as e:
+                                        result_container[0] = f"Error: {e}"
+
+                                self.nvim.async_call(_apply_modification)
+                                for _ in range(100):
+                                    await asyncio.sleep(0.05)
+                                    if result_container[0] is not None:
+                                        break
+                                ui_result = result_container[0] or "Error: timeout"
+                        except Exception as e:
+                            ui_result = f"Error: {e}"
+
+                        try:
+                            with open(resp_file, "w") as _f:
+                                json.dump({"result": ui_result}, _f)
+                        except Exception:
+                            pass
+
                 await asyncio.sleep(0.05)
         except Exception as e:
             result = {"stdout": "", "stderr": "", "returncode": -1, "error": str(e)}
 
         try:
-            import json
-
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
@@ -2148,6 +2231,7 @@ pcall(vim.keymap.del, "n", "<C-c>")
         self._do_task = None
         self._do_request_id = None
         self._do_cancelled = False
+        self._do_buf_number = None
 
     def cancel_agent(self):
         """Cancel the current agent response and flush the queue."""
