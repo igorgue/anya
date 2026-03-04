@@ -128,7 +128,7 @@ vim.g.maplocalleader = "\\"
 
 -- plugin setup
 require("which-key").setup({})
-require("snacks").setup({})
+require("snacks").setup({ input = { enabled = true }, picker = { enabled = true, ui_select = true } })
 require("danger").setup({
   style = "dark",
   alacritty = false,
@@ -185,7 +185,13 @@ require("render-markdown").setup({
   },
 })
 require("notify").setup({})
-require("noice").setup({})
+require("noice").setup({
+  presets = {
+    bottom_search = false,
+    command_palette = false,
+    long_message_to_split = false,
+  },
+})
 require("blink.cmp").setup({
   fuzzy = { implementation = "lua" },
   completion = {

@@ -866,12 +866,6 @@ class AnyaPlugin:
                     prompt = chunk.data.get("prompt", "")
                     options = chunk.data.get("options", ["Yes", "No"])
 
-                    # Log that we received the confirmation request
-                    self.nvim.async_call(
-                        self.nvim.out_write,
-                        f"Anya: Received confirmation request: {prompt[:50]}...\n",
-                    )
-
                     # Show confirmation dialog and send response
                     # Use default args to capture values by value, not reference
                     async def handle_confirmation(
