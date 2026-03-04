@@ -1849,10 +1849,29 @@ pcall(vim.keymap.del, "n", "<C-c>")
                     self.nvim.api.buf_set_lines(buf_number, 0, 0, False, lines)
 
                 self.nvim.api.buf_set_option(buf_number, "modifiable", was_modifiable)
-                # Mark buffer modified and redraw so changes are visible immediately
+                # Mark buffer modified so the UI shows [+]
                 self.nvim.api.buf_set_option(buf_number, "modified", True)
                 result_container[0] = "ok"
-                self.nvim.command("redraw")
+                # Emit a user event so the Lua side can schedule a proper
+                # checktime + redraw after the buffer has been written.
+                # Using exec_lua with vim.schedule ensures this runs after
+                # the current async_call frame, which is necessary for the
+                # screen to actually refresh (redraw! inside async_call is
+                # unreliable when the buffer is not in the active terminal tab).
+                self.nvim.exec_lua(
+                    """
+local bufnr = select(1, ...)
+vim.schedule(function()
+    vim.cmd("checktime")
+    vim.api.nvim_exec_autocmds("User", {
+        pattern = "AnyaDoBufferModified",
+        data = { bufnr = bufnr },
+    })
+    vim.cmd("redraw!")
+end)
+""",
+                    buf_number,
+                )
             except Exception as e:
                 result_container[0] = f"Error: {e}"
 

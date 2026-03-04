@@ -251,6 +251,27 @@ function M:init()
   })
 
   -- :Anya do (headless buffer modification) events
+
+  -- Fired after the buffer has been written; ensure the screen is refreshed
+  -- in every window that shows the modified buffer, even if it's not currently
+  -- focused or is on a different terminal tab.
+  vim.api.nvim_create_autocmd({ "User" }, {
+    pattern = "AnyaDoBufferModified",
+    group = group,
+    callback = function(event)
+      local bufnr = event.data and event.data.bufnr
+      if not bufnr then return end
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_buf(win) == bufnr then
+          vim.api.nvim_win_call(win, function()
+            -- Move cursor to top so the user sees the updated content
+            vim.cmd("normal! gg")
+          end)
+        end
+      end
+    end,
+  })
+
   vim.api.nvim_create_autocmd({ "User" }, {
     pattern = "AnyaDoStarted",
     group = group,
