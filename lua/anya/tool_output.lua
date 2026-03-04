@@ -109,10 +109,15 @@ end
 
 --- Send a retry prompt for the code in the scratch buffer to Anya
 --- @param buf number Buffer number containing the code
+--- @param win number Window number (from Snacks scratch self.win)
 --- @param title string The code title (used in [[title]] reference)
-local function retry_code_with_anya(buf, title)
+local function retry_code_with_anya(buf, win, title, extra_instructions)
   local content = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
   local prompt = string.format("Retry this code [[%s]]:\n\n```python\n%s\n```", title, content)
+
+  if extra_instructions and extra_instructions:match("%S") then
+    prompt = prompt .. "\n\nAdditional instructions:\n" .. extra_instructions
+  end
 
   -- Find the prompt buffer
   local prompt_buf = nil
@@ -131,9 +136,22 @@ local function retry_code_with_anya(buf, title)
     return
   end
 
+  -- Close the scratch window before sending
+  if win and vim.api.nvim_win_is_valid(win) then
+    vim.api.nvim_win_close(win, true)
+  end
+
   vim.api.nvim_set_option_value("modifiable", true, { buf = prompt_buf })
   vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, vim.split(prompt, "\n", { plain = true }))
   require("anya.conversation").send_message()
+end
+
+local function retry_code_with_anya_prompt(buf, win, title)
+  vim.ui.input({
+    prompt = "Extra instructions for retry: ",
+  }, function(input)
+    retry_code_with_anya(buf, win, title, input)
+  end)
 end
 
 --- Open the saved code file for a [[title]] reference using Snacks scratch.
@@ -211,9 +229,17 @@ function M.open_code_at_cursor(override_line, override_col)
           retry_with_anya = {
             "gs",
             function(self)
-              retry_code_with_anya(self.buf, title)
+              retry_code_with_anya(self.buf, self.win, title)
             end,
             desc = "retry",
+            mode = { "n" },
+          },
+          retry_with_anya_prompt = {
+            "gS",
+            function(self)
+              retry_code_with_anya_prompt(self.buf, self.win, title)
+            end,
+            desc = "retry with prompt",
             mode = { "n" },
           },
           open_output = {
@@ -320,9 +346,17 @@ function M.open_code_at_cursor_by_title(title)
           retry_with_anya = {
             "gs",
             function(self)
-              retry_code_with_anya(self.buf, title)
+              retry_code_with_anya(self.buf, self.win, title)
             end,
             desc = "retry",
+            mode = { "n" },
+          },
+          retry_with_anya_prompt = {
+            "gS",
+            function(self)
+              retry_code_with_anya_prompt(self.buf, self.win, title)
+            end,
+            desc = "retry with prompt",
             mode = { "n" },
           },
           open_output = {
