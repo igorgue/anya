@@ -393,14 +393,20 @@ Anya supports Claude Code-compatible **Agent Skills** — modular, filesystem-ba
 
 ### Directory Layout
 
-Skills are directories containing a `SKILL.md` file, placed in one of two locations:
+Skills are directories containing a `SKILL.md` file. Anya scans **four locations** in
+priority order (later overrides earlier for the same skill name):
 
-| Location | Scope |
-|---|---|
-| `~/.claude/skills/<name>/` | Global — available in all projects |
-| `.claude/skills/<name>/` | Project-local — available only in this project |
+| Location | Scope | Ecosystem |
+|---|---|---|
+| `~/.claude/skills/<name>/` | Global | Claude Code |
+| `~/.agents/skills/<name>/` | Global | Universal (skills.sh) |
+| `.claude/skills/<name>/` | Project-local | Claude Code |
+| `.agents/skills/<name>/` | Project-local | Universal (skills.sh) |
 
-Project-local skills take precedence over global skills with the same name.
+Project-local skills take precedence over global ones. Within the same scope,
+`.agents/` takes precedence over `.claude/` — so you can use skills installed via
+`npx skills add` (which writes to `~/.agents/skills/`) alongside hand-crafted
+Claude Code skills without conflicts.
 
 ### Creating a Skill
 

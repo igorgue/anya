@@ -1,10 +1,15 @@
 """Agent Skills discovery and validation.
 
-Implements Claude Code-compatible filesystem-based Skills:
-- Scans ~/.claude/skills/ (global) and <cwd>/.claude/skills/ (project-local)
-- Parses YAML frontmatter from each SKILL.md
+Implements filesystem-based Skills compatible with Claude Code and the open
+agent skills ecosystem (skills.sh / ~/.agents/skills/):
+- Scans ~/.claude/skills/ (global, Claude Code)
+- Scans ~/.agents/skills/ (global, universal agent skills)
+- Scans <cwd>/.claude/skills/ (project-local, Claude Code)
+- Scans <cwd>/.agents/skills/ (project-local, universal agent skills)
+- Parses YAML frontmatter from each SKILL.md, including multi-line block scalars
 - Validates name and description fields per the Claude Code spec
-- Project-local skills take precedence over global skills with the same name
+- Later scan locations take precedence over earlier ones for the same name
+  (project-local > global; .agents > .claude within the same scope)
 """
 
 from __future__ import annotations
@@ -37,7 +42,16 @@ def _parse_frontmatter(content: str) -> tuple[dict[str, str], str]:
     """Parse YAML-style frontmatter from a markdown file.
 
     Returns (frontmatter_dict, body) where body is everything after the closing ---.
-    Only handles simple key: value pairs (no nested YAML), which is all Skills need.
+    Handles both simple ``key: value`` pairs and block scalar values used by the
+    universal agent skills ecosystem (e.g. the ``uv`` / ``ty`` skills from
+    astral-sh/claude-code-plugins):
+
+        description:
+          First line of the description.
+          Second line continues here.
+
+    The block scalar value is collected by joining all indented continuation
+    lines with a single space and stripping the result.
     """
     content = content.strip()
     if not content.startswith("---"):
@@ -50,17 +64,43 @@ def _parse_frontmatter(content: str) -> tuple[dict[str, str], str]:
         return {}, content
 
     frontmatter_text = rest[:end].strip()
-    body = rest[end + 4 :].strip()  # skip \n---
+    body = rest[end + 4:].strip()  # skip \n---
 
     result: dict[str, str] = {}
-    for line in frontmatter_text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if ":" in line:
-            key, _, value = line.partition(":")
-            result[key.strip()] = value.strip()
+    current_key: str | None = None
+    current_value_lines: list[str] = []
 
+    def _flush():
+        if current_key is not None:
+            result[current_key] = " ".join(current_value_lines).strip()
+
+    for line in frontmatter_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        # An indented line whose first token contains no colon is a continuation
+        # of the previous block-scalar value.
+        first_token = stripped.split()[0] if stripped.split() else ""
+        if current_key is not None and line.startswith((" ", "\t")) and ":" not in first_token:
+            current_value_lines.append(stripped)
+            continue
+
+        # New key: value pair — flush the previous one first
+        _flush()
+        current_key = None
+        current_value_lines = []
+
+        if ":" in stripped:
+            key, _, value = stripped.partition(":")
+            current_key = key.strip()
+            value = value.strip()
+            if value:
+                # Inline value — single-line
+                current_value_lines = [value]
+            # else: block scalar, continuation lines follow
+
+    _flush()
     return result, body
 
 
@@ -130,11 +170,15 @@ def _load_skill_from_dir(skill_dir: str) -> Skill | None:
 def discover_skills(cwd: str | None = None) -> list[Skill]:
     """Discover all available Skills.
 
-    Scans two locations:
-    1. ~/.claude/skills/ (global skills)
-    2. <cwd>/.claude/skills/ (project-local skills)
+    Scans four locations in priority order (later overrides earlier):
 
-    Project-local skills take precedence over global skills with the same name.
+    1. ``~/.claude/skills/``       — global Claude Code skills
+    2. ``~/.agents/skills/``       — global universal agent skills (skills.sh)
+    3. ``<cwd>/.claude/skills/``   — project-local Claude Code skills
+    4. ``<cwd>/.agents/skills/``   — project-local universal agent skills
+
+    Skills with the same name in a later location override earlier ones, so
+    project-local skills always win over global ones.
 
     Args:
         cwd: Current working directory to scan for project-local skills.
@@ -149,16 +193,21 @@ def discover_skills(cwd: str | None = None) -> list[Skill]:
         except Exception:
             cwd = ""
 
+    home = os.path.expanduser("~")
     skills_by_name: dict[str, Skill] = {}
 
-    # Level 1: global skills (~/.claude/skills/)
-    global_skills_dir = os.path.join(os.path.expanduser("~"), ".claude", "skills")
-    _scan_skills_dir(global_skills_dir, skills_by_name)
+    # 1. Global Claude Code skills
+    _scan_skills_dir(os.path.join(home, ".claude", "skills"), skills_by_name)
 
-    # Level 2: project-local skills (<cwd>/.claude/skills/) — overrides global
+    # 2. Global universal agent skills
+    _scan_skills_dir(os.path.join(home, ".agents", "skills"), skills_by_name)
+
     if cwd:
-        local_skills_dir = os.path.join(cwd, ".claude", "skills")
-        _scan_skills_dir(local_skills_dir, skills_by_name)
+        # 3. Project-local Claude Code skills
+        _scan_skills_dir(os.path.join(cwd, ".claude", "skills"), skills_by_name)
+
+        # 4. Project-local universal agent skills
+        _scan_skills_dir(os.path.join(cwd, ".agents", "skills"), skills_by_name)
 
     return sorted(skills_by_name.values(), key=lambda s: s.name)
 
