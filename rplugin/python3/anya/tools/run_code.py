@@ -431,9 +431,7 @@ async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
             pass
 
 
-async def _nvim_modify_buffer(
-    nvim, buf_path: str, content: str, mode: str
-) -> str:
+async def _nvim_modify_buffer(nvim, buf_path: str, content: str, mode: str) -> str:
     """Modify a Neovim buffer directly (direct nvim mode)."""
     import os
 
@@ -466,7 +464,9 @@ async def _nvim_modify_buffer(
 
             nvim.api.buf_set_option(target_buf.number, "modifiable", was_modifiable)
             nvim.api.buf_set_option(target_buf.number, "modified", True)
-            result_container[0] = f"Successfully modified buffer: {os.path.basename(buf_path)}"
+            result_container[0] = (
+                f"Successfully modified buffer: {os.path.basename(buf_path)}"
+            )
         except Exception as e:
             result_container[0] = f"Error: {e}"
 
