@@ -182,7 +182,7 @@ function files.new(_opts)
     end,
 
     get_trigger_characters = function()
-      return { "@", "." }
+      return { "@", ".", "/" }
     end,
 
     get_completions = function(_self, ctx, callback)

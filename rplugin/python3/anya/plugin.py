@@ -230,7 +230,9 @@ class AnyaPlugin:
                 db.update_conversation_title(conversation_id, title)
                 # Update the window title to show the conversation title
                 self.nvim.async_call(
-                    lambda: self.nvim.options.__setitem__("titlestring", f"Anya: {title}")
+                    lambda: self.nvim.options.__setitem__(
+                        "titlestring", f"Anya: {title}"
+                    )
                 )
             except Exception:
                 pass
