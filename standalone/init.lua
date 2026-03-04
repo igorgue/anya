@@ -85,6 +85,10 @@ vim.opt.smoothscroll = false
 
 vim.opt.clipboard = "unnamedplus"
 
+-- Set window title to "Anya"
+vim.opt.title = true
+vim.opt.titlestring = "Anya"
+
 vim.opt.shortmess:append("I")
 
 if vim.o.diff ~= false then

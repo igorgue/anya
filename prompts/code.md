@@ -317,20 +317,23 @@ After presenting the plan in the conversation, use `run_code` with `from anya.li
 - `other`
 
 **You may add additional options between `execute` and `other`** if they would be useful for the specific plan. For example:
-- `save and execute` - Save the plan, then implement it
 - `revise plan` - If you asked clarifying questions and need to adjust
 - `show code first` - Preview code changes before executing
-- `save as TODO` - Save the plan but don't execute now
 - Any other relevant options for your specific plan
 
 The options list should be: `["save", "execute", ...additional options..., "other"]`
 
 ### Step 3: Follow User Selection
 
-- `save`: Save the plan as a markdown file in the project root (filename chosen by the agent), and stop.
-- `execute`: Do not save the plan to a file; proceed to implement the plan directly.
-- `other`: Do not save or execute; return control to the prompt so the user can continue.
-- For any additional options you added, handle them appropriately based on their meaning.
+After the user selects an option, you **MUST take the appropriate action**:
+
+- **`save`**: Write the plan to a markdown file in the project root using `fs.write_file()`. Choose a descriptive filename based on the plan content (e.g., `plan-add-authentication.md`, `plan-refactor-database.md`). Inform the user of the file location, then stop.
+  
+- **`execute`**: Begin implementing the plan immediately. Do NOT save the plan to a file. Start by reading relevant files, then make the code changes described in your plan. Verify your work as you go.
+
+- **`other`**: Do NOT save or execute anything. Simply acknowledge and wait for the user to provide further instructions or a new prompt. This allows the user to modify their request or ask questions.
+
+- **Additional options**: Handle them appropriately based on their meaning. For example, `revise plan` means you should update the plan based on user feedback and re-present it.
 
 **Important**: Only trigger `/plan` behavior when the command appears as `/plan` at the start of the message. Do NOT trigger it when:
 - The command is wrapped in quotes: `/plan`

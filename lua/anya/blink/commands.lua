@@ -34,7 +34,7 @@ local AVAILABLE_COMMANDS = {
   },
   {
     label = "/plan",
-    description = "Create a plan first, then choose save/execute/save and execute/other",
+    description = "Create a plan first, then choose save/execute/other",
     kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Keyword or 14,
   },
   {
