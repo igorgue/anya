@@ -2219,6 +2219,7 @@ Available slash commands:
   /file      Open file picker to add files to prompt
   /compact   Compact conversation context
   /init      Create or update AGENTS.md with project instructions
+  /plan      Draft a plan first, then choose save/execute/save+execute
 
 Usage:
   Type a message in the prompt buffer and press Enter to send.

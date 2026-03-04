@@ -33,6 +33,11 @@ local AVAILABLE_COMMANDS = {
     kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Keyword or 14,
   },
   {
+    label = "/plan",
+    description = "Create a plan first, then choose save/execute/save and execute/other",
+    kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Keyword or 14,
+  },
+  {
     label = "/new",
     description = "Clear chat history (alias for /clear)",
     kind = vim.lsp and vim.lsp.CompletionItemKind and vim.lsp.CompletionItemKind.Keyword or 14,
