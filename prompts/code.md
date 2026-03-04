@@ -309,18 +309,28 @@ When the user's message starts with the `/plan` command (NOT in quotes, backtick
 
 ### Step 2: Ask for User Decision
 
-After presenting the plan in the conversation, use `run_code` with `from anya.libs import ui` and call `ui.ask(...)` with exactly these options:
+After presenting the plan in the conversation, use `run_code` with `from anya.libs import ui` and call `ui.ask(...)` with options.
+
+**Default options (always include these):**
 - `save`
 - `execute`
-- `save and execute`
 - `other`
+
+**You may add additional options between `execute` and `other`** if they would be useful for the specific plan. For example:
+- `save and execute` - Save the plan, then implement it
+- `revise plan` - If you asked clarifying questions and need to adjust
+- `show code first` - Preview code changes before executing
+- `save as TODO` - Save the plan but don't execute now
+- Any other relevant options for your specific plan
+
+The options list should be: `["save", "execute", ...additional options..., "other"]`
 
 ### Step 3: Follow User Selection
 
 - `save`: Save the plan as a markdown file in the project root (filename chosen by the agent), and stop.
 - `execute`: Do not save the plan to a file; proceed to implement the plan directly.
-- `save and execute`: Save the markdown plan in the root, then implement the plan.
-- `other`: Treat as cancel; do not save or execute, and return control to the prompt so the user can continue.
+- `other`: Do not save or execute; return control to the prompt so the user can continue.
+- For any additional options you added, handle them appropriately based on their meaning.
 
 **Important**: Only trigger `/plan` behavior when the command appears as `/plan` at the start of the message. Do NOT trigger it when:
 - The command is wrapped in quotes: `/plan`
