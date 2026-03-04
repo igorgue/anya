@@ -359,7 +359,8 @@ async def _run_with_ui_requests_nvim(
 async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
     """Scan ui_dir for pending request files and serve each one.
 
-    Handles both "select" (vim.ui.select) and "input" (vim.ui.input) kinds.
+    Handles "select" (vim.ui.select), "input" (vim.ui.input), and
+    "modify_buffer" (buffer modification) kinds.
     Each request file is removed after reading; the response is written to
     a matching .response.json file for the subprocess to pick up.
     """
@@ -400,14 +401,84 @@ async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
                     result = await plugin_context.confirmation_callback(
                         f"__input__:{default}:{prompt}", []
                     )
-        except Exception:
-            result = ""
+            elif kind == "modify_buffer":
+                # Handle buffer modification from anya.libs.buffer
+                buf_content = req.get("content", "")
+                buf_mode = req.get("mode", "replace")
+                buf_path = plugin_context.current_buffer
+
+                if not buf_path:
+                    result = "Error: No current buffer available"
+                elif plugin_context.modify_buffer_callback:
+                    # Daemon mode: use the callback to request modification
+                    result = await plugin_context.modify_buffer_callback(
+                        buf_path, buf_content, buf_mode
+                    )
+                elif plugin_context.has_nvim and plugin_context.nvim:
+                    # Direct nvim mode: modify buffer directly
+                    result = await _nvim_modify_buffer(
+                        plugin_context.nvim, buf_path, buf_content, buf_mode
+                    )
+                else:
+                    result = "Error: No method available to modify buffer"
+        except Exception as e:
+            result = f"Error: {e}"
 
         try:
             with open(response_file, "w") as f:
                 _json.dump({"result": result}, f)
         except Exception:
             pass
+
+
+async def _nvim_modify_buffer(
+    nvim, buf_path: str, content: str, mode: str
+) -> str:
+    """Modify a Neovim buffer directly (direct nvim mode)."""
+    import os
+
+    result_container = [None]
+
+    def apply_modification():
+        try:
+            # Find the buffer by name
+            target_buf = None
+            for buf in nvim.buffers:
+                if buf.valid and buf.name == buf_path:
+                    target_buf = buf
+                    break
+
+            if not target_buf:
+                result_container[0] = f"Error: Buffer not found: {buf_path}"
+                return
+
+            lines = content.split("\n")
+            was_modifiable = nvim.api.buf_get_option(target_buf.number, "modifiable")
+            nvim.api.buf_set_option(target_buf.number, "modifiable", True)
+
+            if mode == "replace":
+                nvim.api.buf_set_lines(target_buf.number, 0, -1, False, lines)
+            elif mode == "append":
+                lc = nvim.api.buf_line_count(target_buf.number)
+                nvim.api.buf_set_lines(target_buf.number, lc, lc, False, lines)
+            elif mode == "prepend":
+                nvim.api.buf_set_lines(target_buf.number, 0, 0, False, lines)
+
+            nvim.api.buf_set_option(target_buf.number, "modifiable", was_modifiable)
+            nvim.api.buf_set_option(target_buf.number, "modified", True)
+            result_container[0] = f"Successfully modified buffer: {os.path.basename(buf_path)}"
+        except Exception as e:
+            result_container[0] = f"Error: {e}"
+
+    nvim.async_call(apply_modification)
+
+    # Wait for the async call to complete
+    for _ in range(100):
+        await asyncio.sleep(0.05)
+        if result_container[0] is not None:
+            break
+
+    return result_container[0] or "Error: timeout"
 
 
 async def _nvim_ui_input(nvim, prompt: str, default: str = "") -> str:

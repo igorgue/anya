@@ -1740,9 +1740,9 @@ pcall(vim.keymap.del, "n", "<C-c>")
             f"{instruction}\n\n"
             f"Current file: `{rel_path}` (filetype: {ft})\n\n"
             f"File content:\n```{ft}\n{buf_content}\n```\n\n"
-            f"Use the `modify_buffer` tool to write the result directly to the buffer.\n"
-            f"The `modify_buffer` tool's `content` argument must be the COMPLETE new file content.\n"
-            f"Do not add any explanation — just call `modify_buffer` with the full result."
+            f"Use `from anya.libs import buffer; buffer.modify(content)` to write the result.\n"
+            f"The `content` argument must be the COMPLETE new file content.\n"
+            f"Do not add any explanation — just use buffer.modify() with the full result."
         )
 
         nvim_context = NvimContext(

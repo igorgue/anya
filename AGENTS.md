@@ -262,6 +262,25 @@ ui.confirm("Continue?")                     # Yes/no
 ui.input("Enter value:")                    # Text input
 ```
 
+### Buffer Modification (`buffer`)
+
+```python
+from anya.libs import buffer
+
+# Replace buffer contents (during :Anya do)
+buffer.modify("def new_function():\n    pass")
+
+# Append to buffer
+buffer.modify("# End of file", mode="append")
+
+# Prepend to buffer
+buffer.modify("# Header", mode="prepend")
+```
+
+**Note:** The `buffer` lib only works inside `run_code()` calls when a current buffer
+context is available (e.g., during `:Anya do` operations). Use `fs.write_file()` for
+writing to arbitrary files.
+
 ### Background Jobs (`background`)
 
 ```python
