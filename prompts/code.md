@@ -164,7 +164,7 @@ result = mcp.call("zai-vision", "diagnose_error_screenshot", {"imagePath": "/pat
 | Read a file (for understanding) | `fs.read_file()` |
 | Read a file (for string manipulation) | `open(path).read()` |
 | Read multiple files | `fs.read_many_files()` |
-| Write/create a file | `fs.write_file()` or `fs.create_file()` |
+| Write/create a file | `fs.write_file()` inside `run_code` |
 | List directory contents | `fs.list_files()` |
 | Search code in project | `fs.search_code()` |
 | Run shell command | `shell.run()` |

@@ -228,6 +228,10 @@ class AnyaPlugin:
             try:
                 self._ensure_db()
                 db.update_conversation_title(conversation_id, title)
+                # Update the window title to show the conversation title
+                self.nvim.async_call(
+                    lambda: self.nvim.options.__setitem__("titlestring", f"Anya: {title}")
+                )
             except Exception:
                 pass
 
@@ -664,6 +668,7 @@ class AnyaPlugin:
         thinking_started = False
         thinking_finalized = False
         tool_was_called = False
+        early_title_triggered = False  # Track if we've started early title generation
 
         try:
             await subscriber.connect()
@@ -711,6 +716,24 @@ class AnyaPlugin:
                     if not self._request_cancelled:
                         self.nvim.async_call(
                             ui.stream_text_to_buffer, self.nvim, chat_bufnr, formatted
+                        )
+
+                    # Early title generation: trigger after ~300 chars of content
+                    # This provides a title mid-stream instead of waiting for completion
+                    if (
+                        not early_title_triggered
+                        and conversation_id
+                        and sum(len(s) for s in collected_content) >= 300
+                    ):
+                        early_title_triggered = True
+                        partial_content = "".join(collected_content)
+                        asyncio.create_task(
+                            self._generate_conversation_title(
+                                conversation_id,
+                                text,
+                                partial_content,
+                                request_agent_settings,
+                            )
                         )
 
                 elif chunk.event_type == StreamEventType.THINKING_START:
@@ -772,16 +795,17 @@ class AnyaPlugin:
                     if tool_name and not self._request_cancelled:
                         # For run_code, use the title argument as the display name
                         display_name = tool_name
-                        if tool_name == "run_code" and tool_args_raw:
+                        if tool_args_raw:
                             try:
                                 args_dict = (
                                     json.loads(tool_args_raw)
                                     if isinstance(tool_args_raw, str)
                                     else tool_args_raw
                                 )
-                                title = args_dict.get("title", "")
-                                if title:
-                                    display_name = title
+                                if tool_name == "run_code":
+                                    title = args_dict.get("title", "")
+                                    if title:
+                                        display_name = title
                             except (ValueError, AttributeError):
                                 pass
 
@@ -1316,8 +1340,9 @@ end
 
             self.nvim.async_call(save_after_streaming)
 
-            # Generate title if the conversation doesn't have one yet
-            if conversation_id and message_text:
+            # Generate title if not already done during early streaming
+            # (early_title_triggered handles the first-response case)
+            if conversation_id and message_text and not early_title_triggered:
                 asyncio.create_task(
                     self._generate_conversation_title(
                         conversation_id,
@@ -1578,6 +1603,12 @@ end
                 message_text_from_buffer = "\n".join(message_slice).rstrip("\n")
 
         if message_text_from_buffer:
+            # Strip cancellation marker if present (added by cancel_agent)
+            # This ensures the visual indicator doesn't pollute the saved content
+            lines = message_text_from_buffer.split("\n")
+            while lines and lines[-1].strip().startswith("> cancelled"):
+                lines.pop()
+            message_text_from_buffer = "\n".join(lines).rstrip("\n")
             message_text = message_text_from_buffer
         elif not message_text:
             self.nvim.err_write(f"Warning: Empty message content for {msg_id}\n")

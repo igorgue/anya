@@ -124,6 +124,11 @@ def clean_assistant_content(text: str, record_markers: list | None = None) -> st
             continue
         result.append(line)
 
+    # Strip cancellation markers (added by cancel_agent)
+    # These are visual indicators that shouldn't be sent to the LLM
+    while result and result[-1].strip().startswith("> cancelled"):
+        result.pop()
+
     # Clean up result - remove leading/trailing empty lines
     cleaned = "\n".join(result).strip()
     return cleaned
