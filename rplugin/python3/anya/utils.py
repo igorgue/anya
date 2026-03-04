@@ -219,19 +219,40 @@ def nvim_call_sync(nvim, func: callable) -> any:
 async def nvim_ui_select(nvim, options: list, prompt: str) -> str:
     """Ask user to select from options using vim.ui.select."""
     import asyncio
+    import os
+    import tempfile
+    import uuid
 
     lua_options = "{" + ", ".join(f'"{opt}"' for opt in options) + "}"
     lua_prompt = prompt.replace('"', '\\"').replace("\n", "\\n")
 
+    # Use a temp file for the result instead of polling vim globals via RPC,
+    # which blocks the main loop and freezes the picker UI
+    result_file = os.path.join(
+        tempfile.gettempdir(), f"anya_select_{uuid.uuid4().hex[:8]}"
+    )
+
     def run_select():
         nvim.exec_lua(
             f"""
-vim.g.anya_select_result = nil
-vim.ui.select({lua_options},
-    {{prompt = "{lua_prompt}"}},
-    function(selection)
-        vim.g.anya_select_result = selection or "Cancel"
-    end)
+pcall(function() require('anya.text').pause_queue() end)
+local _ok, _err = pcall(function()
+  vim.ui.select({lua_options},
+      {{prompt = "{lua_prompt}"}},
+      vim.schedule_wrap(function(selection)
+          local f = io.open("{result_file}", "w")
+          if f then
+              f:write(selection or "Cancel")
+              f:close()
+          end
+          pcall(function() require('anya.text').resume_queue() end)
+      end))
+end)
+if not _ok then
+  pcall(function() require('anya.text').resume_queue() end)
+  local f = io.open("{result_file}", "w")
+  if f then f:write("Cancel") f:close() end
+end
 """
         )
 
@@ -239,18 +260,19 @@ vim.ui.select({lua_options},
 
     start_time = asyncio.get_event_loop().time()
     while asyncio.get_event_loop().time() - start_time < 30.0:
-        result = [None]
-
-        def get_result():
+        await asyncio.sleep(0.15)
+        if os.path.exists(result_file):
             try:
-                result[0] = nvim.eval("get(g:, 'anya_select_result', v:null)")
+                with open(result_file) as f:
+                    val = f.read().strip() or "Cancel"
+                os.unlink(result_file)
+                return val
             except Exception:
-                pass
+                return "Cancel"
 
-        nvim.async_call(get_result)
-        await asyncio.sleep(0.05)
-
-        if result[0] is not None:
-            return result[0]
-
+    nvim.async_call(
+        lambda: nvim.exec_lua(
+            "pcall(function() require('anya.text').resume_queue() end)"
+        )
+    )
     return "Cancel"

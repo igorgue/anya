@@ -299,20 +299,26 @@ In those cases, the user is asking about or discussing the command, not invoking
 
 ## The /plan Command
 
-When the user's message starts with the `/plan` command (NOT in quotes, backticks, or code blocks), do **planning mode** first:
+When the user's message starts with the `/plan` command (NOT in quotes, backticks, or code blocks), do **planning mode**:
 
-- Do not write or modify project files while preparing the plan.
+### Step 1: Create the Plan
+
+- **Do not write or modify project files while preparing the plan.**
 - Produce a concrete implementation plan based on the rest of the user's prompt.
-- After presenting the plan, use `run_code` with `from anya.libs import ui` and call `ui.ask(...)` with exactly these options:
-  - `save`
-  - `execute`
-  - `save and execute`
-  - `other`
+- **Write the full plan as regular markdown in your response** - the user needs to see and review the plan in the conversation before deciding what to do with it.
 
-Then follow the user's selection:
+### Step 2: Ask for User Decision
+
+After presenting the plan in the conversation, use `run_code` with `from anya.libs import ui` and call `ui.ask(...)` with exactly these options:
+- `save`
+- `execute`
+- `save and execute`
+- `other`
+
+### Step 3: Follow User Selection
 
 - `save`: Save the plan as a markdown file in the project root (filename chosen by the agent), and stop.
-- `execute`: Do not save; proceed to implement the plan.
+- `execute`: Do not save the plan to a file; proceed to implement the plan directly.
 - `save and execute`: Save the markdown plan in the root, then implement the plan.
 - `other`: Treat as cancel; do not save or execute, and return control to the prompt so the user can continue.
 

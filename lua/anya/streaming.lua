@@ -13,6 +13,10 @@ if not _G.anya_stream_queue then
   _G.anya_stream_sync_pending = false -- Barrier flag for sync writes
 end
 
+if _G.anya_stream_ui_block == nil then
+  _G.anya_stream_ui_block = false -- Hard block for any writes while UI prompt is active
+end
+
 -- Append text chunk to buffer
 function M._append_to_buffer(bufnr, chunk)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
@@ -101,8 +105,8 @@ function M._ensure_timer_running()
   end
 
   local function timer_callback()
-    -- Check if paused - skip processing but keep timer running
-    if _G.anya_stream_paused then
+    -- Check if paused/UI-blocked - skip processing but keep timer running
+    if _G.anya_stream_paused or _G.anya_stream_ui_block then
       return
     end
 
@@ -151,7 +155,18 @@ function M._ensure_timer_running()
     item.text = item.text:sub(chars_to_write + 1)
 
     if chunk ~= "" then
-      M._append_to_buffer(item.bufnr, chunk)
+      local ok, err = pcall(M._append_to_buffer, item.bufnr, chunk)
+      if not ok then
+        if err and (tostring(err):find("E565") or tostring(err):find("textlock")) then
+          -- UI is in a textlocked state (e.g. vim.ui.select/inputlist open).
+          -- Put the chunk back and retry on the next timer tick.
+          item.text = chunk .. item.text
+          return
+        end
+        -- Never hard-error from timer callback; keep queue alive.
+        item.text = chunk .. item.text
+        return
+      end
       M._autoscroll_to_bottom(item.bufnr)
     end
 
@@ -196,6 +211,12 @@ function M.output_sync(bufnr, text, marker_list, skip_process_markers)
 
   -- Ensure marker isolation
   final_text = markers.ensure_marker_line_isolation(final_text)
+
+  -- If UI prompt is active, defer sync write into queue to avoid textlock (E565).
+  if _G.anya_stream_paused or _G.anya_stream_ui_block then
+    table.insert(_G.anya_stream_queue, { bufnr = bufnr, text = final_text })
+    return
+  end
 
   -- CRITICAL: Stop the timer IMMEDIATELY to prevent any race conditions
   if _G.anya_stream_timer then
@@ -278,6 +299,7 @@ end
 -- Pause the streaming queue (stop writing but keep items queued)
 function M.pause_queue()
   _G.anya_stream_paused = true
+  _G.anya_stream_ui_block = true
   if _G.anya_stream_timer then
     _G.anya_stream_timer:stop()
     _G.anya_stream_timer = nil
@@ -287,6 +309,7 @@ end
 -- Resume the streaming queue (continue writing from where it paused)
 function M.resume_queue()
   _G.anya_stream_paused = false
+  _G.anya_stream_ui_block = false
   -- Restart timer if queue has items
   if #_G.anya_stream_queue > 0 then
     M._ensure_timer_running()
@@ -296,6 +319,7 @@ end
 -- Clear the streaming queue and stop timer
 function M.clear_queue()
   _G.anya_stream_queue = {}
+  _G.anya_stream_ui_block = false
   if _G.anya_stream_timer then
     _G.anya_stream_timer:stop()
     _G.anya_stream_timer = nil
@@ -307,6 +331,8 @@ function M.get_queue_status()
   return {
     queue_length = #_G.anya_stream_queue,
     timer_running = _G.anya_stream_timer ~= nil,
+    paused = _G.anya_stream_paused == true,
+    ui_blocked = _G.anya_stream_ui_block == true,
   }
 end
 

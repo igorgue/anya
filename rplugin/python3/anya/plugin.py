@@ -1086,19 +1086,42 @@ vim.ui.select({lua_options},
                                                 lua_prompt = prompt.replace(
                                                     '"', '\\"'
                                                 ).replace("\n", "\\n")
-                                                _select_result = [None]
+
+                                                # Use a temp file for the result to avoid
+                                                # RPC polling that blocks the main loop and
+                                                # freezes the picker UI
+                                                import tempfile
+
+                                                _ui_result_file = os.path.join(
+                                                    tempfile.gettempdir(),
+                                                    f"anya_ui_select_{req_id}",
+                                                )
 
                                                 def _run_select(
-                                                    _lo=lua_options, _lp=lua_prompt
+                                                    _lo=lua_options,
+                                                    _lp=lua_prompt,
+                                                    _rf=_ui_result_file,
                                                 ):
                                                     self.nvim.exec_lua(
                                                         f"""
-vim.g.anya_ui_result = nil
-vim.ui.select({_lo},
-    {{prompt = "{_lp}"}},
-    function(sel)
-        vim.g.anya_ui_result = sel or "Cancel"
-    end)
+pcall(function() require('anya.text').pause_queue() end)
+local _ok, _err = pcall(function()
+  vim.ui.select({_lo},
+      {{prompt = "{_lp}"}},
+      vim.schedule_wrap(function(sel)
+          local f = io.open("{_rf}", "w")
+          if f then
+              f:write(sel or "Cancel")
+              f:close()
+          end
+          pcall(function() require('anya.text').resume_queue() end)
+      end))
+end)
+if not _ok then
+  pcall(function() require('anya.text').resume_queue() end)
+  local f = io.open("{_rf}", "w")
+  if f then f:write("Cancel") f:close() end
+end
 """
                                                     )
 
@@ -1109,28 +1132,27 @@ vim.ui.select({_lo},
                                                     - _t0
                                                     < 300.0
                                                 ):
-
-                                                    def _get_sel():
+                                                    await asyncio.sleep(0.15)
+                                                    if os.path.exists(_ui_result_file):
                                                         try:
-                                                            v = self.nvim.eval(
-                                                                "get(g:, 'anya_ui_result', v:null)"
-                                                            )
-                                                            if (
-                                                                v is not None
-                                                                and v != "v:null"
-                                                                and v != "null"
-                                                            ):
-                                                                _select_result[0] = str(
-                                                                    v
+                                                            with open(
+                                                                _ui_result_file
+                                                            ) as _rf:
+                                                                ui_result = (
+                                                                    _rf.read().strip()
+                                                                    or "Cancel"
                                                                 )
+                                                            os.unlink(_ui_result_file)
                                                         except Exception:
-                                                            pass
-
-                                                    self.nvim.async_call(_get_sel)
-                                                    await asyncio.sleep(0.1)
-                                                    if _select_result[0] is not None:
-                                                        ui_result = _select_result[0]
+                                                            ui_result = "Cancel"
                                                         break
+
+                                                if not ui_result:
+                                                    self.nvim.async_call(
+                                                        lambda: self.nvim.exec_lua(
+                                                            "pcall(function() require('anya.text').resume_queue() end)"
+                                                        )
+                                                    )
 
                                             elif kind == "input":
                                                 default = req.get("default", "")
@@ -1140,19 +1162,39 @@ vim.ui.select({_lo},
                                                 lua_default = default.replace(
                                                     '"', '\\"'
                                                 )
-                                                _input_result = [None]
+
+                                                import tempfile
+
+                                                _ui_result_file = os.path.join(
+                                                    tempfile.gettempdir(),
+                                                    f"anya_ui_input_{req_id}",
+                                                )
 
                                                 def _run_input(
-                                                    _lp=lua_prompt, _ld=lua_default
+                                                    _lp=lua_prompt,
+                                                    _ld=lua_default,
+                                                    _rf=_ui_result_file,
                                                 ):
                                                     self.nvim.exec_lua(
                                                         f"""
-vim.g.anya_ui_result = nil
-vim.ui.input(
-    {{prompt = "{_lp}", default = "{_ld}"}},
-    function(val)
-        vim.g.anya_ui_result = val or ""
-    end)
+pcall(function() require('anya.text').pause_queue() end)
+local _ok, _err = pcall(function()
+  vim.ui.input(
+      {{prompt = "{_lp}", default = "{_ld}"}},
+      vim.schedule_wrap(function(val)
+          local f = io.open("{_rf}", "w")
+          if f then
+              f:write(val or "")
+              f:close()
+          end
+          pcall(function() require('anya.text').resume_queue() end)
+      end))
+end)
+if not _ok then
+  pcall(function() require('anya.text').resume_queue() end)
+  local f = io.open("{_rf}", "w")
+  if f then f:write("") f:close() end
+end
 """
                                                     )
 
@@ -1163,28 +1205,24 @@ vim.ui.input(
                                                     - _t0
                                                     < 300.0
                                                 ):
-
-                                                    def _get_inp():
+                                                    await asyncio.sleep(0.15)
+                                                    if os.path.exists(_ui_result_file):
                                                         try:
-                                                            v = self.nvim.eval(
-                                                                "get(g:, 'anya_ui_result', v:null)"
-                                                            )
-                                                            if (
-                                                                v is not None
-                                                                and v != "v:null"
-                                                                and v != "null"
-                                                            ):
-                                                                _input_result[0] = str(
-                                                                    v
-                                                                )
+                                                            with open(
+                                                                _ui_result_file
+                                                            ) as _rf:
+                                                                ui_result = _rf.read()
+                                                            os.unlink(_ui_result_file)
                                                         except Exception:
-                                                            pass
-
-                                                    self.nvim.async_call(_get_inp)
-                                                    await asyncio.sleep(0.1)
-                                                    if _input_result[0] is not None:
-                                                        ui_result = _input_result[0]
+                                                            ui_result = ""
                                                         break
+
+                                                if not ui_result and ui_result != "":
+                                                    self.nvim.async_call(
+                                                        lambda: self.nvim.exec_lua(
+                                                            "pcall(function() require('anya.text').resume_queue() end)"
+                                                        )
+                                                    )
 
                                         except Exception:
                                             ui_result = ""
@@ -2101,10 +2139,12 @@ pcall(vim.keymap.del, "n", "<C-c>")
             text = args[0]
             existing_conv_id = args[1] if len(args) > 1 else None
 
-            # Handle slash commands (no return value needed)
+            # Handle plugin-level slash commands.
+            # /init and /plan are agent instructions and must go through normal flow.
             if text and text.strip().startswith("/"):
-                self._handle_slash_command(text.strip(), existing_conv_id)
-                return None
+                handled = self._handle_slash_command(text.strip(), existing_conv_id)
+                if handled:
+                    return None
 
             # Generate IDs and timestamp on server side
             from datetime import datetime, timezone
@@ -2185,23 +2225,32 @@ pcall(vim.keymap.del, "n", "<C-c>")
             return None
 
     def _handle_slash_command(self, command, conversation_id=None):
-        """Handle slash commands like /clear, /cancel, /help."""
+        """Handle plugin-level slash commands.
+
+        Returns True when handled by the plugin, False when it should be sent
+        to the agent as a normal prompt (e.g. /init, /plan, or unknown commands).
+        """
         parts = command.split()
-        cmd = parts[0].lower()
+        cmd = parts[0].lower() if parts else ""
 
         if cmd == "/clear" or cmd == "/new":
             self.nvim.async_call(self._clear_command)
+            return True
         elif cmd == "/cancel":
             self.cancel_agent()
+            return True
         elif cmd == "/help":
             self.nvim.async_call(self._help_command)
+            return True
         elif cmd == "/file":
             self.nvim.async_call(self._file_command)
+            return True
         elif cmd == "/compact":
             self.nvim.async_call(self._compact_command)
-        else:
-            # Unknown command - treat as regular prompt
-            self.send(command, conversation_id)
+            return True
+
+        # Not a plugin command: let AnyaSend persist and send as normal prompt.
+        return False
 
     def _clear_command(self):
         """Handle /clear command."""

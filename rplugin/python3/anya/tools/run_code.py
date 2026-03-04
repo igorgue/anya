@@ -492,11 +492,19 @@ async def _nvim_ui_input(nvim, prompt: str, default: str = "") -> str:
         nvim.exec_lua(
             f"""
 vim.g.anya_input_result = nil
-vim.ui.input(
-    {{prompt = "{lua_prompt}", default = "{lua_default}"}},
-    function(value)
-        vim.g.anya_input_result = value or ""
-    end)
+pcall(function() require('anya.text').pause_queue() end)
+local _ok, _err = pcall(function()
+  vim.ui.input(
+      {{prompt = "{lua_prompt}", default = "{lua_default}"}},
+      function(value)
+          vim.g.anya_input_result = value or ""
+          pcall(function() require('anya.text').resume_queue() end)
+      end)
+end)
+if not _ok then
+  pcall(function() require('anya.text').resume_queue() end)
+  vim.g.anya_input_result = ""
+end
 """
         )
 
@@ -519,6 +527,11 @@ vim.ui.input(
         if result[0] is not None:
             return result[0]
 
+    nvim.async_call(
+        lambda: nvim.exec_lua(
+            "pcall(function() require('anya.text').resume_queue() end)"
+        )
+    )
     return ""
 
 
