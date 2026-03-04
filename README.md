@@ -35,7 +35,7 @@ These are not required, but enhance the experience:
 
 ```lua
 {
-  "igorkav/anya",
+  "igorgue/anya",
   config = function()
     require("anya").setup({
       start_in_insert = true, -- Enter insert mode when opening the prompt
@@ -47,7 +47,7 @@ These are not required, but enhance the experience:
 ### vim-plug
 
 ```vim
-Plug 'igorkav/anya'
+Plug 'igorgue/anya'
 ```
 
 Then install Python dependencies manually:
@@ -72,11 +72,10 @@ Set these before launching Neovim (e.g. in your shell profile):
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `OPENAI_API_KEY` | (required) | Your OpenAI API key |
 | `ANYA_MODEL` | `gpt-4.1` | Model to use |
 | `ANYA_API_KEY` | — | Override API key (e.g. for OpenRouter) |
 | `ANYA_API_BASE` | — | Custom API base URL |
-| `ANYA_API_TYPE` | `responses` | API type: `responses` or `chat_completions` |
+| `ANYA_API_TYPE` | `responses` | API type: `responses` or `chat_completions` or `anthropic` |
 | `ANYA_THINKING_BUDGET` | — | Reasoning effort hint for supported models |
 | `ANYA_DISABLE_MCP` | `0` | Set to `1` to disable MCP tools |
 
@@ -85,8 +84,7 @@ Set these before launching Neovim (e.g. in your shell profile):
 ```bash
 export ANYA_API_TYPE=chat_completions
 export ANYA_API_KEY="sk-or-..."
-export ANYA_MODEL="anthropic/claude-opus-4-5"
-nvim
+export ANYA_MODEL="anthropic/claude-opus-4-6"
 ```
 
 Any model name containing `/` or `:` is automatically routed through
@@ -107,6 +105,12 @@ For quick access from the terminal, add this alias to your `~/.zshrc` or `~/.bas
 
 ```bash
 alias anya="nvim +Anya"
+```
+
+## Use standalone anya (with bateries included)
+
+```bash
+alias anya="nvim -u ~~/.local/share/nvim/lazy/anya/standalone/init.lua +Anya"
 ```
 
 Then reload your shell:
@@ -135,6 +139,7 @@ Now you can open Anya directly by typing `anya` in your terminal.
 | `:Anya daemon stop` | Stop the background daemon |
 | `:Anya daemon status` | Show daemon status |
 | `:Anya help` | Show help text |
+| `:Anya do "instruction` | Run an arbitrary command (e.g. `:Anya do "write a commit for me"`) |
 
 The daemon starts automatically when Neovim loads the plugin — you normally
 don't need to manage it manually.
@@ -180,16 +185,6 @@ In either buffer you can use:
 - **`/command`** — run a built-in slash command (e.g. `/review`, `/plan`)
 
 Both are highlighted automatically.
-
-### Edit confirmation flow
-
-When Anya proposes a file change, a folded block appears in the chat buffer
-showing the diff. You are prompted to:
-
-- **Apply** — write the change to disk
-- **Reject** — discard the change
-
-All edit states (pending / applied / rejected) persist across restarts.
 
 ## Conversation history
 
