@@ -302,10 +302,8 @@ function M:init()
         else
           handle.message = "error"
         end
-        vim.defer_fn(function()
-          M:pop_progress_handle(event.data.id)
-          handle:finish()
-        end, 1000)
+        M:pop_progress_handle(event.data.id)
+        handle:finish()
       end
     end,
   })
