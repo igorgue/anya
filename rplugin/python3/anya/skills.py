@@ -29,7 +29,7 @@ _XML_TAG_PATTERN = re.compile(r"<[^>]+>")
 class Skill:
     name: str
     description: str
-    path: str        # absolute path to the skill directory
+    path: str  # absolute path to the skill directory
     skill_md_path: str  # absolute path to SKILL.md
 
 
@@ -50,7 +50,7 @@ def _parse_frontmatter(content: str) -> tuple[dict[str, str], str]:
         return {}, content
 
     frontmatter_text = rest[:end].strip()
-    body = rest[end + 4:].strip()  # skip \n---
+    body = rest[end + 4 :].strip()  # skip \n---
 
     result: dict[str, str] = {}
     for line in frontmatter_text.splitlines():

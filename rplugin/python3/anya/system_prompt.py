@@ -232,9 +232,7 @@ def read_agent_md_from_cwd(
         return None
 
 
-def read_skills_from_cwd(
-    nvim: Any | None = None, cwd: str | None = None
-) -> str | None:
+def read_skills_from_cwd(nvim: Any | None = None, cwd: str | None = None) -> str | None:
     """Discover Agent Skills and format them as a system prompt block.
 
     Scans ~/.claude/skills/ (global) and <cwd>/.claude/skills/ (project-local).
