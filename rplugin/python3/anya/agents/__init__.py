@@ -86,14 +86,14 @@ async def CodeAgent(
     ).strip()
     model_settings_obj = get_default_model_settings(model_name.lower())
 
-    # API type - now supports "responses", "chat_completions", and "anthropic"
+    # API type - now supports "responses", "chat_completions", "anthropic", and "copilot"
     api_type = _get_setting(
         "api_type", "ANYA_API_TYPE", "ANYA_OPENAI_API_TYPE", default="responses"
     )
     if api_type:
         api_type = api_type.strip().lower()
-        # Allow "responses", "chat_completions", and "anthropic"
-        if api_type not in {"chat_completions", "responses", "anthropic"}:
+        # Allow "responses", "chat_completions", "anthropic", and "copilot"
+        if api_type not in {"chat_completions", "responses", "anthropic", "copilot"}:
             api_type = "responses"
     else:
         api_type = "responses"

@@ -469,6 +469,9 @@ class AnyaPlugin:
                     self.nvim.out_write("Anya: Daemon restarted.\n")
                 else:
                     self.nvim.err_write("Anya: Failed to restart daemon.\n")
+        elif subcommand == "copilot":
+            # GitHub Copilot management subcommands
+            self._handle_copilot_command(args[1:] if len(args) > 1 else [])
 
     def _open_interface(self, layout="split", direction=None, force_open=False):
         """Open the Anya interface with floating chat and prompt windows.
@@ -484,6 +487,170 @@ class AnyaPlugin:
         self.chat_buf, self.prompt_buf = buffers.new(
             self.nvim, layout, direction, force_open
         )
+
+    def _handle_copilot_command(self, args):
+        """Handle :Anya copilot subcommands."""
+        if not args:
+            self.nvim.out_write("Usage: :Anya copilot [login|logout|status]\n")
+            return
+
+        copilot_cmd = args[0]
+
+        if copilot_cmd == "login":
+            self._copilot_login()
+        elif copilot_cmd == "logout":
+            self._copilot_logout()
+        elif copilot_cmd == "status":
+            self._copilot_status()
+        elif copilot_cmd == "models":
+            self._copilot_models()
+        else:
+            self.nvim.err_write(f"Unknown copilot command: {copilot_cmd}\n")
+            self.nvim.out_write("Usage: :Anya copilot [login|logout|status|models]\n")
+
+    def _copilot_login(self):
+        """Run the Copilot device OAuth flow."""
+
+        async def run_device_flow():
+            from .copilot_auth import get_auth
+
+            auth = get_auth()
+
+            # Check if already logged in
+            if auth.is_logged_in():
+                self.nvim.async_call(
+                    self.nvim.out_write,
+                    "Anya Copilot: Already logged in. Use :Anya copilot logout first.\n",
+                )
+                return
+
+            # Status callback to notify user
+            async def status_callback(event, data):
+                if event == "visit_url":
+                    user_code = data.get("user_code", "")
+                    verification_uri = data.get("verification_uri", "")
+                    message = data.get("message", "")
+                    self.nvim.async_call(
+                        lambda: self.nvim.exec_lua(
+                            f"vim.notify({repr(message)}, vim.log.levels.INFO, {{title = 'Anya Copilot'}})"
+                        )
+                    )
+                    # Also write to messages
+                    self.nvim.async_call(
+                        self.nvim.out_write,
+                        f"\nAnya Copilot: Visit {verification_uri} and enter code: {user_code}\n",
+                    )
+
+            try:
+                await auth.device_flow(status_callback=status_callback)
+                self.nvim.async_call(
+                    lambda: self.nvim.exec_lua(
+                        "vim.notify('Copilot login successful!', vim.log.levels.INFO, {title = 'Anya Copilot'})"
+                    )
+                )
+                self.nvim.async_call(
+                    self.nvim.out_write, "Anya Copilot: Login successful!\n"
+                )
+            except Exception as e:
+                error_msg = str(e)
+                self.nvim.async_call(
+                    lambda: self.nvim.exec_lua(
+                        f"vim.notify({repr(error_msg)}, vim.log.levels.ERROR, {{title = 'Anya Copilot'}})"
+                    )
+                )
+                self.nvim.async_call(
+                    self.nvim.err_write, f"Anya Copilot: Login failed: {error_msg}\n"
+                )
+
+        # Run in background
+        loop = self._ensure_loop()
+        asyncio.run_coroutine_threadsafe(run_device_flow(), loop)
+
+    def _copilot_logout(self):
+        """Log out from Copilot."""
+        try:
+            from .copilot_auth import get_auth
+
+            auth = get_auth()
+            auth.logout()
+            self.nvim.out_write("Anya Copilot: Logged out successfully.\n")
+            self.nvim.exec_lua(
+                "vim.notify('Logged out from Copilot', vim.log.levels.INFO, {title = 'Anya Copilot'})"
+            )
+        except Exception as e:
+            self.nvim.err_write(f"Anya Copilot: Logout failed: {e}\n")
+
+    def _copilot_status(self):
+        """Show Copilot authentication status."""
+        try:
+            from .copilot_auth import get_auth
+            import time
+
+            auth = get_auth()
+            status = auth.get_status()
+
+            lines = ["Anya Copilot Status:"]
+            lines.append(f"  Logged in: {'yes' if status['logged_in'] else 'no'}")
+            lines.append(f"  GitHub token: {'present' if status['has_github_token'] else 'missing'}")
+
+            if status["copilot_token_expires_at"]:
+                expires_at = status["copilot_token_expires_at"]
+                expires_str = time.strftime(
+                    "%Y-%m-%d %H:%M:%S UTC", time.gmtime(expires_at)
+                )
+                valid = status["copilot_token_valid"]
+                lines.append(f"  Copilot token: {'valid' if valid else 'expired'} (expires: {expires_str})")
+            else:
+                lines.append("  Copilot token: not cached")
+
+            lines.append(f"  API endpoint: {status['api_base']}")
+
+            self.nvim.out_write("\n".join(lines) + "\n")
+        except Exception as e:
+            self.nvim.err_write(f"Anya Copilot: Failed to get status: {e}\n")
+
+    def _copilot_models(self):
+        """List available Copilot models."""
+        async def fetch_models():
+            from .copilot_auth import get_auth
+
+            auth = get_auth()
+            
+            if not auth.is_logged_in():
+                self.nvim.async_call(
+                    self.nvim.err_write,
+                    "Anya Copilot: Not logged in. Run :Anya copilot login first.\n"
+                )
+                return
+
+            try:
+                models = await auth.get_models()
+                
+                lines = ["Anya Copilot Available Models:"]
+                lines.append("-" * 50)
+                for model in models:
+                    model_id = model.get("id", "unknown")
+                    owned_by = model.get("owned_by", "unknown")
+                    lines.append(f"  {model_id}")
+                    if owned_by != "unknown":
+                        lines.append(f"    Provider: {owned_by}")
+                lines.append("-" * 50)
+                lines.append(f"Total: {len(models)} models")
+                lines.append("")
+                lines.append("Set model with: export ANYA_MODEL=<model_id>")
+                
+                self.nvim.async_call(
+                    self.nvim.out_write, "\n".join(lines) + "\n"
+                )
+            except Exception as e:
+                self.nvim.async_call(
+                    self.nvim.err_write, f"Anya Copilot: Failed to fetch models: {e}\n"
+                )
+
+        # Run in background
+        loop = self._ensure_loop()
+        asyncio.run_coroutine_threadsafe(fetch_models(), loop)
+
 
     def send(self, text, conversation_id=None, is_new_conversation=False):
         """Send a prompt to the code agent and stream the response to the chat buffer."""

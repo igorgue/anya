@@ -335,11 +335,11 @@ final_status = background.wait_for_job("process_id", timeout_seconds=30)
 **Key Environment Variables**
 | Variable             | Default    | Purpose                      |
 |----------------------|------------|------------------------------|
-| `OPENAI_API_KEY`     | (required) | LLM access                   |
+| `OPENAI_API_KEY`     | (required) | LLM access (not needed for Copilot) |
 | `ANYA_MODEL`         | gpt-4.1    | Default LLM                  |
 | `ANYA_API_KEY`       | (unset)    | Override API key (for OpenRouter, etc.) |
 | `ANYA_API_BASE`      | (unset)    | Custom API endpoint (auto-detected for OpenRouter models) |
-| `ANYA_API_TYPE`      | responses  | API type: "responses" (default), "chat_completions", or "anthropic" |
+| `ANYA_API_TYPE`      | responses  | API type: "responses" (default), "chat_completions", "anthropic", or "copilot" |
 | `ANYA_THINKING_BUDGET`| (unset)   | Reasoning effort for model   |
 | `ANYA_DISABLE_MCP`   | "0"        | Disable MCP agent/tools      |
 
@@ -384,6 +384,45 @@ export ANYA_API_BASE=https://your-custom-endpoint.com/v1
 export ANYA_API_KEY=your-api-key
 export ANYA_MODEL=your-model-name
 ```
+
+### GitHub Copilot Support
+Anya supports GitHub Copilot as a provider, allowing you to use Copilot's models without
+an OpenAI API key. This uses the same models available in VS Code's Copilot Chat.
+
+**Setup:**
+1. Login once with the device flow:
+   ```
+   :Anya copilot login
+   ```
+   This will prompt you to visit `https://github.com/login/device` and enter a code.
+
+2. Set environment variables:
+   ```bash
+   export ANYA_API_TYPE=copilot
+   export ANYA_MODEL=gpt-4o  # or claude-3.5-sonnet, o3-mini, etc.
+   ```
+
+3. Restart Neovim and use Anya normally.
+
+**Commands:**
+| Command | Description |
+|---------|-------------|
+| `:Anya copilot login` | Run the OAuth device flow to authenticate |
+| `:Anya copilot logout` | Remove stored authentication tokens |
+| `:Anya copilot status` | Show current authentication status |
+| `:Anya copilot models` | List available Copilot models |
+
+**Available Models:**
+- `gpt-4o`, `gpt-4.1`, `gpt-4.1-mini`
+- `claude-3.5-sonnet`, `claude-3.7-sonnet`
+- `o3-mini`, `o1`
+- (and more depending on your subscription tier)
+
+**How it works:**
+- Authentication uses a two-stage OAuth device flow (no web server needed)
+- A long-lived GitHub token is stored at `~/.local/share/anya/copilot_token`
+- Short-lived Copilot API tokens (~30 min) are cached and auto-refreshed
+- Copilot uses the OpenAI chat completions format (not the responses API)
 
 ---
 

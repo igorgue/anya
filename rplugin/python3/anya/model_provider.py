@@ -26,9 +26,15 @@ def needs_custom_provider(
     2. Model name contains ':' (e.g., OpenRouter variants like 'model:free')
     3. A custom base URL is specified (e.g., custom API endpoints)
     4. API type is 'anthropic' (native Anthropic API)
+    5. API type is 'copilot' (GitHub Copilot API)
+    6. Model name starts with 'github-copilot/'
     """
     return (
-        "/" in model or ":" in model or base_url is not None or api_type == "anthropic"
+        "/" in model
+        or ":" in model
+        or base_url is not None
+        or api_type in ("anthropic", "copilot")
+        or model.startswith("github-copilot/")
     )
 
 
@@ -59,15 +65,38 @@ def get_custom_model_provider(
     if not needs_custom_provider(model, base_url, api_type):
         return None
 
-    if not api_key:
-        logger.warning("Custom provider needed but no API key found")
-        return None
-
-    # Handle Anthropic API type
+    # Handle Anthropic API type (first, as it has its own auth)
     if api_type == "anthropic":
         from .anthropic_model import get_anthropic_model_provider
 
         return get_anthropic_model_provider(settings)
+
+    # Handle Copilot API type (has its own auth, no api_key needed)
+    if api_type == "copilot":
+        from .copilot_model import get_copilot_model_provider
+        import asyncio
+
+        # Get or create event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're in an async context, create a new loop in a thread
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(
+                        asyncio.run, get_copilot_model_provider(settings)
+                    )
+                    return future.result()
+            else:
+                return loop.run_until_complete(get_copilot_model_provider(settings))
+        except RuntimeError:
+            return asyncio.run(get_copilot_model_provider(settings))
+
+    # For other custom providers, we need an API key
+    if not api_key:
+        logger.warning("Custom provider needed but no API key found")
+        return None
 
     # Handle OpenAI-compatible APIs (chat_completions)
     try:
@@ -131,8 +160,8 @@ def get_run_config(settings: "AgentSettings | None" = None):
     except ImportError:
         return None
 
-    # For chat_completions API or anthropic API, disable nested handoff history
+    # For chat_completions API, anthropic API, or copilot API, disable nested handoff history
     # as non-OpenAI providers don't support the nested message format
-    nest_handoff = api_type not in ("chat_completions", "anthropic")
+    nest_handoff = api_type not in ("chat_completions", "anthropic", "copilot")
 
     return RunConfig(model_provider=provider, nest_handoff_history=nest_handoff)
