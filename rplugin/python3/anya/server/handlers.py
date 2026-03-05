@@ -341,7 +341,7 @@ class RequestHandler:
                 self.logger.info(f"Conversation {conversation_id} already has title, skipping generation")
                 # Still emit event to close the fidget notification
                 result_chunk = StreamChunk(
-                    request_id=request_id,
+                    request_id="system",
                     session_id="system",
                     event_type=StreamEventType.TITLE_GENERATED,
                     data={
@@ -450,7 +450,7 @@ class RequestHandler:
         # Use system topic so all instances receive it, but include session_id
         # so each instance can filter appropriately
         result_chunk = StreamChunk(
-            request_id=request_id,
+            request_id="system",
             session_id="system",
             event_type=StreamEventType.TITLE_GENERATED,
             data={

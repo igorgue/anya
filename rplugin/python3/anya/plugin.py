@@ -64,6 +64,7 @@ class AnyaPlugin:
         self._client = AnyaClient()
         # Separate client for confirmations (to avoid blocking on main request socket)
         self._confirmation_client = AnyaClient()
+        self._title_client = AnyaClient()
         self._daemon_check_done = False
 
         # System event subscriber for MCP status updates
@@ -1543,7 +1544,7 @@ end
             await loop.run_in_executor(
                 None,
                 functools.partial(
-                    self._client.send_request,
+                    self._title_client.send_request,
                     RequestType.GENERATE_TITLE,
                     self.session_id,
                     f"title_{conversation_id}",
