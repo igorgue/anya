@@ -17,7 +17,7 @@ A persistent Neovim AI assistant with multi-conversation support, built on OpenA
 ## Requirements
 
 - Neovim 0.10+
-- Python 3.13+
+- Python 3.11+
 - An OpenAI API key (or compatible provider key)
 
 ## Optional Neovim plugins

@@ -1,8 +1,12 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "agent-nvim"
+name = "anya"
 version = "0.1.0"
-description = "Neovim Agent Plugin"
-requires-python = ">=3.13"
+description = "Anya Agent"
+requires-python = ">=3.11"
 dependencies = [
     "pynvim",
     "openai",
@@ -17,6 +21,13 @@ dependencies = [
 
 [project.scripts]
 anya-daemon = "anya.server.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "rplugin/python3"}
+
+[tool.setuptools.packages.find]
+where = ["rplugin/python3"]
+include = ["anya*"]
 
 [dependency-groups]
 dev = [
