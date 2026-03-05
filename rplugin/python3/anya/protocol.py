@@ -19,6 +19,7 @@ class RequestType(Enum):
     PING = "ping"
     TOOL_CONFIRMATION_RESPONSE = "tool_confirmation_response"
     GENERATE_TITLE = "generate_title"
+    GET_SYSTEM_PROMPT = "get_system_prompt"
 
 
 class ResponseType(Enum):

@@ -99,6 +99,35 @@ require("anya").setup({
 })
 ```
 
+## Python Interpreter & Virtualenvs
+
+Anya's daemon always runs under its own bundled Python venv (`<plugin-root>/.venv`),
+regardless of what the shell environment looks like. This means it works correctly even
+when you open Neovim from a project directory with a virtualenv activated (mise, pyenv,
+conda, plain `source .venv/bin/activate`, etc.).
+
+However, Neovim's **rplugin host** (the process that loads `plugin.py`) is controlled
+separately by `python3_host_prog`. If you don't pin this, Neovim may pick up the active
+project Python at startup, which won't have pynvim or the anya package installed, causing
+a load failure.
+
+**Recommended fix**: pin `python3_host_prog` to Anya's venv Python in your Neovim config:
+
+```lua
+-- in init.lua (set this before any plugin manager setup)
+vim.g.python3_host_prog = vim.fn.expand("~/Code/anya/.venv/bin/python")
+-- adjust the path to wherever you cloned/installed anya
+```
+
+With lazy.nvim you can also set it per-plugin installation path:
+
+```lua
+vim.g.python3_host_prog = vim.fn.stdpath("data") .. "/lazy/anya/.venv/bin/python"
+```
+
+If the daemon still fails to start, Anya will print the Python path it tried to use in
+the error message so you can diagnose the mismatch quickly.
+
 ## Terminal alias
 
 For quick access from the terminal, add this alias to your `~/.zshrc` or `~/.bashrc`:

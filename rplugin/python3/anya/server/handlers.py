@@ -178,6 +178,8 @@ class RequestHandler:
                 return await self._handle_confirmation_response(request)
             elif request.type == RequestType.GENERATE_TITLE:
                 return await self._handle_generate_title(request)
+            elif request.type == RequestType.GET_SYSTEM_PROMPT:
+                return await self._handle_get_system_prompt(request)
             else:
                 return make_error_response(
                     request.request_id,
@@ -1062,3 +1064,40 @@ class RequestHandler:
                         "unclosed": True,
                     },
                 )
+
+    async def _handle_get_system_prompt(self, request: Request) -> Response:
+        """Handle a GET_SYSTEM_PROMPT request.
+
+        Returns the full system prompt for the Code agent, including all
+        dynamic instructions, context, AGENTS.md, and skills metadata.
+        """
+        from ..agents import CodeAgent
+        from ..protocol import AgentSettings
+
+        # Get settings from payload or use defaults
+        settings_dict = request.payload.get("settings", {})
+        cwd = request.payload.get("cwd")
+
+        settings = AgentSettings.from_dict(settings_dict) if settings_dict else None
+
+        try:
+            # Build the system prompt the same way as when creating an agent
+            from ..agents.utils import get_instructions
+            from ..agents.dynamic_instructions import generate_dynamic_code_instructions, update_agent_instructions
+            from ..system_prompt import apply_system_prompt
+            from ..libs import get_libs_prompt
+
+            base_instructions = get_instructions("code.md")
+            dynamic_instructions = await generate_dynamic_code_instructions([])
+            libs_instructions = get_libs_prompt()
+            instructions = update_agent_instructions(base_instructions, dynamic_instructions)
+            instructions = update_agent_instructions(instructions, libs_instructions)
+            instructions = apply_system_prompt(instructions, nvim=None, cwd=cwd)
+
+            return make_success_response(request.request_id, {
+                "system_prompt": instructions,
+                "model": settings.model if settings else os.environ.get("ANYA_MODEL", "gpt-4.1"),
+            })
+        except Exception as e:
+            self.logger.exception(f"Error getting system prompt: {e}")
+            return make_error_response(request.request_id, str(e))

@@ -171,7 +171,14 @@ vim.api.nvim_create_autocmd("FileType", {
     pcall(vim.treesitter.start, args.buf)
   end,
 })
-require("fidget").setup({})
+require("fidget").setup({
+  notification = {
+    window = {
+      x_padding = 0,
+      align = "top",
+    }
+  }
+})
 require("render-markdown").setup({
   file_types = { "anya-chat", "markdown" },
   preset = "lazy",

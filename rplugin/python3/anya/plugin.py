@@ -142,7 +142,10 @@ class AnyaPlugin:
                 else:
                     self.nvim.async_call(
                         self.nvim.err_write,
-                        "Anya: Failed to start daemon. Run manually with: python -m anya.server.main -f\n",
+                        f"Anya: Failed to start daemon (Python: {daemon_mgmt._get_anya_python()}).\n"
+                        "  A project virtualenv may be conflicting with Anya's venv.\n"
+                        "  Fix: set vim.g.python3_host_prog to Anya's venv Python in your Neovim config.\n"
+                        "  Or run manually: python -m anya.server.main -f\n",
                     )
                     self._daemon_check_done = True
                     return
@@ -440,6 +443,8 @@ class AnyaPlugin:
         elif subcommand == "cancel":
             self.cancel_agent()
             self._cancel_do_command()
+        elif subcommand == "system-prompt":
+            self.nvim.command("lua require('anya.system_prompt').show()")
         elif subcommand == "daemon":
             # Daemon management subcommands
             if len(args) < 2:
@@ -740,7 +745,8 @@ class AnyaPlugin:
                         and msg_id
                         and (
                             current_time - last_save_time >= save_interval
-                            or current_char_count - last_save_char_count >= save_char_threshold
+                            or current_char_count - last_save_char_count
+                            >= save_char_threshold
                         )
                     ):
                         last_save_time = current_time
@@ -804,7 +810,8 @@ class AnyaPlugin:
                         and msg_id
                         and (
                             current_time - last_save_time >= save_interval
-                            or current_char_count - last_save_char_count >= save_char_threshold
+                            or current_char_count - last_save_char_count
+                            >= save_char_threshold
                         )
                     ):
                         last_save_time = current_time
@@ -1604,7 +1611,6 @@ end
             )
             return None
 
-
     async def _save_partial_message(
         self, msg_id: str, conversation_id: str, partial_content: str
     ):
@@ -1854,7 +1860,6 @@ pcall(vim.keymap.del, "n", "<C-c>")
         buf_number: int,
     ):
         """Run :Anya do headlessly via the daemon, then write result back to buffer."""
-        import concurrent.futures as cfutures
 
         loop = asyncio.get_event_loop()
         is_running = await loop.run_in_executor(None, daemon_mgmt.is_daemon_running)
@@ -2124,9 +2129,7 @@ end)
 
                         req_id = req.get("id", "")
                         kind = req.get("kind", "select")
-                        resp_file = os.path.join(
-                            exec_ui_dir, f"{req_id}.response.json"
-                        )
+                        resp_file = os.path.join(exec_ui_dir, f"{req_id}.response.json")
 
                         ui_result = ""
                         try:
@@ -2144,22 +2147,39 @@ end)
                                 ):
                                     try:
                                         if not self.nvim.api.buf_is_valid(_buf):
-                                            result_container[0] = "Error: Buffer is no longer valid"
+                                            result_container[0] = (
+                                                "Error: Buffer is no longer valid"
+                                            )
                                             return
                                         _lines = _content.split("\n")
-                                        was_modifiable = self.nvim.api.buf_get_option(_buf, "modifiable")
-                                        self.nvim.api.buf_set_option(_buf, "modifiable", True)
+                                        was_modifiable = self.nvim.api.buf_get_option(
+                                            _buf, "modifiable"
+                                        )
+                                        self.nvim.api.buf_set_option(
+                                            _buf, "modifiable", True
+                                        )
                                         if _mode == "replace":
-                                            self.nvim.api.buf_set_lines(_buf, 0, -1, False, _lines)
+                                            self.nvim.api.buf_set_lines(
+                                                _buf, 0, -1, False, _lines
+                                            )
                                         elif _mode == "append":
                                             lc = self.nvim.api.buf_line_count(_buf)
-                                            self.nvim.api.buf_set_lines(_buf, lc, lc, False, _lines)
+                                            self.nvim.api.buf_set_lines(
+                                                _buf, lc, lc, False, _lines
+                                            )
                                         elif _mode == "prepend":
-                                            self.nvim.api.buf_set_lines(_buf, 0, 0, False, _lines)
-                                        self.nvim.api.buf_set_option(_buf, "modifiable", was_modifiable)
-                                        self.nvim.api.buf_set_option(_buf, "modified", True)
+                                            self.nvim.api.buf_set_lines(
+                                                _buf, 0, 0, False, _lines
+                                            )
+                                        self.nvim.api.buf_set_option(
+                                            _buf, "modifiable", was_modifiable
+                                        )
+                                        self.nvim.api.buf_set_option(
+                                            _buf, "modified", True
+                                        )
                                         result_container[0] = "ok"
-                                        self.nvim.exec_lua("""
+                                        self.nvim.exec_lua(
+                                            """
 local bufnr = select(1, ...)
 vim.schedule(function()
     vim.cmd("checktime")
@@ -2169,7 +2189,9 @@ vim.schedule(function()
     })
     vim.cmd("redraw!")
 end)
-""", _buf)
+""",
+                                            _buf,
+                                        )
                                     except Exception as e:
                                         result_container[0] = f"Error: {e}"
 
@@ -2965,6 +2987,67 @@ Usage:
             return {"success": True}
         except Exception as e:
             return {"success": False, "message": str(e)}
+
+    @pynvim.function("AnyaGetSystemPrompt", sync=False)
+    def anya_get_system_prompt(self, args):
+        """Get the current system prompt from the daemon."""
+
+        def fetch_and_display():
+            try:
+                # Get cwd from args or use current directory
+                cwd = args[0] if args else self.nvim.call("getcwd")
+
+                # Get agent settings from environment
+                settings = self._get_agent_settings()
+
+                # Request system prompt from daemon
+                response = self._client.send_request(
+                    {
+                        "type": "get_system_prompt",
+                        "session_id": self.session_id,
+                        "request_id": str(uuid.uuid4()),
+                        "payload": {
+                            "cwd": cwd,
+                            "settings": settings.to_dict(),
+                        },
+                    }
+                )
+
+                if response.get("error"):
+                    self.nvim.async_call(
+                        lambda: self.nvim.err_write(
+                            f"Anya: Failed to get system prompt: {response['error']}\n"
+                        )
+                    )
+                    return
+
+                prompt = response.get("payload", {}).get("system_prompt", "")
+                if not prompt:
+                    self.nvim.async_call(
+                        lambda: self.nvim.err_write(
+                            "Anya: No system prompt available.\n"
+                        )
+                    )
+                    return
+
+                # Display in snacks scratch buffer via Lua
+                self.nvim.async_call(
+                    lambda: self.nvim.exec_lua(
+                        f"require('anya.system_prompt').display({repr(prompt)})"
+                    )
+                )
+            except Exception:
+                self.nvim.async_call(
+                    lambda: self.nvim.err_write(
+                        f"Anya: Error getting system prompt: {e}\n"
+                    )
+                )
+
+        # Run in background thread
+        import threading
+
+        thread = threading.Thread(target=fetch_and_display, daemon=True)
+        thread.start()
 
     @pynvim.function("AnyaDaemonStatus", sync=True)
     def anya_daemon_status(self, args):

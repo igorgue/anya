@@ -142,6 +142,49 @@ def cleanup_stale_files():
             logger.warning(f"Failed to remove {f}: {e}")
 
 
+def _get_anya_python() -> str:
+    """Return the Python interpreter that has anya installed.
+
+    Prefer the venv that lives alongside the plugin root (e.g. ~/Code/anya/.venv)
+    so that the daemon always uses the correct interpreter even when Neovim was
+    opened from a shell with a project virtualenv activated.
+    """
+    anya_pkg = Path(__file__).parent  # .../rplugin/python3/anya
+    plugin_root = anya_pkg.parent.parent.parent  # .../anya/
+    venv_python = plugin_root / ".venv" / "bin" / "python"
+    if venv_python.exists():
+        return str(venv_python)
+    return sys.executable
+
+
+def _sanitize_env_for_daemon(env: dict) -> dict:
+    """Strip project-venv contamination from the daemon subprocess environment.
+
+    When Neovim is opened from a shell with a virtualenv or conda environment
+    activated, VIRTUAL_ENV / CONDA_PREFIX / CONDA_DEFAULT_ENV are set and the
+    activated bin dir is prepended to PATH. The daemon must not inherit these
+    because it runs under the anya venv Python, not the project venv.
+    """
+    venv_path = env.pop("VIRTUAL_ENV", None)
+    env.pop("CONDA_DEFAULT_ENV", None)
+    conda_prefix = env.pop("CONDA_PREFIX", None)
+
+    if "PATH" in env:
+        path_entries = env["PATH"].split(":")
+        cleaned = []
+        for entry in path_entries:
+            skip = any(
+                entry.startswith(prefix)
+                for prefix in [venv_path, conda_prefix]
+                if prefix
+            )
+            if not skip:
+                cleaned.append(entry)
+        env["PATH"] = ":".join(cleaned)
+
+    return env
+
+
 def start_daemon(foreground: bool = False, debug: bool = False) -> bool:
     """Start the Anya daemon.
 
@@ -165,7 +208,7 @@ def start_daemon(foreground: bool = False, debug: bool = False) -> bool:
 
     # Build command to start daemon
     # Use the server module directly
-    python_executable = sys.executable
+    python_executable = _get_anya_python()
     server_module = "anya.server.main"
 
     cmd = [python_executable, "-m", server_module]
@@ -177,7 +220,7 @@ def start_daemon(foreground: bool = False, debug: bool = False) -> bool:
     # Set up environment with PYTHONPATH including the rplugin directory
     # This is needed because the daemon runs as a subprocess and needs
     # to find the anya package
-    env = os.environ.copy()
+    env = _sanitize_env_for_daemon(os.environ.copy())
     rplugin_path = Path(__file__).parent.parent.resolve()
     existing_pythonpath = env.get("PYTHONPATH", "")
     if existing_pythonpath:

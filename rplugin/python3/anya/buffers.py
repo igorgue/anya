@@ -44,7 +44,7 @@ def set_prompt_buffer_options(nvim: Nvim, bufnr: int):
     nvim.api.buf_set_option(bufnr, "number", False)
     nvim.api.buf_set_option(bufnr, "relativenumber", False)
     nvim.api.buf_set_option(bufnr, "signcolumn", "no")
-    nvim.api.buf_set_option(bufnr, "spell", False)
+    nvim.api.buf_set_option(bufnr, "spell", True)
     nvim.api.buf_set_option(bufnr, "modifiable", True)
 
 
