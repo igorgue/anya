@@ -13,6 +13,19 @@ function! s:get_python_host_prog() abort
     return g:python3_host_prog
   endif
 
+  try
+    python3 import sys, vim; vim.vars['_anya_detected_python3_host_prog'] = sys.executable
+  catch
+  endtry
+
+  if exists('g:_anya_detected_python3_host_prog')
+    let l:detected = g:_anya_detected_python3_host_prog
+    unlet g:_anya_detected_python3_host_prog
+    if executable(l:detected)
+      return l:detected
+    endif
+  endif
+
   return exepath('python3')
 endfunction
 
