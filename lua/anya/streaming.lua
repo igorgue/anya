@@ -394,6 +394,16 @@ function M.flush_queue(process_markers_after)
       pcall(markers_ui._process_markers, bufnr)
     end
   end
+
+  -- After flushing, attempt to drain any queued user messages.
+  -- This covers the case where the agent finished but the queue was still
+  -- draining when the user submitted their follow-up.
+  vim.schedule(function()
+    local ok, conv = pcall(require, "anya.conversation")
+    if ok and conv._drain_pending_queue then
+      conv._drain_pending_queue()
+    end
+  end)
 end
 
 return M

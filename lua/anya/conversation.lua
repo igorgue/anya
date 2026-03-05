@@ -21,6 +21,9 @@ M._request_started_at = nil
 -- Maximum time (seconds) to consider a request in-progress before assuming it's stuck
 local REQUEST_TIMEOUT_SECONDS = 300
 
+-- Queue of pending message texts to send after the current response completes
+M._pending_queue = {}
+
 --- Check if we should block sending
 --- @return boolean True if sending should be blocked
 local function is_send_blocked()
@@ -129,26 +132,15 @@ end
 --- Creates a new conversation if one doesn't exist
 --- @return boolean True if the message was sent successfully
 function M.send_message()
-  -- Block immediately if another send is in progress
-  if is_send_blocked() then
-    vim.notify("Anya: Please wait for the current response to complete.", vim.log.levels.WARN)
-    return false
-  end
-
-  -- Set the lock IMMEDIATELY before any RPC calls
-  M._sending_in_progress = true
-
   local chat_buf = get_chat_buffer()
   local prompt_buf = get_prompt_buffer()
 
   if not chat_buf then
-    M._sending_in_progress = false
     vim.notify("Anya: Chat buffer not found. Run :Anya to open the interface.", vim.log.levels.ERROR)
     return false
   end
 
   if not prompt_buf then
-    M._sending_in_progress = false
     vim.notify("Anya: Prompt buffer not found. Run :Anya to open the interface.", vim.log.levels.ERROR)
     return false
   end
@@ -159,9 +151,24 @@ function M.send_message()
 
   -- Don't send empty messages
   if not prompt_text:match("%S") then
-    M._sending_in_progress = false
     return false
   end
+
+  -- If another request is in progress, queue the message instead of blocking
+  if is_send_blocked() then
+    vim.api.nvim_set_option_value("modifiable", true, { buf = prompt_buf })
+    vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, { "" })
+    table.insert(M._pending_queue, prompt_text)
+    local n = #M._pending_queue
+    vim.notify(
+      "Anya: Message queued" .. (n > 1 and (" (" .. n .. " pending)") or "") .. ".",
+      vim.log.levels.INFO
+    )
+    return true
+  end
+
+  -- Set the lock IMMEDIATELY before any RPC calls
+  M._sending_in_progress = true
 
   -- Get existing conversation ID (if any)
   local existing_conv_id = get_conversation_id(chat_buf)
@@ -286,6 +293,9 @@ function M.clear_conversation()
     return
   end
 
+  -- Clear any pending queued messages too
+  M._pending_queue = {}
+
   -- Clear the conversation ID
   pcall(vim.api.nvim_buf_del_var, chat_buf, CONVERSATION_ID_VAR)
 
@@ -352,6 +362,126 @@ function M.force_reset_request_state()
   M._request_started_at = nil
 end
 
+--- Drain the pending message queue: send the next queued message if possible.
+--- Called automatically after each response completes.
+function M._drain_pending_queue()
+  if #M._pending_queue == 0 then
+    return
+  end
+  if is_send_blocked() then
+    return
+  end
+
+  local next_text = table.remove(M._pending_queue, 1)
+  if not next_text or not next_text:match("%S") then
+    -- Skip empty entries and try next
+    M._drain_pending_queue()
+    return
+  end
+
+  local chat_buf = get_chat_buffer()
+  if not chat_buf then
+    return
+  end
+
+  local existing_conv_id = get_conversation_id(chat_buf)
+
+  -- Set the lock immediately
+  M._sending_in_progress = true
+
+  -- Single RPC call to send message
+  local ok, result = pcall(vim.fn.AnyaSend, next_text, existing_conv_id)
+  if not ok then
+    M._sending_in_progress = false
+    vim.notify("Anya: Failed to send queued message: " .. tostring(result), vim.log.levels.ERROR)
+    return
+  end
+
+  -- Slash commands return nil
+  if result == nil or result == vim.NIL then
+    M._sending_in_progress = false
+    return
+  end
+
+  local conv_id = result.conv_id
+  local msg_id = result.msg_id
+
+  if result.is_new then
+    set_conversation_id(chat_buf, conv_id)
+  end
+
+  -- Write the user message into the chat buffer
+  local chat_empty = is_chat_buffer_empty(chat_buf)
+  local output_lines = {}
+
+  table.insert(output_lines, markers.make_message_marker(msg_id))
+
+  local formatted_lines = format_user_message(next_text)
+  for _, line in ipairs(formatted_lines) do
+    table.insert(output_lines, line)
+  end
+
+  local final_text = table.concat(output_lines, "\n")
+  final_text = markers.ensure_marker_line_isolation(final_text)
+  output_lines = vim.split(final_text, "\n", { plain = true })
+
+  local insert_line
+  if chat_empty then
+    insert_line = 0
+  else
+    local was_mod = vim.api.nvim_get_option_value("modifiable", { buf = chat_buf })
+    vim.api.nvim_set_option_value("modifiable", true, { buf = chat_buf })
+    local line_count = vim.api.nvim_buf_line_count(chat_buf)
+    while line_count > 0 do
+      local last_line = vim.api.nvim_buf_get_lines(chat_buf, line_count - 1, line_count, false)[1] or ""
+      if last_line:match("^%s*$") then
+        vim.api.nvim_buf_set_lines(chat_buf, line_count - 1, line_count, false, {})
+        line_count = line_count - 1
+      else
+        local stripped = last_line:gsub("%s+$", "")
+        if stripped ~= last_line then
+          vim.api.nvim_buf_set_lines(chat_buf, line_count - 1, line_count, false, { stripped })
+        end
+        break
+      end
+    end
+    insert_line = line_count
+    vim.api.nvim_set_option_value("modifiable", was_mod, { buf = chat_buf })
+  end
+
+  local was_modifiable = vim.api.nvim_get_option_value("modifiable", { buf = chat_buf })
+  vim.api.nvim_set_option_value("modifiable", true, { buf = chat_buf })
+  if chat_empty then
+    vim.api.nvim_buf_set_lines(chat_buf, 0, -1, false, output_lines)
+  else
+    vim.api.nvim_buf_set_lines(chat_buf, insert_line, insert_line, false, output_lines)
+  end
+  vim.api.nvim_set_option_value("modifiable", was_modifiable, { buf = chat_buf })
+
+  text._process_markers(chat_buf)
+  text._autoscroll_to_bottom(chat_buf)
+
+  -- Save to prompt history
+  local history = require("anya.history")
+  history.add(next_text)
+
+  -- Handoff
+  M._sending_in_progress = false
+  M._request_in_progress = true
+  M._request_started_at = vim.loop.now()
+end
+
+--- Get the number of messages currently pending in the queue.
+--- @return number
+function M.get_pending_queue_length()
+  return #M._pending_queue
+end
+
+--- Clear the pending queue (e.g. when the conversation is cleared).
+function M.clear_pending_queue()
+  M._pending_queue = {}
+end
+
 --- Set up autocommands to track request state
 --- Called once during plugin initialization
 function M.setup_request_tracking()
@@ -376,6 +506,8 @@ function M.setup_request_tracking()
       M._sending_in_progress = false
       M._request_in_progress = false
       M._request_started_at = nil
+      -- Drain pending queue after a short delay to let the streaming queue flush
+      vim.defer_fn(M._drain_pending_queue, 100)
     end,
     desc = "Track when Anya request finishes",
   })
