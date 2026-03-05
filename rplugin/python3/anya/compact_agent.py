@@ -154,11 +154,19 @@ async def compact_conversation(
                 temperature=0.1,
             )
             summary = response.content[0].text if response.content else ""
+        elif api_type == "responses":
+            response = await client.responses.create(
+                model=model_name,
+                input=prompt,
+                max_output_tokens=4096,
+                temperature=0.1,
+            )
+            summary = response.output_text or ""
         else:
             response = await client.chat.completions.create(
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=4096,
+                max_completion_tokens=4096,
                 temperature=0.1,
             )
             summary = response.choices[0].message.content or ""

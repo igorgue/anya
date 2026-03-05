@@ -145,11 +145,19 @@ async def generate_title(
                 temperature=0.3,
             )
             raw = response.content[0].text if response.content else ""
+        elif api_type == "responses":
+            response = await client.responses.create(
+                model=model_name,
+                input=prompt,
+                max_output_tokens=30,
+                temperature=0.3,
+            )
+            raw = response.output_text or ""
         else:
             response = await client.chat.completions.create(
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=30,
+                max_completion_tokens=30,
                 temperature=0.3,
             )
             raw = response.choices[0].message.content or ""
