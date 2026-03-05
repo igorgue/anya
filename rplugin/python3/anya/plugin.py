@@ -186,6 +186,8 @@ class AnyaPlugin:
                         self._handle_mcp_server_ready(chunk.data)
                     elif chunk.event_type == StreamEventType.TITLE_GENERATED:
                         self._handle_title_generated(chunk.data)
+                    elif chunk.event_type == StreamEventType.CONVERSATION_COMPACTED:
+                        self._handle_conversation_compacted(chunk.data)
                 except Exception:
                     # Don't spam errors - just log once and continue
                     pass
@@ -257,6 +259,76 @@ class AnyaPlugin:
                 "success": success,
             },
         )
+
+    def _handle_conversation_compacted(self, data: dict):
+        """Handle CONVERSATION_COMPACTED system event from daemon."""
+        originating_session = data.get("originating_session_id", "")
+        if originating_session and originating_session != self.session_id:
+            return
+
+        conversation_id = data.get("conversation_id", "")
+        summary = data.get("summary", "")
+        success = data.get("success", False)
+
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaCompactionFinished",
+            {
+                "conversation_id": conversation_id,
+                "success": success,
+            },
+        )
+
+        if not success or not summary:
+            self.nvim.async_call(
+                self.nvim.err_write,
+                "Anya: Compaction failed — could not generate summary.\n",
+            )
+            return
+
+        self.nvim.async_call(self._apply_compaction, conversation_id, summary)
+
+    def _apply_compaction(self, conversation_id: str, summary: str):
+        """Apply compaction: replace buffer content and DB messages with the summary."""
+        from datetime import datetime, timezone
+
+        chat_buf = ui.get_chat_buffer(self.nvim)
+        if not chat_buf or not self.nvim.api.buf_is_valid(chat_buf):
+            return
+
+        try:
+            buf_conv_id = self.nvim.api.buf_get_var(chat_buf, "anya_conversation_id")
+            if buf_conv_id != conversation_id:
+                return
+        except Exception:
+            return
+
+        now = datetime.now(timezone.utc)
+        timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+        summary_msg_id = ids.new(conversation=conversation_id)
+
+        note = "_[Conversation compacted — previous context summarized below]_\n\n"
+        new_content = markers.make_message_marker(summary_msg_id) + "\n" + note + summary
+
+        try:
+            lines = new_content.split("\n")
+            self.nvim.api.buf_set_option(chat_buf, "modifiable", True)
+            self.nvim.api.buf_set_lines(chat_buf, 0, -1, False, lines)
+        except Exception as e:
+            self.nvim.err_write(f"Anya: Error updating buffer after compaction: {e}\n")
+            return
+
+        try:
+            self._ensure_db()
+            db.replace_messages_with_summary(
+                conversation_id=conversation_id,
+                summary_msg_id=summary_msg_id,
+                summary_content=note + summary,
+                timestamp=timestamp,
+            )
+        except Exception as e:
+            self.nvim.err_write(f"Anya: Error updating DB after compaction: {e}\n")
+
 
     def _handle_mcp_init_complete(self, data: dict):
         """Handle MCP initialization complete event."""
@@ -1521,12 +1593,35 @@ end
 
                 elif chunk.event_type == StreamEventType.ERROR:
                     error = chunk.data.get("error", "Unknown error")
-                    self.nvim.async_call(
-                        ui.append_to_chat_buffer,
-                        self.nvim,
-                        chat_bufnr,
-                        f"\n\n**Error:** {error}\n",
+                    # Detect context window exceeded errors and auto-compact
+                    is_context_overflow = (
+                        "context_length_exceeded" in error
+                        or "context window" in error.lower()
+                        or "maximum context length" in error.lower()
+                        or "max_tokens_exceeded" in error
+                        or ("400" in error and ("token" in error.lower() or "context" in error.lower()))
                     )
+                    if is_context_overflow:
+                        self.nvim.async_call(
+                            ui.append_to_chat_buffer,
+                            self.nvim,
+                            chat_bufnr,
+                            "\n\n_Context window full. Compacting conversation..._\n",
+                        )
+                        # Trigger auto-compaction using the history already built
+                        if conversation_id:
+                            self.nvim.async_call(
+                                self._trigger_compaction,
+                                conversation_id,
+                                llm_history,
+                            )
+                    else:
+                        self.nvim.async_call(
+                            ui.append_to_chat_buffer,
+                            self.nvim,
+                            chat_bufnr,
+                            f"\n\n**Error:** {error}\n",
+                        )
                     break
 
             # Wait for send task to complete (should be immediate now)
@@ -2695,15 +2790,112 @@ For more help, see :h anya"""
                 self.nvim, chat_buf.number, "File picker not yet implemented.\n\n"
             )
 
-    def _compact_command(self):
-        """Handle /compact command."""
+    def _trigger_compaction(self, conversation_id: str, history: list):
+        """Send COMPACT_CONVERSATION request to the daemon.
+
+        Args:
+            conversation_id: The conversation to compact
+            history: Current LLM history (list of {role, content} dicts)
+        """
+        import functools
+
+        settings = self._get_agent_settings()
+
+        fidget.emit_user_event(
+            self.nvim,
+            "AnyaCompactionStarted",
+            {"conversation_id": conversation_id},
+        )
+
         chat_buf = ui.get_chat_buffer(self.nvim)
         if chat_buf and self.nvim.api.buf_is_valid(chat_buf):
             ui.stream_text_to_buffer(
                 self.nvim,
                 chat_buf.number,
-                "Context compaction not yet implemented.\n\n",
+                "\n_Compacting conversation..._\n",
             )
+
+        async def _send():
+            loop = asyncio.get_event_loop()
+            try:
+                await loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        self._title_client.send_request,
+                        RequestType.COMPACT_CONVERSATION,
+                        self.session_id,
+                        f"compact_{conversation_id}",
+                        {
+                            "conversation_id": conversation_id,
+                            "history": history,
+                            "settings": settings.to_dict(),
+                        },
+                        5.0,
+                    ),
+                )
+            except Exception as e:
+                self.nvim.async_call(
+                    self.nvim.err_write,
+                    f"Anya: Failed to send compaction request: {e}\n",
+                )
+                fidget.emit_user_event(
+                    self.nvim,
+                    "AnyaCompactionFinished",
+                    {"conversation_id": conversation_id, "success": False},
+                )
+
+        loop = self._ensure_loop()
+        asyncio.run_coroutine_threadsafe(_send(), loop)
+
+
+    def _compact_command(self):
+        """Handle /compact command — compact the current conversation."""
+        chat_buf = ui.get_chat_buffer(self.nvim)
+        if not chat_buf or not self.nvim.api.buf_is_valid(chat_buf):
+            return
+
+        conversation_id = None
+        try:
+            conversation_id = self.nvim.api.buf_get_var(chat_buf, "anya_conversation_id")
+        except Exception:
+            pass
+
+        if not conversation_id:
+            self.nvim.err_write("Anya: No active conversation to compact.\n")
+            return
+
+        # Build history from buffer content
+        try:
+            import concurrent.futures
+            buf_future: concurrent.futures.Future = concurrent.futures.Future()
+
+            def _get_content():
+                try:
+                    lines = self.nvim.api.buf_get_lines(chat_buf, 0, -1, False)
+                    buf_future.set_result("\n".join(lines))
+                except Exception as exc:
+                    buf_future.set_exception(exc)
+
+            self.nvim.async_call(_get_content)
+
+            # Wait briefly for async_call to complete (we're on main thread here)
+            import time as _time
+            _t0 = _time.monotonic()
+            while not buf_future.done() and _time.monotonic() - _t0 < 2.0:
+                _time.sleep(0.01)
+
+            buf_content = buf_future.result() if buf_future.done() else ""
+            records = history.parse_buffer_content(buf_content)
+            llm_history = history.build_llm_history(records)
+        except Exception as e:
+            self.nvim.err_write(f"Anya: Error reading buffer for compaction: {e}\n")
+            return
+
+        if not llm_history:
+            self.nvim.err_write("Anya: No conversation history to compact.\n")
+            return
+
+        self._trigger_compaction(conversation_id, llm_history)
 
     @pynvim.function("AnyaCancel", sync=False)
     def anya_cancel(self, args):

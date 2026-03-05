@@ -40,7 +40,7 @@ def set_prompt_buffer_options(nvim: Nvim, bufnr: int):
         bufnr: Buffer number
     """
     nvim.api.buf_set_option(bufnr, "wrap", True)
-    nvim.api.buf_set_option(bufnr, "linebreak", True)
+    nvim.api.buf_set_option(bufnr, "linebreak", False)
     nvim.api.buf_set_option(bufnr, "number", False)
     nvim.api.buf_set_option(bufnr, "relativenumber", False)
     nvim.api.buf_set_option(bufnr, "signcolumn", "no")
@@ -56,7 +56,8 @@ def set_prompt_window_options(nvim: Nvim, winid: int):
         winid: Window ID
     """
     nvim.api.win_set_option(winid, "wrap", True)
-    nvim.api.win_set_option(winid, "linebreak", True)
+    nvim.api.win_set_option(winid, "linebreak", False)
+    nvim.api.win_set_option(winid, "showbreak", "")
     nvim.api.win_set_option(winid, "winhighlight", "Normal:Normal")
     # Clear winbar on prompt window to ensure it doesn't interfere
     try:
@@ -768,21 +769,13 @@ def reposition_floats(nvim: Nvim):
         prompt_buf = nvim.api.win_get_buf(prompt_win)
         line_count = nvim.api.buf_line_count(prompt_buf)
 
-        # Use nvim_win_text_height to get the actual display height (accounts for wrapping)
         try:
-            result = nvim.api.win_text_height(
-                prompt_win,
-                {
-                    "start_row": 0,
-                    "end_row": line_count - 1 if line_count > 0 else 0,
-                },
-            )
-            # win_text_height returns a dict with 'all' key
-            display_height = (
-                result.get("all", line_count) if isinstance(result, dict) else result
-            )
+            result = nvim.api.win_text_height(prompt_win, {})
+            # "all" includes virtual/fill lines below the last buffer line, subtract them
+            display_height = result["all"] - result.get("fill", 0)
+            if not isinstance(display_height, int) or display_height < 1:
+                display_height = line_count
         except Exception:
-            # Fallback to line count if win_text_height is not available
             display_height = line_count
 
         # Use content height, but respect manual height override if set (C-Up/C-Down)

@@ -19,6 +19,7 @@ class RequestType(Enum):
     PING = "ping"
     TOOL_CONFIRMATION_RESPONSE = "tool_confirmation_response"
     GENERATE_TITLE = "generate_title"
+    COMPACT_CONVERSATION = "compact_conversation"
     GET_SYSTEM_PROMPT = "get_system_prompt"
 
 
@@ -60,6 +61,8 @@ class StreamEventType(Enum):
     TOKEN_USAGE = "token_usage"
     # Title generation result (system event)
     TITLE_GENERATED = "title_generated"
+    # Conversation compaction result (system event)
+    CONVERSATION_COMPACTED = "conversation_compacted"
     # Buffer modification request
     MODIFY_BUFFER_REQUEST = "modify_buffer_request"
 

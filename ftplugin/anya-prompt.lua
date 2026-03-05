@@ -7,7 +7,7 @@
 
 -- Buffer-local options
 vim.opt_local.wrap = true
-vim.opt_local.linebreak = true
+vim.opt_local.linebreak = false
 vim.opt_local.number = false
 vim.opt_local.relativenumber = false
 vim.opt_local.signcolumn = "no"
@@ -16,7 +16,7 @@ vim.opt_local.modifiable = true
 -- Clear winbar on this window to prevent navic or other plugins from interfering
 -- Use both opt.winbar (affects current window) and window option for reliability
 vim.opt.winbar = ""
-vim.opt.showbreak = " "
+vim.opt_local.showbreak = ""
 
 -- Read config
 local anya_config = (function()

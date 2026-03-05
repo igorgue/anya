@@ -522,6 +522,45 @@ def get_tool_outputs_for_message(message_id: str) -> list[dict[str, Any]]:
         conn.close()
 
 
+
+def replace_messages_with_summary(
+    conversation_id: str,
+    summary_msg_id: str,
+    summary_content: str,
+    timestamp: str,
+) -> bool:
+    """Delete all messages for a conversation and insert a single summary message.
+
+    Used during context compaction to replace the full history with a summary.
+
+    Args:
+        conversation_id: The conversation to compact
+        summary_msg_id: New message ID for the summary
+        summary_content: The summary text to store
+        timestamp: ISO 8601 timestamp for the new message
+
+    Returns:
+        True if successful
+    """
+    conn = get_connection()
+    try:
+        conn.execute(
+            "DELETE FROM messages WHERE conversation_id = ?",
+            (conversation_id,),
+        )
+        conn.execute(
+            """INSERT INTO messages (id, conversation_id, role, content, author, model, created_at, ended_at, markers)
+               VALUES (?, ?, 'assistant', ?, 'Code', NULL, ?, NULL, NULL)""",
+            (summary_msg_id, conversation_id, summary_content, timestamp),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
 def rebuild_buffer_content(
     conversation: dict[str, Any], messages: list[dict[str, Any]]
 ) -> str:

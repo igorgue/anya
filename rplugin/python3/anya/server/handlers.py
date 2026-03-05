@@ -178,6 +178,8 @@ class RequestHandler:
                 return await self._handle_confirmation_response(request)
             elif request.type == RequestType.GENERATE_TITLE:
                 return await self._handle_generate_title(request)
+            elif request.type == RequestType.COMPACT_CONVERSATION:
+                return await self._handle_compact_conversation(request)
             elif request.type == RequestType.GET_SYSTEM_PROMPT:
                 return await self._handle_get_system_prompt(request)
             else:
@@ -386,6 +388,57 @@ class RequestHandler:
             await self.pub_socket.send(result_chunk.serialize())
         except Exception as e:
             self.logger.warning(f"Failed to emit TITLE_GENERATED event: {e}")
+
+    async def _handle_compact_conversation(self, request: Request) -> Response:
+        """Handle a COMPACT_CONVERSATION request.
+
+        Returns immediately; compaction runs in a background task and the result
+        is emitted as a CONVERSATION_COMPACTED system event.
+        """
+        asyncio.create_task(
+            self._compact_conversation_background(
+                session_id=request.session_id,
+                request_id=request.request_id,
+                conversation_id=request.payload.get("conversation_id", ""),
+                history=request.payload.get("history", []),
+                settings_dict=request.payload.get("settings", {}),
+            )
+        )
+        return make_success_response(request.request_id, {"status": "started"})
+
+    async def _compact_conversation_background(
+        self,
+        session_id: str,
+        request_id: str,
+        conversation_id: str,
+        history: list[dict],
+        settings_dict: dict,
+    ):
+        """Generate a conversation summary and emit CONVERSATION_COMPACTED."""
+        summary = None
+        try:
+            from ..compact_agent import compact_conversation
+            settings = AgentSettings.from_dict(settings_dict) if settings_dict else None
+            summary = await compact_conversation(history, settings)
+        except Exception as e:
+            self.logger.warning(f"Compaction failed: {e}")
+
+        result_chunk = StreamChunk(
+            request_id="system",
+            session_id="system",
+            event_type=StreamEventType.CONVERSATION_COMPACTED,
+            data={
+                "conversation_id": conversation_id,
+                "summary": summary or "",
+                "success": bool(summary),
+                "originating_session_id": session_id,
+            },
+        )
+        try:
+            await self.pub_socket.send(result_chunk.serialize())
+        except Exception as e:
+            self.logger.warning(f"Failed to emit CONVERSATION_COMPACTED event: {e}")
+
 
     async def _handle_cancel_request(self, request: Request) -> Response:
         """Handle a CANCEL_REQUEST request."""
