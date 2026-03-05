@@ -332,18 +332,34 @@ class RequestHandler:
         settings_dict: dict,
     ):
         """Generate a conversation title using the same API client as the coding agent."""
+        title = None
+
         # Skip if the conversation already has a title
         try:
             conv = db.get_conversation(conversation_id)
             if conv and conv.get("title"):
                 self.logger.info(f"Conversation {conversation_id} already has title, skipping generation")
+                # Still emit event to close the fidget notification
+                result_chunk = StreamChunk(
+                    request_id=request_id,
+                    session_id="system",
+                    event_type=StreamEventType.TITLE_GENERATED,
+                    data={
+                        "conversation_id": conversation_id,
+                        "title": conv.get("title"),
+                        "success": True,
+                        "originating_session_id": session_id,
+                    },
+                )
+                try:
+                    await self.pub_socket.send(result_chunk.serialize())
+                except Exception as e:
+                    self.logger.warning(f"Failed to emit TITLE_GENERATED event: {e}")
                 return
         except Exception as e:
             self.logger.warning(f"Failed to check existing title: {e}")
 
         import re
-
-        title = None
         try:
             settings = AgentSettings.from_dict(settings_dict) if settings_dict else None
 
