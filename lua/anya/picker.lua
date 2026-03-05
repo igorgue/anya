@@ -82,8 +82,9 @@ end
 --- Load a conversation into the chat buffer
 --- @param conversation_id string The conversation ID to load
 --- @param new_cwd string|nil Optional new cwd to switch to
+--- @param title string|nil Optional conversation title to set as window title
 --- @return boolean True if successful
-local function load_conversation(conversation_id, new_cwd)
+local function load_conversation(conversation_id, new_cwd, title)
   local chat_buf = get_chat_buffer()
   if not chat_buf then
     vim.notify("Anya: Chat buffer not found. Run :Anya to open the interface.", vim.log.levels.ERROR)
@@ -115,6 +116,11 @@ local function load_conversation(conversation_id, new_cwd)
 
   -- Set the conversation ID on the buffer
   vim.api.nvim_buf_set_var(chat_buf, "anya_conversation_id", conversation_id)
+
+  -- Update window title if the conversation has a title
+  if title and title ~= "" then
+    vim.o.titlestring = "Anya: " .. title
+  end
 
   -- Process markers to create folds and extmarks
   local text = require("anya.text")
@@ -196,7 +202,7 @@ function M.open()
       idx = i,
       text = title,
       id = conv.id,
-      title = title,
+      title = conv.title,
       date = date,
       updated_at = conv.updated_at,
       created_at = conv.created_at,
@@ -218,7 +224,7 @@ function M.open()
         table.insert(ret, { "  " })
       end
       -- Title
-      table.insert(ret, { item.title, "SnacksPickerLabel" })
+      table.insert(ret, { item.title or "Untitled conversation", "SnacksPickerLabel" })
       -- Date (right-aligned effect with padding)
       table.insert(ret, { "  " })
       table.insert(ret, { item.date, "SnacksPickerComment" })
@@ -268,16 +274,16 @@ function M.open()
 
       -- If cwd matches or no cwd stored, load directly
       if item.cwd_matches then
-        load_conversation(item.id)
+        load_conversation(item.id, nil, item.title)
         return
       end
 
       -- Show confirmation dialog for cwd mismatch
       show_cwd_confirmation(item, function(action)
         if action == "switch" then
-          load_conversation(item.id, item.cwd)
+          load_conversation(item.id, item.cwd, item.title)
         elseif action == "load" then
-          load_conversation(item.id)
+          load_conversation(item.id, nil, item.title)
         end
         -- "cancel" does nothing
       end)
