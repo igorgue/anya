@@ -300,6 +300,10 @@ vim.keymap.set("n", "<localleader>p", function()
   require("anya.system_prompt").show()
 end, { buffer = true, desc = "Open system prompt" })
 
+vim.keymap.set("n", "<localleader>u", function()
+  vim.cmd("UpdateRemotePlugins")
+end, { buffer = true, desc = "Open system prompt" })
+
 -- Focus toggle between chat and prompt with Tab
 vim.keymap.set("n", "<Tab>", function()
   local wins = vim.api.nvim_tabpage_list_wins(0)
