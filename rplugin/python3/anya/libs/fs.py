@@ -15,6 +15,8 @@ import os
 import shutil
 import subprocess
 
+from . import buffer as buffer_lib
+
 
 def read_file(path_with_range: str, cwd: str | None = None) -> str:
     """Read a file with optional line range, returning content with line numbers.
@@ -153,6 +155,10 @@ def read_many_files(files: list[str], cwd: str | None = None) -> str:
 def write_file(path: str, content: str, cwd: str | None = None) -> str:
     """Write content to a file, creating parent directories as needed.
 
+    If the target file is currently open in Neovim, this updates the open
+    buffer in place instead of writing directly to disk. This keeps the editor
+    view in sync and preserves unsaved buffer state.
+
     If the file does not exist it will be created. If it does exist its
     content will be replaced entirely.
 
@@ -167,6 +173,9 @@ def write_file(path: str, content: str, cwd: str | None = None) -> str:
     path = os.path.expandvars(os.path.expanduser(path))
     if not os.path.isabs(path):
         path = os.path.join(cwd or os.getcwd(), path)
+
+    if buffer_lib.is_open(path):
+        return buffer_lib.modify_file(path, content)
 
     parent = os.path.dirname(path)
     if parent:

@@ -5,9 +5,9 @@ first user message and assistant response. Uses the same API settings
 as the main agent.
 """
 
+import logging
 import os
 import re
-import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -30,14 +30,70 @@ def _clean_content(text: str) -> str:
     - Tool call headers: [[tool_name]]
     - Collapses excess whitespace
     """
-    # Strip HTML marker comments
     text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
-    # Strip [[tool_name]] tool headers
     text = re.sub(r"\[\[.*?\]\]", "", text)
-    # Collapse runs of whitespace / blank lines
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = text.strip()
     return text[:_MAX_CONTENT_CHARS]
+
+
+def _parse_reasoning_effort(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    effort = str(value).strip().lower()
+    if not effort:
+        return None
+
+    allowed = {"none", "minimal", "low", "medium", "high", "xhigh"}
+    return effort if effort in allowed else None
+
+
+def _get_reasoning_effort(settings: "AgentSettings | None") -> str | None:
+    raw = None
+    if settings is not None:
+        raw = settings.thinking_budget
+    if raw is None:
+        raw = os.environ.get("ANYA_THINKING_BUDGET")
+    if raw is None or not str(raw).strip():
+        return None
+    return _parse_reasoning_effort(raw) or "medium"
+
+
+def _build_openai_request_kwargs(
+    *,
+    api_type: str,
+    model_name: str,
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    reasoning_effort: str | None,
+) -> dict:
+    if api_type == "responses":
+        kwargs = {
+            "model": model_name,
+            "input": prompt,
+            "max_output_tokens": max_tokens,
+        }
+        if reasoning_effort is not None:
+            kwargs["reasoning"] = {
+                "effort": reasoning_effort,
+                "summary": "auto",
+            }
+        else:
+            kwargs["temperature"] = temperature
+        return kwargs
+
+    kwargs = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_completion_tokens": max_tokens,
+    }
+    if reasoning_effort is not None:
+        kwargs["reasoning_effort"] = reasoning_effort
+    else:
+        kwargs["temperature"] = temperature
+    return kwargs
 
 
 async def _build_client(settings: "AgentSettings | None"):
@@ -46,7 +102,6 @@ async def _build_client(settings: "AgentSettings | None"):
     Handles all provider types: copilot, anthropic, openrouter, and plain OpenAI/compatible.
     Returns a (client, model_name, api_type) tuple.
     """
-    # Resolve settings vs environment
     if settings:
         model_name = settings.model or "gpt-4.1"
         api_key = settings.api_key
@@ -89,14 +144,12 @@ async def _build_client(settings: "AgentSettings | None"):
             client_kwargs["base_url"] = api_base
         return AsyncAnthropic(**client_kwargs), model_name, api_type
 
-    # Plain OpenAI / OpenRouter / any chat_completions-compatible endpoint
     from openai import AsyncOpenAI
 
     client_kwargs: dict = {"timeout": _API_TIMEOUT}
     if api_key:
         client_kwargs["api_key"] = api_key
 
-    # Auto-detect OpenRouter if model contains '/' and no explicit base URL
     base_url = api_base
     if not base_url and "/" in model_name:
         base_url = "https://openrouter.ai/api/v1"
@@ -111,26 +164,17 @@ async def generate_title(
     assistant_message: str,
     settings: "AgentSettings | None",
 ) -> str | None:
-    """Generate a short title for a conversation.
-
-    Args:
-        user_message: The user's first message
-        assistant_message: The assistant's first response (raw buffer text)
-        settings: AgentSettings with API configuration, or None to use env vars
-
-    Returns:
-        Generated title string or None on failure
-    """
+    """Generate a short title for a conversation."""
     try:
         client, model_name, api_type = await _build_client(settings)
+        reasoning_effort = _get_reasoning_effort(settings)
 
-        # Clean and truncate both messages
         user_snippet = _clean_content(user_message)
         assistant_snippet = _clean_content(assistant_message)
 
         prompt = (
             "Generate a short, descriptive title (maximum 8 words) for this "
-            "conversation. Output ONLY the title \u2014 no quotes, no trailing "
+            "conversation. Output ONLY the title — no quotes, no trailing "
             "punctuation, no explanation.\n\n"
             f"User: {user_snippet}\n"
             f"Assistant: {assistant_snippet}\n"
@@ -147,22 +191,30 @@ async def generate_title(
             raw = response.content[0].text if response.content else ""
         elif api_type == "responses":
             response = await client.responses.create(
-                model=model_name,
-                input=prompt,
-                max_output_tokens=30,
-                temperature=0.3,
+                **_build_openai_request_kwargs(
+                    api_type=api_type,
+                    model_name=model_name,
+                    prompt=prompt,
+                    max_tokens=30,
+                    temperature=0.3,
+                    reasoning_effort=reasoning_effort,
+                )
             )
             raw = response.output_text or ""
         else:
             response = await client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-                max_completion_tokens=30,
-                temperature=0.3,
+                **_build_openai_request_kwargs(
+                    api_type=api_type,
+                    model_name=model_name,
+                    prompt=prompt,
+                    max_tokens=30,
+                    temperature=0.3,
+                    reasoning_effort=reasoning_effort,
+                )
             )
             raw = response.choices[0].message.content or ""
 
-        title = raw.strip().strip("\u201c\u201d'").rstrip(".!?").strip()
+        title = raw.strip().strip("“”'").rstrip(".!?").strip()
         return title if title else None
 
     except Exception as e:

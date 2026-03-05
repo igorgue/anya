@@ -147,6 +147,17 @@ result = mcp.call("zai-vision", "diagnose_error_screenshot", {"imagePath": "/pat
 
 ---
 
+### Buffer Editing: `from anya.libs import buffer`
+
+**Use `buffer.modify_file()` when the target file is already open in Neovim.**
+
+- `buffer.modify()` - Modify the current buffer.
+- `buffer.modify_file(path, content)` - Modify another open file buffer by path.
+- `buffer.list_open_buffers()` - Inspect open buffer metadata available to the agent.
+- `buffer.is_open(path)` - Check whether a file is open in Neovim.
+
+---
+
 ### User Interaction: `from anya.libs import ui`
 
 **Use `ui` for interactive prompts when you need user input.**
@@ -164,7 +175,7 @@ result = mcp.call("zai-vision", "diagnose_error_screenshot", {"imagePath": "/pat
 | Read a file (for understanding) | `fs.read_file()` |
 | Read a file (for string manipulation) | `open(path).read()` |
 | Read multiple files | `fs.read_many_files()` |
-| Write/create a file | `fs.write_file()` inside `execute` |
+| Write/create a file | `fs.write_file()` inside `execute` (`buffer.modify_file()` for already-open buffers) |
 | List directory contents | `fs.list_files()` |
 | Search code in project | `fs.search_code()` |
 | Run shell command | `shell.run()` |

@@ -864,16 +864,7 @@ class AnyaPlugin:
             try:
                 cwd = self.nvim.call("getcwd")
                 current_buffer = self.nvim.api.buf_get_name(0)
-                open_buffers = []
-                # Get open buffers info
-                for buf in self.nvim.buffers:
-                    if buf.valid and buf.name:
-                        open_buffers.append(
-                            {
-                                "name": buf.name,
-                                "bufnr": buf.number,
-                            }
-                        )
+                open_buffers = self._collect_open_buffers()
                 context_future.set_result(
                     {
                         "cwd": cwd,
@@ -2015,10 +2006,7 @@ end
             buf_content = "\n".join(buf_lines)
             ft = self.nvim.api.buf_get_option(buf, "filetype")
             cwd = self.nvim.call("getcwd")
-            open_buffers = []
-            for b in self.nvim.buffers:
-                if b.valid and b.name:
-                    open_buffers.append({"name": b.name, "bufnr": b.number})
+            open_buffers = self._collect_open_buffers()
         except Exception as e:
             self.nvim.err_write(f"Anya: Failed to read buffer: {e}\n")
             return
@@ -2109,6 +2097,122 @@ pcall(vim.keymap.del, "n", "<C-c>")
         self._do_running = False
         self._do_task = None
         self._do_request_id = None
+
+    def _normalize_buffer_path(self, path: str) -> str:
+        """Normalize a buffer path for stable matching."""
+        return os.path.abspath(os.path.expandvars(os.path.expanduser(path)))
+
+    def _collect_open_buffers(self) -> list[dict]:
+        """Collect metadata for open file buffers."""
+        cwd = self.nvim.call("getcwd")
+        current_buf = self.nvim.api.get_current_buf()
+        current_bufnr = current_buf.number if current_buf else -1
+
+        visible_bufnrs = set()
+        try:
+            for win in self.nvim.api.list_wins():
+                try:
+                    visible_bufnrs.add(self.nvim.api.win_get_buf(win))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        open_buffers = []
+        for buf in self.nvim.buffers:
+            try:
+                if not buf.valid or not buf.name:
+                    continue
+
+                path = buf.name
+                rel_path = path
+                try:
+                    rel_path = os.path.relpath(path, cwd) if cwd else path
+                except Exception:
+                    pass
+
+                open_buffers.append(
+                    {
+                        "name": path,
+                        "path": path,
+                        "rel_path": rel_path,
+                        "bufnr": buf.number,
+                        "is_current": buf.number == current_bufnr,
+                        "is_visible": buf.number in visible_bufnrs,
+                        "modified": bool(
+                            self.nvim.api.buf_get_option(buf.number, "modified")
+                        ),
+                        "filetype": self.nvim.api.buf_get_option(buf.number, "filetype"),
+                    }
+                )
+            except Exception:
+                continue
+
+        return open_buffers
+
+    def _find_open_buffer_number(
+        self, target_path: str | None, fallback_bufnr: int | None = None
+    ) -> int | None:
+        """Find an open buffer number by file path."""
+        if not target_path:
+            return fallback_bufnr
+
+        try:
+            normalized_target = self._normalize_buffer_path(target_path)
+        except Exception:
+            normalized_target = target_path
+
+        for buf in self.nvim.buffers:
+            try:
+                if not buf.valid or not buf.name:
+                    continue
+                if self._normalize_buffer_path(buf.name) == normalized_target:
+                    return buf.number
+            except Exception:
+                continue
+
+        return fallback_bufnr
+
+    def _apply_buffer_modification(
+        self, buf_number: int, content: str, mode: str = "replace"
+    ) -> str:
+        """Apply a text modification to a Neovim buffer."""
+        if not self.nvim.api.buf_is_valid(buf_number):
+            return "Error: Buffer is no longer valid"
+
+        lines = content.split("\n")
+        was_modifiable = self.nvim.api.buf_get_option(buf_number, "modifiable")
+        self.nvim.api.buf_set_option(buf_number, "modifiable", True)
+
+        try:
+            if mode == "replace":
+                self.nvim.api.buf_set_lines(buf_number, 0, -1, False, lines)
+            elif mode == "append":
+                lc = self.nvim.api.buf_line_count(buf_number)
+                self.nvim.api.buf_set_lines(buf_number, lc, lc, False, lines)
+            elif mode == "prepend":
+                self.nvim.api.buf_set_lines(buf_number, 0, 0, False, lines)
+            else:
+                return f"Error: Invalid modify mode: {mode}"
+        finally:
+            self.nvim.api.buf_set_option(buf_number, "modifiable", was_modifiable)
+
+        self.nvim.api.buf_set_option(buf_number, "modified", True)
+        self.nvim.exec_lua(
+            """
+local bufnr = select(1, ...)
+vim.schedule(function()
+    vim.cmd("checktime")
+    vim.api.nvim_exec_autocmds("User", {
+        pattern = "AnyaDoBufferModified",
+        data = { bufnr = bufnr },
+    })
+    vim.cmd("redraw!")
+end)
+""",
+            buf_number,
+        )
+        return "ok"
 
     async def _run_do_via_daemon(
         self,
@@ -2238,50 +2342,24 @@ pcall(vim.keymap.del, "n", "<C-c>")
         confirmation_id = chunk.data.get("confirmation_id")
         content = chunk.data.get("content", "")
         mode = chunk.data.get("mode", "replace")
+        target_path = chunk.data.get("target_path") or chunk.data.get("buf_path")
 
         result_container = [None]
 
         def apply_modification():
             try:
-                if not self.nvim.api.buf_is_valid(buf_number):
-                    result_container[0] = "Error: Buffer is no longer valid"
+                target_buf_number = self._find_open_buffer_number(target_path, buf_number)
+                if target_buf_number is None:
+                    if target_path:
+                        result_container[0] = (
+                            f"Error: Open buffer not found for path: {target_path}"
+                        )
+                    else:
+                        result_container[0] = "Error: Buffer is no longer valid"
                     return
 
-                lines = content.split("\n")
-                was_modifiable = self.nvim.api.buf_get_option(buf_number, "modifiable")
-                self.nvim.api.buf_set_option(buf_number, "modifiable", True)
-
-                if mode == "replace":
-                    self.nvim.api.buf_set_lines(buf_number, 0, -1, False, lines)
-                elif mode == "append":
-                    lc = self.nvim.api.buf_line_count(buf_number)
-                    self.nvim.api.buf_set_lines(buf_number, lc, lc, False, lines)
-                elif mode == "prepend":
-                    self.nvim.api.buf_set_lines(buf_number, 0, 0, False, lines)
-
-                self.nvim.api.buf_set_option(buf_number, "modifiable", was_modifiable)
-                # Mark buffer modified so the UI shows [+]
-                self.nvim.api.buf_set_option(buf_number, "modified", True)
-                result_container[0] = "ok"
-                # Emit a user event so the Lua side can schedule a proper
-                # checktime + redraw after the buffer has been written.
-                # Using exec_lua with vim.schedule ensures this runs after
-                # the current async_call frame, which is necessary for the
-                # screen to actually refresh (redraw! inside async_call is
-                # unreliable when the buffer is not in the active terminal tab).
-                self.nvim.exec_lua(
-                    """
-local bufnr = select(1, ...)
-vim.schedule(function()
-    vim.cmd("checktime")
-    vim.api.nvim_exec_autocmds("User", {
-        pattern = "AnyaDoBufferModified",
-        data = { bufnr = bufnr },
-    })
-    vim.cmd("redraw!")
-end)
-""",
-                    buf_number,
+                result_container[0] = self._apply_buffer_modification(
+                    target_buf_number, content, mode
                 )
             except Exception as e:
                 result_container[0] = f"Error: {e}"
@@ -2398,61 +2476,31 @@ end)
                             if kind == "modify_buffer":
                                 buf_content = req.get("content", "")
                                 buf_mode = req.get("mode", "replace")
-                                # Apply the buffer modification directly using
-                                # the current do operation's buffer number.
+                                target_path = req.get("target_path") or req.get("buf_path")
                                 result_container = [None]
 
                                 def _apply_modification(
                                     _content=buf_content,
                                     _mode=buf_mode,
+                                    _target_path=target_path,
                                     _buf=self._do_buf_number,
                                 ):
                                     try:
-                                        if not self.nvim.api.buf_is_valid(_buf):
-                                            result_container[0] = (
-                                                "Error: Buffer is no longer valid"
-                                            )
+                                        target_buf_number = self._find_open_buffer_number(
+                                            _target_path, _buf
+                                        )
+                                        if target_buf_number is None:
+                                            if _target_path:
+                                                result_container[0] = (
+                                                    f"Error: Open buffer not found for path: {_target_path}"
+                                                )
+                                            else:
+                                                result_container[0] = (
+                                                    "Error: Buffer is no longer valid"
+                                                )
                                             return
-                                        _lines = _content.split("\n")
-                                        was_modifiable = self.nvim.api.buf_get_option(
-                                            _buf, "modifiable"
-                                        )
-                                        self.nvim.api.buf_set_option(
-                                            _buf, "modifiable", True
-                                        )
-                                        if _mode == "replace":
-                                            self.nvim.api.buf_set_lines(
-                                                _buf, 0, -1, False, _lines
-                                            )
-                                        elif _mode == "append":
-                                            lc = self.nvim.api.buf_line_count(_buf)
-                                            self.nvim.api.buf_set_lines(
-                                                _buf, lc, lc, False, _lines
-                                            )
-                                        elif _mode == "prepend":
-                                            self.nvim.api.buf_set_lines(
-                                                _buf, 0, 0, False, _lines
-                                            )
-                                        self.nvim.api.buf_set_option(
-                                            _buf, "modifiable", was_modifiable
-                                        )
-                                        self.nvim.api.buf_set_option(
-                                            _buf, "modified", True
-                                        )
-                                        result_container[0] = "ok"
-                                        self.nvim.exec_lua(
-                                            """
-local bufnr = select(1, ...)
-vim.schedule(function()
-    vim.cmd("checktime")
-    vim.api.nvim_exec_autocmds("User", {
-        pattern = "AnyaDoBufferModified",
-        data = { bufnr = bufnr },
-    })
-    vim.cmd("redraw!")
-end)
-""",
-                                            _buf,
+                                        result_container[0] = self._apply_buffer_modification(
+                                            target_buf_number, _content, _mode
                                         )
                                     except Exception as e:
                                         result_container[0] = f"Error: {e}"
@@ -3360,27 +3408,33 @@ Usage:
                 settings = self._get_agent_settings()
 
                 # Request system prompt from daemon
+                request_id = str(uuid.uuid4())
                 response = self._client.send_request(
-                    {
-                        "type": "get_system_prompt",
-                        "session_id": self.session_id,
-                        "request_id": str(uuid.uuid4()),
-                        "payload": {
-                            "cwd": cwd,
-                            "settings": settings.to_dict(),
-                        },
-                    }
+                    RequestType.GET_SYSTEM_PROMPT,
+                    session_id=self.session_id,
+                    request_id=request_id,
+                    payload={
+                        "cwd": cwd,
+                        "settings": settings.to_dict(),
+                    },
                 )
 
-                if response.get("error"):
+                if response is None:
                     self.nvim.async_call(
                         lambda: self.nvim.err_write(
-                            f"Anya: Failed to get system prompt: {response['error']}\n"
+                            "Anya: Failed to get system prompt: no response from daemon.\n"
                         )
                     )
                     return
 
-                prompt = response.get("payload", {}).get("system_prompt", "")
+                if response.error:
+                    error_message = f"Anya: Failed to get system prompt: {response.error}\n"
+                    self.nvim.async_call(
+                        lambda message=error_message: self.nvim.err_write(message)
+                    )
+                    return
+
+                prompt = response.payload.get("system_prompt", "")
                 if not prompt:
                     self.nvim.async_call(
                         lambda: self.nvim.err_write(
@@ -3395,11 +3449,10 @@ Usage:
                         f"require('anya.system_prompt').display({repr(prompt)})"
                     )
                 )
-            except Exception:
+            except Exception as e:
+                error_message = f"Anya: Error getting system prompt: {e}\n"
                 self.nvim.async_call(
-                    lambda: self.nvim.err_write(
-                        f"Anya: Error getting system prompt: {e}\n"
-                    )
+                    lambda message=error_message: self.nvim.err_write(message)
                 )
 
         # Run in background thread

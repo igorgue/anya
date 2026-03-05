@@ -1,23 +1,23 @@
-"""Modify the current Neovim buffer content.
+"""Modify the current Neovim buffer or another open file buffer.
 
 Uses a temp-file rendezvous pattern (similar to ui.py) that the plugin
 monitors while the subprocess is running. Works in both daemon mode
-(during :Anya do) and direct Neovim mode.
+(during normal chat execute() calls and :Anya do) and direct Neovim mode.
 
 Usage:
     from anya.libs import buffer
 
-    # Replace buffer contents
+    # Replace current buffer contents
     buffer.modify("def hello():\n    print('hello')")
 
-    # Append to buffer
-    buffer.modify("# Added line", mode="append")
+    # Replace another open file buffer by path
+    buffer.modify_file("lib/app.py", "print('updated')")
 
-    # Prepend to buffer
-    buffer.modify("# Header", mode="prepend")
+    # Inspect what file buffers are currently open
+    print(buffer.list_open_buffers())
 
-Note: This lib only works inside execute() calls when a current buffer
-context is available (e.g., during :Anya do operations).
+Note: This lib only works inside execute() calls when buffer context is
+available (for example while the agent is running from Neovim).
 """
 
 import json
@@ -31,38 +31,35 @@ def _ui_dir() -> str | None:
     return os.environ.get("ANYA_UI_DIR")
 
 
-def modify(content: str, mode: str = "replace", timeout: float = 30.0) -> str:
-    """Modify the current Neovim buffer content.
+def _normalize_path(path: str) -> str:
+    """Normalize a file path for matching against open buffer paths."""
+    return os.path.abspath(os.path.expandvars(os.path.expanduser(path)))
 
-    This writes content directly to the current buffer in Neovim.
-    Use this when the agent wants to modify the file the user is currently editing.
 
-    Args:
-        content: The content to write to the buffer.
-        mode: How to modify the buffer:
-            - "replace": Replace entire buffer content (default)
-            - "append": Append to the end of the buffer
-            - "prepend": Insert at the beginning of the buffer
-        timeout: Seconds to wait before raising TimeoutError (default 30).
+def _load_open_buffers() -> list[dict]:
+    """Load serialized open buffer metadata from execute() environment."""
+    raw = os.environ.get("ANYA_OPEN_BUFFERS", "")
+    if not raw:
+        return []
 
-    Returns:
-        Success message or error description.
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
 
-    Raises:
-        RuntimeError: If not running inside an execute call (no ANYA_UI_DIR).
-        TimeoutError: If the plugin doesn't respond within *timeout* seconds.
-        ValueError: If mode is invalid.
+    if not isinstance(data, list):
+        return []
 
-    Example:
-        from anya.libs import buffer
+    return [item for item in data if isinstance(item, dict)]
 
-        # Replace buffer with new code
-        result = buffer.modify("def new_function():\n    pass")
-        print(result)
 
-        # Append a line
-        result = buffer.modify("\n# End of file", mode="append")
-    """
+def _request_modify(
+    content: str,
+    mode: str = "replace",
+    timeout: float = 30.0,
+    target_path: str | None = None,
+) -> str:
+    """Send a modify-buffer request to the plugin and wait for the response."""
     ui_dir = _ui_dir()
     if not ui_dir:
         raise RuntimeError(
@@ -85,6 +82,9 @@ def modify(content: str, mode: str = "replace", timeout: float = 30.0) -> str:
         "content": content,
         "mode": mode,
     }
+    if target_path:
+        request_data["target_path"] = _normalize_path(target_path)
+
     with open(request_file, "w") as f:
         json.dump(request_data, f)
 
@@ -100,9 +100,59 @@ def modify(content: str, mode: str = "replace", timeout: float = 30.0) -> str:
             return response.get("result", "")
         time.sleep(0.05)
 
-    # Clean up stale request on timeout
     try:
         os.unlink(request_file)
     except OSError:
         pass
     raise TimeoutError(f"Buffer modify request timed out after {timeout}s")
+
+
+def modify(content: str, mode: str = "replace", timeout: float = 30.0) -> str:
+    """Modify the current Neovim buffer content."""
+    return _request_modify(content=content, mode=mode, timeout=timeout)
+
+
+def modify_file(
+    path: str,
+    content: str,
+    mode: str = "replace",
+    timeout: float = 30.0,
+) -> str:
+    """Modify an already-open file buffer by path.
+
+    Args:
+        path: File path for an open Neovim buffer. Relative paths are resolved
+            against the execute() process cwd before matching.
+        content: Content to write to the buffer.
+        mode: "replace", "append", or "prepend".
+        timeout: Seconds to wait before raising TimeoutError.
+
+    Returns:
+        Success message or error description.
+    """
+    return _request_modify(
+        content=content,
+        mode=mode,
+        timeout=timeout,
+        target_path=path,
+    )
+
+
+def list_open_buffers() -> list[dict]:
+    """Return metadata for file buffers currently open in Neovim."""
+    return _load_open_buffers()
+
+
+def is_open(path: str) -> bool:
+    """Return True if the given file path matches an open Neovim buffer."""
+    target = _normalize_path(path)
+    for buf in _load_open_buffers():
+        candidate = buf.get("path") or buf.get("name")
+        if not candidate:
+            continue
+        try:
+            if _normalize_path(candidate) == target:
+                return True
+        except Exception:
+            continue
+    return False

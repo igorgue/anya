@@ -294,7 +294,7 @@ require("blink.cmp").setup({
           return vim.fn.getcmdtype() == ":"
         end,
       },
-      ghost_text = { enabled = true },
+      ghost_text = { enabled = false },
     },
   },
 })
@@ -339,4 +339,13 @@ vim.cmd("colorscheme danger")
 
 -- keymaps
 vim.keymap.set("n", "<leader>q", "<cmd>qa!<CR>", { desc = "Quit" })
-vim.keymap.set("i", "<C-q>", "<Esc><cmd>qa!<CR>", { desc = "Quit" })
+vim.keymap.set({"n", "i"}, "<C-q>", "<Esc><cmd>qa!<CR>", { desc = "Quit" })
+
+-- movement
+vim.keymap.set("n", "j", "gj", { desc = "Move down" })
+vim.keymap.set("n", "k", "gk", { desc = "Move up" })
+
+vim.keymap.set("n", "<C-j>", "<C-w>j", { desc = "Move to window below" })
+vim.keymap.set("n", "<C-k>", "<C-w>k", { desc = "Move to window above" })
+vim.keymap.set("n", "<C-h>", "<C-w>h", { desc = "Move to window left" })
+vim.keymap.set("n", "<C-l>", "<C-w>l", { desc = "Move to window right" })

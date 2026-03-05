@@ -54,8 +54,11 @@ end
 --- @param path string The full path
 --- @return string Shortened path
 local function shorten_path(path)
-  if not path or path == "" then
+  if not path or path == vim.NIL or path == "" then
     return ""
+  end
+  if type(path) ~= "string" then
+    path = tostring(path)
   end
   -- Replace home directory with ~
   local home = vim.loop.os_getenv("HOME") or ""
@@ -63,6 +66,23 @@ local function shorten_path(path)
     path = "~" .. path:sub(#home + 1)
   end
   return path
+end
+
+--- Normalize msgpack nil/userdata values into Lua strings
+--- @param value any
+--- @param default string|nil
+--- @return string|nil
+local function as_string(value, default)
+  if value == nil or value == vim.NIL then
+    return default
+  end
+  if type(value) ~= "string" then
+    value = tostring(value)
+  end
+  if value == "" then
+    return default
+  end
+  return value
 end
 
 --- Get the chat buffer by looking for a buffer with filetype "anya-chat"
@@ -118,7 +138,8 @@ local function load_conversation(conversation_id, new_cwd, title)
   vim.api.nvim_buf_set_var(chat_buf, "anya_conversation_id", conversation_id)
 
   -- Update window title if the conversation has a title
-  if title and title ~= "" then
+  title = as_string(title)
+  if title then
     vim.o.titlestring = "Anya: " .. title
   end
 
@@ -193,16 +214,16 @@ function M.open()
   -- Build items for the picker
   local items = {}
   for i, conv in ipairs(conversations) do
-    local title = conv.title or "Untitled conversation"
-    local date = format_timestamp(conv.updated_at)
-    local conv_cwd = conv.cwd or ""
+    local title = as_string(conv.title, "Untitled conversation")
+    local date = format_timestamp(as_string(conv.updated_at, ""))
+    local conv_cwd = as_string(conv.cwd, "")
     local cwd_matches = conv_cwd == "" or conv_cwd == current_cwd
 
     table.insert(items, {
       idx = i,
       text = title,
       id = conv.id,
-      title = conv.title,
+      title = title,
       date = date,
       updated_at = conv.updated_at,
       created_at = conv.created_at,

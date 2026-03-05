@@ -169,6 +169,47 @@ def _write_job_meta(cwd: str, process_id: str, data: dict) -> None:
         raise
 
 
+def _normalize_file_path(path: str) -> str:
+    """Normalize a file path for reliable open-buffer matching."""
+    return os.path.abspath(os.path.expandvars(os.path.expanduser(path)))
+
+
+def _resolve_open_buffer_path(
+    target_path: str | None, plugin_context: NvimPluginContext
+) -> str | None:
+    """Resolve a requested path to an actual open buffer path from context."""
+    requested = target_path or plugin_context.current_buffer
+    if not requested:
+        return None
+
+    try:
+        normalized_requested = _normalize_file_path(requested)
+    except Exception:
+        normalized_requested = requested
+
+    current_buffer = plugin_context.current_buffer
+    if current_buffer:
+        try:
+            if _normalize_file_path(current_buffer) == normalized_requested:
+                return current_buffer
+        except Exception:
+            if current_buffer == requested:
+                return current_buffer
+
+    for buf in plugin_context.open_buffers:
+        candidate = buf.get("path") or buf.get("name")
+        if not candidate:
+            continue
+        try:
+            if _normalize_file_path(candidate) == normalized_requested:
+                return candidate
+        except Exception:
+            if candidate == requested:
+                return candidate
+
+    return None
+
+
 async def _monitor_background_process(
     process_id: str,
     process: asyncio.subprocess.Process,
@@ -405,10 +446,14 @@ async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
                 # Handle buffer modification from anya.libs.buffer
                 buf_content = req.get("content", "")
                 buf_mode = req.get("mode", "replace")
-                buf_path = plugin_context.current_buffer
+                target_path = req.get("target_path") or req.get("buf_path")
+                buf_path = _resolve_open_buffer_path(target_path, plugin_context)
 
                 if not buf_path:
-                    result = "Error: No current buffer available"
+                    if target_path:
+                        result = f"Error: Open buffer not found for path: {target_path}"
+                    else:
+                        result = "Error: No current buffer available"
                 elif plugin_context.modify_buffer_callback:
                     # Daemon mode: use the callback to request modification
                     result = await plugin_context.modify_buffer_callback(
@@ -580,8 +625,14 @@ async def execute(
     ui_dir = os.path.join(cwd, ".anya", "ui", str(uuid.uuid4())[:8])
     os.makedirs(ui_dir, exist_ok=True)
 
+    extra_env = {
+        "ANYA_UI_DIR": ui_dir,
+        "ANYA_CURRENT_BUFFER": plugin_context.current_buffer or "",
+        "ANYA_OPEN_BUFFERS": json.dumps(plugin_context.open_buffers),
+    }
+
     command, script_path = _build_python_command(
-        code, cwd, use_venv, extra_env={"ANYA_UI_DIR": ui_dir}
+        code, cwd, use_venv, extra_env=extra_env
     )
 
     try:
