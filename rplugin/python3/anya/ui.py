@@ -94,37 +94,48 @@ def append_to_prompt_buffer(nvim, bufnr, text):
 
     lines = text.split("\n")
     line_count = nvim.api.buf_line_count(bufnr)
+    target_line = 1
+    target_col = 0
 
     # Check if buffer is effectively empty (one empty line)
     first_line = nvim.api.buf_get_lines(bufnr, 0, 1, False)[0]
     if line_count == 1 and first_line == "":
         nvim.api.buf_set_lines(bufnr, 0, 1, False, lines)
+        target_line = len(lines)
+        target_col = len(lines[-1])
     else:
         # Check if we need a newline content separator
         last_line_content = nvim.api.buf_get_lines(
             bufnr, line_count - 1, line_count, False
         )[0]
         if last_line_content != "":
-            # Append starting on the next line
-            # We use buf_set_lines to append
+            # Append starting on the next line.
             nvim.api.buf_set_lines(bufnr, line_count, line_count, False, [""] + lines)
+            target_line = line_count + 1 + len(lines)
+            target_col = len(lines[-1])
         else:
-            # Overwrite the empty last line? No, just append?
-            # If last line is empty, we can start writing there?
-            # But buf_set_lines at line_count inserts AFTER.
-            # We want to replace the last empty line or insert at it.
-            # Let's just append.
-            nvim.api.buf_set_lines(bufnr, line_count, line_count, False, lines)
+            # Reuse the existing empty trailing line.
+            nvim.api.buf_set_lines(bufnr, line_count - 1, line_count, False, lines)
+            target_line = line_count - 1 + len(lines)
+            target_col = len(lines[-1])
 
-    # Move cursor to end of new content
+    # Move cursor to the end of the inserted content after pending window/autocmd work.
     try:
-        new_line_count = nvim.api.buf_line_count(bufnr)
-        for win in nvim.api.list_wins():
-            if nvim.api.win_get_buf(win) == bufnr:
-                nvim.api.set_current_win(win)
-                # Use a large column value to forcibly set cursor to the end of the line
-                # row is 1-indexed.
-                nvim.api.win_set_cursor(win, [new_line_count, 100000])
+        lua_code = """
+        local bufnr, target_line, target_col = ...
+        vim.schedule(function()
+            if not vim.api.nvim_buf_is_valid(bufnr) then
+                return
+            end
+            for _, win in ipairs(vim.api.nvim_list_wins()) do
+                if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == bufnr then
+                    pcall(vim.api.nvim_set_current_win, win)
+                    pcall(vim.api.nvim_win_set_cursor, win, { target_line, target_col })
+                end
+            end
+        end)
+        """
+        nvim.exec_lua(lua_code, bufnr, target_line, target_col)
     except Exception:
         pass
 
