@@ -304,11 +304,15 @@ class AnyaPlugin:
             return
 
         now = datetime.now(timezone.utc)
-        timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+        timestamp = (
+            now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+        )
         summary_msg_id = ids.new(conversation=conversation_id)
 
         note = "_[Conversation compacted — previous context summarized below]_\n\n"
-        new_content = markers.make_message_marker(summary_msg_id) + "\n" + note + summary
+        new_content = (
+            markers.make_message_marker(summary_msg_id) + "\n" + note + summary
+        )
 
         try:
             lines = new_content.split("\n")
@@ -328,7 +332,6 @@ class AnyaPlugin:
             )
         except Exception as e:
             self.nvim.err_write(f"Anya: Error updating DB after compaction: {e}\n")
-
 
     def _handle_mcp_init_complete(self, data: dict):
         """Handle MCP initialization complete event."""
@@ -663,7 +666,9 @@ class AnyaPlugin:
 
             lines = ["Anya Copilot Status:"]
             lines.append(f"  Logged in: {'yes' if status['logged_in'] else 'no'}")
-            lines.append(f"  GitHub token: {'present' if status['has_github_token'] else 'missing'}")
+            lines.append(
+                f"  GitHub token: {'present' if status['has_github_token'] else 'missing'}"
+            )
 
             if status["copilot_token_expires_at"]:
                 expires_at = status["copilot_token_expires_at"]
@@ -671,7 +676,9 @@ class AnyaPlugin:
                     "%Y-%m-%d %H:%M:%S UTC", time.gmtime(expires_at)
                 )
                 valid = status["copilot_token_valid"]
-                lines.append(f"  Copilot token: {'valid' if valid else 'expired'} (expires: {expires_str})")
+                lines.append(
+                    f"  Copilot token: {'valid' if valid else 'expired'} (expires: {expires_str})"
+                )
             else:
                 lines.append("  Copilot token: not cached")
 
@@ -683,21 +690,22 @@ class AnyaPlugin:
 
     def _copilot_models(self):
         """List available Copilot models."""
+
         async def fetch_models():
             from .copilot_auth import get_auth
 
             auth = get_auth()
-            
+
             if not auth.is_logged_in():
                 self.nvim.async_call(
                     self.nvim.err_write,
-                    "Anya Copilot: Not logged in. Run :Anya copilot login first.\n"
+                    "Anya Copilot: Not logged in. Run :Anya copilot login first.\n",
                 )
                 return
 
             try:
                 models = await auth.get_models()
-                
+
                 lines = ["Anya Copilot Available Models:"]
                 lines.append("-" * 50)
                 for model in models:
@@ -710,10 +718,8 @@ class AnyaPlugin:
                 lines.append(f"Total: {len(models)} models")
                 lines.append("")
                 lines.append("Set model with: export ANYA_MODEL=<model_id>")
-                
-                self.nvim.async_call(
-                    self.nvim.out_write, "\n".join(lines) + "\n"
-                )
+
+                self.nvim.async_call(self.nvim.out_write, "\n".join(lines) + "\n")
             except Exception as e:
                 self.nvim.async_call(
                     self.nvim.err_write, f"Anya Copilot: Failed to fetch models: {e}\n"
@@ -722,7 +728,6 @@ class AnyaPlugin:
         # Run in background
         loop = self._ensure_loop()
         asyncio.run_coroutine_threadsafe(fetch_models(), loop)
-
 
     def send(self, text, conversation_id=None, is_new_conversation=False):
         """Send a prompt to the code agent and stream the response to the chat buffer."""
@@ -1590,7 +1595,10 @@ end
                         or "context window" in error.lower()
                         or "maximum context length" in error.lower()
                         or "max_tokens_exceeded" in error
-                        or ("400" in error and ("token" in error.lower() or "context" in error.lower()))
+                        or (
+                            "400" in error
+                            and ("token" in error.lower() or "context" in error.lower())
+                        )
                     )
                     if is_context_overflow:
                         self.nvim.async_call(
@@ -2142,7 +2150,9 @@ pcall(vim.keymap.del, "n", "<C-c>")
                         "modified": bool(
                             self.nvim.api.buf_get_option(buf.number, "modified")
                         ),
-                        "filetype": self.nvim.api.buf_get_option(buf.number, "filetype"),
+                        "filetype": self.nvim.api.buf_get_option(
+                            buf.number, "filetype"
+                        ),
                     }
                 )
             except Exception:
@@ -2348,7 +2358,9 @@ end)
 
         def apply_modification():
             try:
-                target_buf_number = self._find_open_buffer_number(target_path, buf_number)
+                target_buf_number = self._find_open_buffer_number(
+                    target_path, buf_number
+                )
                 if target_buf_number is None:
                     if target_path:
                         result_container[0] = (
@@ -2476,7 +2488,9 @@ end)
                             if kind == "modify_buffer":
                                 buf_content = req.get("content", "")
                                 buf_mode = req.get("mode", "replace")
-                                target_path = req.get("target_path") or req.get("buf_path")
+                                target_path = req.get("target_path") or req.get(
+                                    "buf_path"
+                                )
                                 result_container = [None]
 
                                 def _apply_modification(
@@ -2486,8 +2500,10 @@ end)
                                     _buf=self._do_buf_number,
                                 ):
                                     try:
-                                        target_buf_number = self._find_open_buffer_number(
-                                            _target_path, _buf
+                                        target_buf_number = (
+                                            self._find_open_buffer_number(
+                                                _target_path, _buf
+                                            )
                                         )
                                         if target_buf_number is None:
                                             if _target_path:
@@ -2499,8 +2515,10 @@ end)
                                                     "Error: Buffer is no longer valid"
                                                 )
                                             return
-                                        result_container[0] = self._apply_buffer_modification(
-                                            target_buf_number, _content, _mode
+                                        result_container[0] = (
+                                            self._apply_buffer_modification(
+                                                target_buf_number, _content, _mode
+                                            )
                                         )
                                     except Exception as e:
                                         result_container[0] = f"Error: {e}"
@@ -2895,7 +2913,6 @@ For more help, see :h anya"""
         loop = self._ensure_loop()
         asyncio.run_coroutine_threadsafe(_send(), loop)
 
-
     def _compact_command(self):
         """Handle /compact command — compact the current conversation."""
         chat_buf = ui.get_chat_buffer(self.nvim)
@@ -2904,7 +2921,9 @@ For more help, see :h anya"""
 
         conversation_id = None
         try:
-            conversation_id = self.nvim.api.buf_get_var(chat_buf, "anya_conversation_id")
+            conversation_id = self.nvim.api.buf_get_var(
+                chat_buf, "anya_conversation_id"
+            )
         except Exception:
             pass
 
@@ -2912,27 +2931,12 @@ For more help, see :h anya"""
             self.nvim.err_write("Anya: No active conversation to compact.\n")
             return
 
-        # Build history from buffer content
         try:
-            import concurrent.futures
-            buf_future: concurrent.futures.Future = concurrent.futures.Future()
-
-            def _get_content():
-                try:
-                    lines = self.nvim.api.buf_get_lines(chat_buf, 0, -1, False)
-                    buf_future.set_result("\n".join(lines))
-                except Exception as exc:
-                    buf_future.set_exception(exc)
-
-            self.nvim.async_call(_get_content)
-
-            # Wait briefly for async_call to complete (we're on main thread here)
-            import time as _time
-            _t0 = _time.monotonic()
-            while not buf_future.done() and _time.monotonic() - _t0 < 2.0:
-                _time.sleep(0.01)
-
-            buf_content = buf_future.result() if buf_future.done() else ""
+            # This callback already runs on Neovim's main thread via async_call,
+            # so reading the buffer synchronously avoids deadlocking on a nested
+            # async_call that can never run until we return.
+            ui.flush_queue(self.nvim)
+            buf_content = buffers.get_buffer_content(self.nvim, chat_buf.number)
             records = history.parse_buffer_content(buf_content)
             llm_history = history.build_llm_history(records)
         except Exception as e:
@@ -3428,7 +3432,9 @@ Usage:
                     return
 
                 if response.error:
-                    error_message = f"Anya: Failed to get system prompt: {response.error}\n"
+                    error_message = (
+                        f"Anya: Failed to get system prompt: {response.error}\n"
+                    )
                     self.nvim.async_call(
                         lambda message=error_message: self.nvim.err_write(message)
                     )

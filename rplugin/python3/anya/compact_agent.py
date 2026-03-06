@@ -105,7 +105,7 @@ def _build_compaction_prompt(history: list[dict]) -> str:
         "- Any important context, constraints, or user preferences mentioned",
         "- Key errors encountered and their resolutions",
         "",
-        "Write in the third person (e.g. \"The user asked..., The assistant wrote...\").",
+        'Write in the third person (e.g. "The user asked..., The assistant wrote...").',
         "Be as detailed as needed — this summary will replace the full history.",
         "Do NOT truncate or omit technical details. Include exact file paths, function names,",
         "and code snippets where they are important for continuing the work.",

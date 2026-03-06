@@ -522,7 +522,6 @@ def get_tool_outputs_for_message(message_id: str) -> list[dict[str, Any]]:
         conn.close()
 
 
-
 def replace_messages_with_summary(
     conversation_id: str,
     summary_msg_id: str,
@@ -560,6 +559,7 @@ def replace_messages_with_summary(
         return False
     finally:
         conn.close()
+
 
 def rebuild_buffer_content(
     conversation: dict[str, Any], messages: list[dict[str, Any]]

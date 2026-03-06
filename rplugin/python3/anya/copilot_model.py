@@ -67,5 +67,7 @@ async def get_copilot_model_provider(settings: "AgentSettings | None" = None):
                 openai_client=client,
             )
 
-    logger.info(f"Created Copilot model provider for model={model_name}, base_url={api_base}")
+    logger.info(
+        f"Created Copilot model provider for model={model_name}, base_url={api_base}"
+    )
     return CopilotModelProvider()

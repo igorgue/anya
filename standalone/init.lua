@@ -176,8 +176,8 @@ require("fidget").setup({
     window = {
       x_padding = 0,
       align = "top",
-    }
-  }
+    },
+  },
 })
 require("render-markdown").setup({
   file_types = { "anya-chat", "markdown" },
@@ -339,7 +339,7 @@ vim.cmd("colorscheme danger")
 
 -- keymaps
 vim.keymap.set("n", "<leader>q", "<cmd>qa!<CR>", { desc = "Quit" })
-vim.keymap.set({"n", "i"}, "<C-q>", "<Esc><cmd>qa!<CR>", { desc = "Quit" })
+vim.keymap.set({ "n", "i" }, "<C-q>", "<Esc><cmd>qa!<CR>", { desc = "Quit" })
 
 -- movement
 vim.keymap.set("n", "j", "gj", { desc = "Move down" })

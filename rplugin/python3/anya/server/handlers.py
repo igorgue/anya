@@ -103,8 +103,6 @@ def _detect_filetype(tool_name: str, content: str) -> str | None:
     return "text"
 
 
-
-
 def _is_retryable_error(exception: Exception) -> bool:
     """Check if an exception represents a retryable API error."""
     # Check for dict-style errors (like the one in the issue)
@@ -113,17 +111,18 @@ def _is_retryable_error(exception: Exception) -> bool:
         code = str(error.get("code", ""))
         # Retry on 5xx errors
         return code.startswith("5")
-    
+
     # Check for string representation of dict errors
     error_str = str(exception)
     if "'code': '5" in error_str or '"code": "5' in error_str:
         return True
     if "'code': 5" in error_str or '"code": 5' in error_str:
         return True
-    
+
     # Check for OpenAI API errors
     try:
         from openai import APIError, APIConnectionError, APITimeoutError, RateLimitError
+
         if isinstance(exception, (APIConnectionError, APITimeoutError, RateLimitError)):
             return True
         # Retry on 5xx API errors
@@ -131,13 +130,16 @@ def _is_retryable_error(exception: Exception) -> bool:
             return exception.status_code >= 500
     except ImportError:
         pass
-    
+
     # Check for common network/timeout errors
     import asyncio
     import httpx
-    if isinstance(exception, (asyncio.TimeoutError, httpx.TimeoutException, httpx.NetworkError)):
+
+    if isinstance(
+        exception, (asyncio.TimeoutError, httpx.TimeoutException, httpx.NetworkError)
+    ):
         return True
-    
+
     return False
 
 
@@ -342,7 +344,9 @@ class RequestHandler:
         try:
             conv = db.get_conversation(conversation_id)
             if conv and conv.get("title"):
-                self.logger.info(f"Conversation {conversation_id} already has title, skipping generation")
+                self.logger.info(
+                    f"Conversation {conversation_id} already has title, skipping generation"
+                )
                 # Still emit event to close the fidget notification
                 result_chunk = StreamChunk(
                     request_id="system",
@@ -365,6 +369,7 @@ class RequestHandler:
 
         try:
             from ..title_agent import generate_title
+
             settings = AgentSettings.from_dict(settings_dict) if settings_dict else None
             title = await generate_title(user_message, assistant_message, settings)
         except Exception as e:
@@ -418,6 +423,7 @@ class RequestHandler:
         summary = None
         try:
             from ..compact_agent import compact_conversation
+
             settings = AgentSettings.from_dict(settings_dict) if settings_dict else None
             summary = await compact_conversation(history, settings)
         except Exception as e:
@@ -438,7 +444,6 @@ class RequestHandler:
             await self.pub_socket.send(result_chunk.serialize())
         except Exception as e:
             self.logger.warning(f"Failed to emit CONVERSATION_COMPACTED event: {e}")
-
 
     async def _handle_cancel_request(self, request: Request) -> Response:
         """Handle a CANCEL_REQUEST request."""
@@ -1056,21 +1061,31 @@ class RequestHandler:
         try:
             # Build the system prompt the same way as when creating an agent
             from ..agents.utils import get_instructions
-            from ..agents.dynamic_instructions import generate_dynamic_code_instructions, update_agent_instructions
+            from ..agents.dynamic_instructions import (
+                generate_dynamic_code_instructions,
+                update_agent_instructions,
+            )
             from ..system_prompt import apply_system_prompt
             from ..libs import get_libs_prompt
 
             base_instructions = get_instructions("code.md")
             dynamic_instructions = await generate_dynamic_code_instructions([])
             libs_instructions = get_libs_prompt()
-            instructions = update_agent_instructions(base_instructions, dynamic_instructions)
+            instructions = update_agent_instructions(
+                base_instructions, dynamic_instructions
+            )
             instructions = update_agent_instructions(instructions, libs_instructions)
             instructions = apply_system_prompt(instructions, nvim=None, cwd=cwd)
 
-            return make_success_response(request.request_id, {
-                "system_prompt": instructions,
-                "model": settings.model if settings else os.environ.get("ANYA_MODEL", "gpt-4.1"),
-            })
+            return make_success_response(
+                request.request_id,
+                {
+                    "system_prompt": instructions,
+                    "model": settings.model
+                    if settings
+                    else os.environ.get("ANYA_MODEL", "gpt-4.1"),
+                },
+            )
         except Exception as e:
             self.logger.exception(f"Error getting system prompt: {e}")
             return make_error_response(request.request_id, str(e))

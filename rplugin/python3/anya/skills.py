@@ -64,7 +64,7 @@ def _parse_frontmatter(content: str) -> tuple[dict[str, str], str]:
         return {}, content
 
     frontmatter_text = rest[:end].strip()
-    body = rest[end + 4:].strip()  # skip \n---
+    body = rest[end + 4 :].strip()  # skip \n---
 
     result: dict[str, str] = {}
     current_key: str | None = None
@@ -82,7 +82,11 @@ def _parse_frontmatter(content: str) -> tuple[dict[str, str], str]:
         # An indented line whose first token contains no colon is a continuation
         # of the previous block-scalar value.
         first_token = stripped.split()[0] if stripped.split() else ""
-        if current_key is not None and line.startswith((" ", "\t")) and ":" not in first_token:
+        if (
+            current_key is not None
+            and line.startswith((" ", "\t"))
+            and ":" not in first_token
+        ):
             current_value_lines.append(stripped)
             continue
 

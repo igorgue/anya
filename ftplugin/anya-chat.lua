@@ -267,7 +267,6 @@ vim.keymap.set("n", "<localleader>p", function()
   require("anya.system_prompt").show()
 end, { buffer = true, desc = "Open system prompt" })
 
-
 -- <C-k> in chat does nothing special (stay in chat, no window above)
 -- But we map it to prevent accidental navigation out of Anya
 vim.keymap.set("n", "<C-k>", function()

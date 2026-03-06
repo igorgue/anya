@@ -175,7 +175,9 @@ def extract_request_usages(usage: Any, provider: str | None = None) -> list[Toke
     return parsed
 
 
-def choose_context_usage(usage: Any, provider: str | None = None) -> tuple[TokenUsage, TokenUsage, int]:
+def choose_context_usage(
+    usage: Any, provider: str | None = None
+) -> tuple[TokenUsage, TokenUsage, int]:
     """Return (effective, aggregate, request_count) token usage.
 
     - effective: best single-request context usage (max context_tokens)

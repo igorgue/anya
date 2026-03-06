@@ -238,9 +238,7 @@ class CopilotAuth:
         # Need to exchange for new token
         github_token = await self.get_github_token()
         if not github_token:
-            raise Exception(
-                "Not logged in to Copilot. Run :Anya copilot login first."
-            )
+            raise Exception("Not logged in to Copilot. Run :Anya copilot login first.")
 
         self._cached_token = await self.exchange_token(github_token)
         return self._cached_token.token
@@ -299,7 +297,6 @@ class CopilotAuth:
 
         return status
 
-
     async def get_models(self) -> list[dict[str, Any]]:
         """Get available Copilot models.
 
@@ -330,11 +327,13 @@ class CopilotAuth:
             models = []
             for model in data.get("data", []):
                 model_id = model.get("id", "")
-                models.append({
-                    "id": model_id,
-                    "name": model.get("name", model_id),
-                    "owned_by": model.get("owned_by", "unknown"),
-                })
+                models.append(
+                    {
+                        "id": model_id,
+                        "name": model.get("name", model_id),
+                        "owned_by": model.get("owned_by", "unknown"),
+                    }
+                )
 
             # Sort by name
             models.sort(key=lambda m: m["id"])

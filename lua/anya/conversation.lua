@@ -160,10 +160,7 @@ function M.send_message()
     vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, { "" })
     table.insert(M._pending_queue, prompt_text)
     local n = #M._pending_queue
-    vim.notify(
-      "Anya: Message queued" .. (n > 1 and (" (" .. n .. " pending)") or "") .. ".",
-      vim.log.levels.INFO
-    )
+    vim.notify("Anya: Message queued" .. (n > 1 and (" (" .. n .. " pending)") or "") .. ".", vim.log.levels.INFO)
     return true
   end
 

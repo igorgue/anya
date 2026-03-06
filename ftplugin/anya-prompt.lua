@@ -294,7 +294,6 @@ vim.keymap.set({ "n", "i" }, "<C-Right>", function()
   resize_pane(-2)
 end, { buffer = true, nowait = true, desc = "Grow side pane" })
 
-
 -- Open system prompt
 vim.keymap.set("n", "<localleader>p", function()
   require("anya.system_prompt").show()
