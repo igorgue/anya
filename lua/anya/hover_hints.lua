@@ -3,7 +3,6 @@
 
 local M = {}
 local markers = require("anya.markers")
-local ui_utils = require("anya.ui_utils")
 
 -- Namespace for hover hints
 M.ns_id = vim.api.nvim_create_namespace("anya_hover_hints")
@@ -164,18 +163,22 @@ local function schedule_hover_hint(bufnr)
 
   local timer = vim.uv.new_timer()
   M._timers[bufnr] = timer
-  timer:start(150, 0, vim.schedule_wrap(function()
-    stop_timer(bufnr)
-    if not vim.api.nvim_buf_is_valid(bufnr) then
-      return
-    end
-    local current_win = vim.api.nvim_get_current_win()
-    if vim.api.nvim_win_get_buf(current_win) ~= bufnr then
-      return
-    end
-    local cursor = vim.api.nvim_win_get_cursor(current_win)
-    show_hover_hint(bufnr, cursor[1])
-  end))
+  timer:start(
+    150,
+    0,
+    vim.schedule_wrap(function()
+      stop_timer(bufnr)
+      if not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+      end
+      local current_win = vim.api.nvim_get_current_win()
+      if vim.api.nvim_win_get_buf(current_win) ~= bufnr then
+        return
+      end
+      local cursor = vim.api.nvim_win_get_cursor(current_win)
+      show_hover_hint(bufnr, cursor[1])
+    end)
+  )
 end
 
 function M.clear_hover_hint()
