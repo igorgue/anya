@@ -615,36 +615,6 @@ function M._process_markers(bufnr, messages)
         table.insert(message_markers, { id = msg_info.id, line = i })
         M._hide_line(bufnr, i)
       end
-    elseif markers.is_tool_output_marker(line) then
-      -- Tool output reference marker - hide it and add virtual text
-      local info = markers.parse_tool_output_marker(line)
-      if info then
-        local _line_count = info.line_count or 0
-        local is_header_line = line:match("^%*%*") or line:match("^%[%[.-%]%]")
-        local target_line_idx = i - 1 -- 0-indexed for extmark
-
-        if is_header_line then
-          -- Header line with inline markers: **header**<!-- at: ... --><!-- ato: ... -->
-          -- Find where the markers start (first <!-- ) and conceal from there
-          local marker_start = line:find("<!%-%-", 1, false)
-          if marker_start then
-            -- Conceal all markers (from <!-- to end of line)
-            vim.api.nvim_buf_set_extmark(bufnr, ui_utils.ns_id, target_line_idx, marker_start - 1, {
-              end_col = #line,
-              conceal = "",
-            })
-          end
-          if line:find(markers.tool_success, 1, true) then
-            M._apply_header_highlight(bufnr, i, "AnyaToolSuccess", nil)
-          elseif line:find(markers.tool_failure, 1, true) then
-            M._apply_header_highlight(bufnr, i, "AnyaToolFailure", nil)
-          end
-          -- No virtual text - just conceal the markers
-        else
-          -- Hide the entire ato: marker line
-          M._hide_line(bufnr, i)
-        end
-      end
     elseif markers.is_marker_line(line) then
       -- Hide the marker line
       M._hide_line(bufnr, i)

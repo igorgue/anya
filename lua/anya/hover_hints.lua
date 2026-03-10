@@ -11,16 +11,12 @@ M.ns_id = vim.api.nvim_create_namespace("anya_hover_hints")
 M._current_hover = nil -- { bufnr, extmark_id }
 M._timers = M._timers or {} -- { [bufnr] = luv_timer }
 
--- Check if a line is a tool call header (has [[title]] or tool output marker)
+-- Check if a line is a tool call header (has [[title]])
 -- @param line string The line to check
--- @return boolean, string|nil True if tool line, and optional type ("code" or "tool_output")
+-- @return boolean, string|nil True if tool line, and optional type ("code")
 local function is_tool_header_line(line)
   if line:match("%[%[.-%]%]") then
     return true, "code"
-  end
-
-  if markers.is_tool_output_marker(line) then
-    return true, "tool_output"
   end
 
   return false, nil

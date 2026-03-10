@@ -38,13 +38,13 @@ local tool_output = require("anya.tool_output")
 local hover_hints = require("anya.hover_hints")
 hover_hints.setup(vim.api.nvim_get_current_buf())
 
--- Open code, tool output on <CR>, else toggle fold
+-- Open code on <CR>, else toggle fold
 vim.keymap.set("n", "<CR>", function()
-  if not tool_output.open_code_at_cursor() and not tool_output.open_at_cursor() then
+  if not tool_output.open_code_at_cursor() then
     -- Try to toggle fold, ignore error if no fold exists
     pcall(vim.cmd, "normal! za")
   end
-end, { buffer = true, desc = "Open code, tool output, or toggle fold" })
+end, { buffer = true, desc = "Open code or toggle fold" })
 
 -- Open tool output on `go`
 vim.keymap.set("n", "go", function()
@@ -60,16 +60,14 @@ vim.keymap.set("n", "<RightRelease>", function()
   end)
 end, { buffer = true, desc = "Open tool output on right-click" })
 
--- Single-click to open code or tool output (mouse support)
+-- Single-click to open code (mouse support)
 -- Capture mouse position immediately (before vim.schedule) for accurate column detection.
 vim.keymap.set("n", "<LeftRelease>", function()
   local mpos = vim.fn.getmousepos()
   vim.schedule(function()
-    if not tool_output.open_code_at_cursor(mpos.line, mpos.column) then
-      tool_output.open_at_cursor() -- Returns false if not on marker line (no-op)
-    end
+    tool_output.open_code_at_cursor(mpos.line, mpos.column)
   end)
-end, { buffer = true, desc = "Open code or tool output on click" })
+end, { buffer = true, desc = "Open code on click" })
 
 -- Section navigation: jump between # headers (# User, # Anya, etc.)
 local function jump_to_header(direction)
