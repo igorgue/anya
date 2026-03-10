@@ -447,6 +447,7 @@ async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
                 buf_content = req.get("content", "")
                 buf_mode = req.get("mode", "replace")
                 target_path = req.get("target_path") or req.get("buf_path")
+                set_modified = req.get("set_modified", True)
                 buf_path = _resolve_open_buffer_path(target_path, plugin_context)
 
                 if not buf_path:
@@ -457,12 +458,16 @@ async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
                 elif plugin_context.modify_buffer_callback:
                     # Daemon mode: use the callback to request modification
                     result = await plugin_context.modify_buffer_callback(
-                        buf_path, buf_content, buf_mode
+                        buf_path, buf_content, buf_mode, set_modified
                     )
                 elif plugin_context.has_nvim and plugin_context.nvim:
                     # Direct nvim mode: modify buffer directly
                     result = await _nvim_modify_buffer(
-                        plugin_context.nvim, buf_path, buf_content, buf_mode
+                        plugin_context.nvim,
+                        buf_path,
+                        buf_content,
+                        buf_mode,
+                        set_modified,
                     )
                 else:
                     result = "Error: No method available to modify buffer"
@@ -476,7 +481,13 @@ async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
             pass
 
 
-async def _nvim_modify_buffer(nvim, buf_path: str, content: str, mode: str) -> str:
+async def _nvim_modify_buffer(
+    nvim,
+    buf_path: str,
+    content: str,
+    mode: str,
+    set_modified: bool = True,
+) -> str:
     """Modify a Neovim buffer directly (direct nvim mode)."""
     import os
 
@@ -508,7 +519,7 @@ async def _nvim_modify_buffer(nvim, buf_path: str, content: str, mode: str) -> s
                 nvim.api.buf_set_lines(target_buf.number, 0, 0, False, lines)
 
             nvim.api.buf_set_option(target_buf.number, "modifiable", was_modifiable)
-            nvim.api.buf_set_option(target_buf.number, "modified", True)
+            nvim.api.buf_set_option(target_buf.number, "modified", set_modified)
             result_container[0] = (
                 f"Successfully modified buffer: {os.path.basename(buf_path)}"
             )

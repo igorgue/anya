@@ -31,8 +31,11 @@ class NvimPluginContext:
         None
     )
     # Modify buffer callback for modifying Neovim buffers in daemon mode
-    # Takes (path: str, content: str, mode: str) and returns success message or error
-    modify_buffer_callback: Callable[[str, str, str], Awaitable[str]] | None = None
+    # Takes (path: str, content: str, mode: str, set_modified: bool) and returns
+    # success message or error
+    modify_buffer_callback: Callable[[str, str, str, bool], Awaitable[str]] | None = (
+        None
+    )
 
     @property
     def has_nvim(self) -> bool:

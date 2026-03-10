@@ -2184,7 +2184,11 @@ pcall(vim.keymap.del, "n", "<C-c>")
         return fallback_bufnr
 
     def _apply_buffer_modification(
-        self, buf_number: int, content: str, mode: str = "replace"
+        self,
+        buf_number: int,
+        content: str,
+        mode: str = "replace",
+        set_modified: bool = True,
     ) -> str:
         """Apply a text modification to a Neovim buffer."""
         if not self.nvim.api.buf_is_valid(buf_number):
@@ -2207,7 +2211,7 @@ pcall(vim.keymap.del, "n", "<C-c>")
         finally:
             self.nvim.api.buf_set_option(buf_number, "modifiable", was_modifiable)
 
-        self.nvim.api.buf_set_option(buf_number, "modified", True)
+        self.nvim.api.buf_set_option(buf_number, "modified", set_modified)
         self.nvim.exec_lua(
             """
 local bufnr = select(1, ...)
@@ -2352,6 +2356,7 @@ end)
         confirmation_id = chunk.data.get("confirmation_id")
         content = chunk.data.get("content", "")
         mode = chunk.data.get("mode", "replace")
+        set_modified = chunk.data.get("set_modified", True)
         target_path = chunk.data.get("target_path") or chunk.data.get("buf_path")
 
         result_container = [None]
@@ -2371,7 +2376,7 @@ end)
                     return
 
                 result_container[0] = self._apply_buffer_modification(
-                    target_buf_number, content, mode
+                    target_buf_number, content, mode, set_modified
                 )
             except Exception as e:
                 result_container[0] = f"Error: {e}"
@@ -2488,6 +2493,7 @@ end)
                             if kind == "modify_buffer":
                                 buf_content = req.get("content", "")
                                 buf_mode = req.get("mode", "replace")
+                                set_modified = req.get("set_modified", True)
                                 target_path = req.get("target_path") or req.get(
                                     "buf_path"
                                 )
@@ -2517,7 +2523,10 @@ end)
                                             return
                                         result_container[0] = (
                                             self._apply_buffer_modification(
-                                                target_buf_number, _content, _mode
+                                                target_buf_number,
+                                                _content,
+                                                _mode,
+                                                set_modified,
                                             )
                                         )
                                     except Exception as e:

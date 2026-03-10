@@ -58,6 +58,7 @@ def _request_modify(
     mode: str = "replace",
     timeout: float = 30.0,
     target_path: str | None = None,
+    set_modified: bool = True,
 ) -> str:
     """Send a modify-buffer request to the plugin and wait for the response."""
     ui_dir = _ui_dir()
@@ -81,6 +82,7 @@ def _request_modify(
         "kind": "modify_buffer",
         "content": content,
         "mode": mode,
+        "set_modified": set_modified,
     }
     if target_path:
         request_data["target_path"] = _normalize_path(target_path)
@@ -107,9 +109,19 @@ def _request_modify(
     raise TimeoutError(f"Buffer modify request timed out after {timeout}s")
 
 
-def modify(content: str, mode: str = "replace", timeout: float = 30.0) -> str:
+def modify(
+    content: str,
+    mode: str = "replace",
+    timeout: float = 30.0,
+    set_modified: bool = True,
+) -> str:
     """Modify the current Neovim buffer content."""
-    return _request_modify(content=content, mode=mode, timeout=timeout)
+    return _request_modify(
+        content=content,
+        mode=mode,
+        timeout=timeout,
+        set_modified=set_modified,
+    )
 
 
 def modify_file(
@@ -117,6 +129,7 @@ def modify_file(
     content: str,
     mode: str = "replace",
     timeout: float = 30.0,
+    set_modified: bool = True,
 ) -> str:
     """Modify an already-open file buffer by path.
 
@@ -126,6 +139,8 @@ def modify_file(
         content: Content to write to the buffer.
         mode: "replace", "append", or "prepend".
         timeout: Seconds to wait before raising TimeoutError.
+        set_modified: Whether to leave the buffer marked as modified after the
+            update.
 
     Returns:
         Success message or error description.
@@ -135,6 +150,7 @@ def modify_file(
         mode=mode,
         timeout=timeout,
         target_path=path,
+        set_modified=set_modified,
     )
 
 

@@ -6,6 +6,10 @@ Usage:
     print(fs.read_file("src/main.py"))
     print(fs.read_file("src/main.py@100-200"))   # line range
     fs.write_file("out.txt", "hello")
+    fs.write_file("script.sh", lines=[           # use lines for complex content
+        "#!/bin/bash",
+        'echo "Hello, World!"',
+    ])
     fs.create_file("new.py", "# stub")
     files = fs.list_files(".")
     results = fs.search_code("def my_func")
@@ -152,30 +156,61 @@ def read_many_files(files: list[str], cwd: str | None = None) -> str:
     return f"Reading {len(files)} file(s)...\n{'=' * 70}\n\n" + "\n".join(parts)
 
 
-def write_file(path: str, content: str, cwd: str | None = None) -> str:
-    """Write content to a file, creating parent directories as needed.
+def write_file(
+    path: str,
+    content: str | None = None,
+    lines: list[str] | None = None,
+    cwd: str | None = None,
+) -> str:
+    """Write content to disk and sync any matching open Neovim buffer.
 
-    If the target file is currently open in Neovim, this updates the open
-    buffer in place instead of writing directly to disk. This keeps the editor
-    view in sync and preserves unsaved buffer state.
+    If the target file is open in Neovim, the file is still written directly to
+    disk first, then the open buffer is updated to match and marked clean. This
+    keeps both the filesystem and editor view in sync.
 
     If the file does not exist it will be created. If it does exist its
     content will be replaced entirely.
 
+    Use `content` for simple strings. Use `lines` when writing files that
+    contain complex content like shell scripts with quotes, multi-line strings,
+    or special characters that may cause parsing issues in triple-quoted strings.
+
     Args:
         path: Destination file path (supports ~ and env-var expansion).
-        content: Text to write.
+        content: Text to write (mutually exclusive with lines).
+        lines: List of lines to write (mutually exclusive with content).
+               Lines are joined with newlines. Use this for shell scripts,
+               configs with quotes, or any content with triple-quote ambiguity.
         cwd: Base directory for relative paths (default: os.getcwd()).
 
     Returns:
         A success message with the absolute path and file size.
+
+    Example:
+        # Simple content
+        fs.write_file("notes.txt", "Hello, World!")
+
+        # Complex content with quotes - use lines to avoid parsing issues
+        fs.write_file("script.sh", lines=[
+            "#!/bin/bash",
+            "",
+            "# This won't cause triple-quote parsing issues",
+            'echo "What\'s your name?"',
+            "read name",
+            'echo "Hello, $name!"',
+        ])
     """
+    if content is None and lines is None:
+        raise ValueError("Provide either content or lines")
+    if content is not None and lines is not None:
+        raise ValueError("Provide either content or lines, not both")
+
+    if lines is not None:
+        content = "\n".join(lines)
+
     path = os.path.expandvars(os.path.expanduser(path))
     if not os.path.isabs(path):
         path = os.path.join(cwd or os.getcwd(), path)
-
-    if buffer_lib.is_open(path):
-        return buffer_lib.modify_file(path, content)
 
     parent = os.path.dirname(path)
     if parent:
@@ -184,20 +219,64 @@ def write_file(path: str, content: str, cwd: str | None = None) -> str:
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    return f"Wrote {os.path.getsize(path)} bytes to {path}"
+    result = f"Wrote {os.path.getsize(path)} bytes to {path}"
+
+    if buffer_lib.is_open(path):
+        try:
+            buffer_result = buffer_lib.modify_file(
+                path,
+                content,
+                set_modified=False,
+            )
+        except Exception as exc:
+            return f"{result} (warning: open buffer sync failed: {exc})"
+
+        if buffer_result not in ("ok", ""):
+            return f"{result} ({buffer_result})"
+
+    return result
 
 
-def create_file(path: str, content: str = "", cwd: str | None = None) -> str:
-    """Create a new file.  Raises if the file already exists.
+def create_file(
+    path: str,
+    content: str | None = None,
+    lines: list[str] | None = None,
+    cwd: str | None = None,
+) -> str:
+    """Create a new file. Raises if the file already exists.
+
+    Use `content` for simple strings. Use `lines` when creating files that
+    contain complex content like shell scripts with quotes, multi-line strings,
+    or special characters that may cause parsing issues in triple-quoted strings.
 
     Args:
         path: New file path (supports ~ and env-var expansion).
-        content: Optional initial content (default: empty).
+        content: Optional initial text content (mutually exclusive with lines).
+        lines: Optional list of lines to write (mutually exclusive with content).
+               Lines are joined with newlines. Use this for shell scripts,
+               configs with quotes, or any content with triple-quote ambiguity.
         cwd: Base directory for relative paths (default: os.getcwd()).
 
     Returns:
         A success message with the absolute path and file size.
+
+    Example:
+        # Simple file
+        fs.create_file("notes.txt", "Hello!")
+
+        # Shell script with quotes - use lines to avoid parsing issues
+        fs.create_file("deploy.sh", lines=[
+            "#!/bin/bash",
+            'echo "Deploying to $ENV..."',
+        ])
     """
+    if content is None and lines is None:
+        content = ""
+    elif content is not None and lines is not None:
+        raise ValueError("Provide either content or lines, not both")
+    elif lines is not None:
+        content = "\n".join(lines)
+
     path = os.path.expandvars(os.path.expanduser(path))
     if not os.path.isabs(path):
         path = os.path.join(cwd or os.getcwd(), path)
@@ -286,14 +365,19 @@ def search_code(
 
     for cmd in (
         ["rg", "--line-number", "--no-heading", "--smart-case", query, target],
-        ["grep", "-rn", query, target],
+        ["grep", "-rn", "-e", query, target],
     ):
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode == 0:
-                output = result.stdout[:max_chars]
-                return output or "(no matches)"
-        except FileNotFoundError:
-            continue
+        exe = shutil.which(cmd[0])
+        if exe:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+            )
+            output = result.stdout.strip()
+            if output:
+                if len(output) > max_chars:
+                    output = output[:max_chars] + "\n... (truncated)"
+                return output
 
-    return "No matches found."
+    return f"No matches found for '{query}' in {target}"
