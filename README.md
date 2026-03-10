@@ -28,6 +28,7 @@ These are not required, but enhance the experience:
 |--------|---------|
 | [blink.cmp](https://github.com/Saghen/blink.cmp) | Autocompletion for `@file` references and `/commands` in the prompt buffer |
 | [snacks.nvim](https://github.com/folke/snacks.nvim) | Powers the `:Anya history` conversation picker |
+| [img-clip.nvim](https://github.com/HakonHarnes/img-clip.nvim) | Enables image-aware paste in the prompt buffer via `<C-v>` and `<localleader>v` |
 
 ## Installation
 
@@ -96,6 +97,12 @@ other OpenAI-compatible endpoint.
 ```lua
 require("anya").setup({
   start_in_insert = true, -- Auto-enter insert mode when prompt opens (default: false)
+  image_clip = {
+    default = {
+      dir_path = "images",
+      prompt_for_file_name = false,
+    },
+  },
 })
 ```
 
@@ -193,6 +200,8 @@ don't need to manage it manually.
 | `<C-Left>` / `<C-Right>` | Normal / Insert | Resize side pane (pane layout) |
 | `<C-a>` / `<C-e>` | Normal / Insert | Jump to start / end of line |
 | `<C-u>` | Normal / Insert | Delete whole line |
+| `<C-v>` | Normal / Insert | Smart paste: paste image via `img-clip.nvim` when the clipboard holds an image, otherwise do a normal paste |
+| `<localleader>v` | Normal / Insert | Force image paste via `img-clip.nvim` |
 
 ### Chat buffer keymaps
 
@@ -255,3 +264,8 @@ system, daemon design, IPC protocol, marker format, and tool extensibility.
 ## License
 
 TBD
+
+
+### Image paste
+
+If you install [`img-clip.nvim`](https://github.com/HakonHarnes/img-clip.nvim), Anya's prompt buffer can paste clipboard images directly into the prompt. `<C-v>` is image-aware and falls back to normal clipboard paste when there is no image in the clipboard. `<localleader>v` always tries an image paste. Anya explicitly disables `img-clip.nvim` drag-and-drop paste interception so terminal paste paths like `<C-S-v>` keep their normal behavior. The standalone config vendors `img-clip.nvim` the same way as the other bundled plugins.

@@ -14,6 +14,8 @@ TOOL_PENDING = "tool_pending"
 TOOL_SUCCESS = "tool_success"
 TOOL_FAILURE = "tool_failure"
 THINKING = "thinking"
+TASK_LIST_START = "task_list_start"
+TASK_LIST_END = "task_list_end"
 
 PREFIX = "<!-- at:"
 SUFFIX = "-->"

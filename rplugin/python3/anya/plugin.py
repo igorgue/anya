@@ -1133,6 +1133,15 @@ class AnyaPlugin:
 
                     tool_was_called = False
 
+                elif chunk.event_type == StreamEventType.TASK_LIST_UPDATE:
+                    title = chunk.data.get("title", "")
+                    items = chunk.data.get("items", [])
+
+                    if not self._request_cancelled:
+                        self.nvim.async_call(
+                            ui.notify_task_list, self.nvim, title, items
+                        )
+
                 elif chunk.event_type == StreamEventType.MEMORY_STORED:
                     # Emit memory stored event for fidget notification
                     memory_text = chunk.data.get("text", "")
@@ -1220,11 +1229,14 @@ class AnyaPlugin:
                                 )
 
                         async def _poll_result(
-                            global_var: str, timeout: float = 300.0
+                            global_var: str, timeout: float | None = None
                         ) -> str | None:
                             """Poll a Neovim global until it becomes non-null."""
                             start = asyncio.get_event_loop().time()
-                            while asyncio.get_event_loop().time() - start < timeout:
+                            while (
+                                timeout is None
+                                or asyncio.get_event_loop().time() - start < timeout
+                            ):
                                 slot = [None]
 
                                 def _read(s=slot, gv=global_var):
@@ -1345,7 +1357,11 @@ end)
                             )
 
                             # Poll for process completion while serving UI requests
-                            deadline = asyncio.get_event_loop().time() + _exec_timeout
+                            deadline = (
+                                None
+                                if _exec_timeout is None
+                                else asyncio.get_event_loop().time() + _exec_timeout
+                            )
                             result = None
                             while result is None:
                                 poll = process.poll()
@@ -1362,7 +1378,10 @@ end)
                                         "returncode": process.returncode,
                                     }
                                     break
-                                if asyncio.get_event_loop().time() > deadline:
+                                if (
+                                    deadline is not None
+                                    and asyncio.get_event_loop().time() > deadline
+                                ):
                                     process.kill()
                                     result = {
                                         "stdout": "",
@@ -1445,12 +1464,7 @@ end
                                                     )
 
                                                 self.nvim.async_call(_run_select)
-                                                _t0 = asyncio.get_event_loop().time()
-                                                while (
-                                                    asyncio.get_event_loop().time()
-                                                    - _t0
-                                                    < 300.0
-                                                ):
+                                                while True:
                                                     await asyncio.sleep(0.15)
                                                     if os.path.exists(_ui_result_file):
                                                         try:
@@ -1518,12 +1532,7 @@ end
                                                     )
 
                                                 self.nvim.async_call(_run_input)
-                                                _t0 = asyncio.get_event_loop().time()
-                                                while (
-                                                    asyncio.get_event_loop().time()
-                                                    - _t0
-                                                    < 300.0
-                                                ):
+                                                while True:
                                                     await asyncio.sleep(0.15)
                                                     if os.path.exists(_ui_result_file):
                                                         try:

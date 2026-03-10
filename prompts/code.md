@@ -167,6 +167,16 @@ result = mcp.call("zai-vision", "diagnose_error_screenshot", {"imagePath": "/pat
 - `ui.input(prompt)` - Ask for text input.
 
 ---
+### Task Lists: `from anya.libs import task_list`
+
+**Use `task_list` inside `execute()` for non-trivial multi-step work. Do not add a separate tool call for this.**
+
+- `task_list.update(title, items)` - Publish the full current checklist snapshot.
+- Use statuses: `pending`, `in_progress`, `done`.
+- Skip task lists for trivial one-step work.
+
+---
+
 
 ## When to Use What
 
@@ -191,6 +201,7 @@ result = mcp.call("zai-vision", "diagnose_error_screenshot", {"imagePath": "/pat
 | Explore GitHub repo | `mcp.call("zai-zread", ...)` |
 | Complex reasoning | `mcp.call("sequentialthinking", ...)` |
 | Ask user a question | `ui.ask()` or `ui.confirm()` |
+| Track non-trivial multi-step work | `task_list.update()` inside `execute()` |
 
 ---
 
@@ -207,6 +218,21 @@ content = fs.read_file("src/main.py")
 with open("src/main.py") as f:
     raw = f.read()
 new_content = raw.replace("old", "new")
+```
+
+For non-trivial multi-step work, keep a live task list inside `execute()`:
+
+```python
+from anya.libs import task_list
+
+task_list.update(
+    title="Implement feature",
+    items=[
+        {"text": "Inspect current code", "status": "done"},
+        {"text": "Make the change", "status": "in_progress"},
+        {"text": "Verify behavior", "status": "pending"},
+    ],
+)
 ```
 
 ### Background Jobs: `from anya.libs import background`

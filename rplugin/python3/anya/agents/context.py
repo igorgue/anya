@@ -36,6 +36,8 @@ class NvimPluginContext:
     modify_buffer_callback: Callable[[str, str, str, bool], Awaitable[str]] | None = (
         None
     )
+    # Task-list callback for live execute progress updates
+    task_list_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None
 
     @property
     def has_nvim(self) -> bool:

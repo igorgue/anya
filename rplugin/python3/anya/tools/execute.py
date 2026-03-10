@@ -353,30 +353,12 @@ async def _run_with_ui_requests(
     ui_dir: str,
     plugin_context: "NvimPluginContext",
 ) -> dict:
-    """Run exec_task while serving any ui.ask/ui.input requests from the subprocess.
-
-    The subprocess writes  <id>.request.json  to ui_dir and waits for
-    <id>.response.json.  We poll for request files at 50 ms intervals
-    while the subprocess is running, dispatch them through
-    confirmation_callback, and write response files back.
-
-    Args:
-        exec_task: Coroutine task for the exec_callback call.
-        ui_dir: Path to the UI rendezvous directory.
-        plugin_context: Agent context (for confirmation_callback access).
-
-    Returns:
-        The dict result from exec_task (stdout/stderr/returncode).
-    """
-    import glob
-    import json as _json
-
+    """Run exec_task while serving side-channel requests from the subprocess."""
     while not exec_task.done():
         await asyncio.sleep(0.05)
-        await _serve_ui_requests(ui_dir, plugin_context)
+        await _serve_ui_side_channel(ui_dir, plugin_context)
 
-    # Drain any final requests written just before the subprocess exited
-    await _serve_ui_requests(ui_dir, plugin_context)
+    await _serve_ui_side_channel(ui_dir, plugin_context)
     return exec_task.result()
 
 
@@ -385,26 +367,23 @@ async def _run_with_ui_requests_nvim(
     ui_dir: str,
     plugin_context: "NvimPluginContext",
 ) -> tuple:
-    """Like _run_with_ui_requests but for the has_nvim direct path.
-
-    Returns the (stdout_bytes, stderr_bytes) tuple from process.communicate().
-    """
+    """Like _run_with_ui_requests but for the has_nvim direct path."""
     while not comm_task.done():
         await asyncio.sleep(0.05)
-        await _serve_ui_requests(ui_dir, plugin_context)
+        await _serve_ui_side_channel(ui_dir, plugin_context)
 
-    await _serve_ui_requests(ui_dir, plugin_context)
+    await _serve_ui_side_channel(ui_dir, plugin_context)
     return comm_task.result()
 
 
-async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
-    """Scan ui_dir for pending request files and serve each one.
+async def _serve_ui_side_channel(ui_dir: str, plugin_context: "NvimPluginContext"):
+    """Serve request/response UI calls and fire-and-forget execute events."""
+    await _serve_ui_requests(ui_dir, plugin_context)
+    await _serve_ui_events(ui_dir, plugin_context)
 
-    Handles "select" (vim.ui.select), "input" (vim.ui.input), and
-    "modify_buffer" (buffer modification) kinds.
-    Each request file is removed after reading; the response is written to
-    a matching .response.json file for the subprocess to pick up.
-    """
+
+async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
+    """Scan ui_dir for pending request files and serve each one."""
     import glob
     import json as _json
 
@@ -481,6 +460,39 @@ async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
             pass
 
 
+async def _serve_ui_events(ui_dir: str, plugin_context: "NvimPluginContext"):
+    """Scan ui_dir for fire-and-forget event files emitted by execute libs."""
+    import glob
+    import json as _json
+
+    pattern = os.path.join(ui_dir, "*.event.json")
+    for event_file in glob.glob(pattern):
+        try:
+            with open(event_file) as f:
+                event = _json.load(f)
+        except Exception:
+            continue
+
+        try:
+            kind = event.get("kind", "")
+            if kind == "task_list_update":
+                payload = {
+                    "title": event.get("title", ""),
+                    "items": event.get("items", []),
+                }
+                if plugin_context.task_list_callback:
+                    await plugin_context.task_list_callback(payload)
+                elif plugin_context.has_nvim and plugin_context.nvim:
+                    await _nvim_task_list_update(
+                        plugin_context.nvim, payload["title"], payload["items"]
+                    )
+        finally:
+            try:
+                os.unlink(event_file)
+            except OSError:
+                pass
+
+
 async def _nvim_modify_buffer(
     nvim,
     buf_path: str,
@@ -537,6 +549,29 @@ async def _nvim_modify_buffer(
     return result_container[0] or "Error: timeout"
 
 
+async def _nvim_task_list_update(nvim, title: str, items: list[dict]) -> str:
+    """Show the task-list snapshot as a Neovim notification (direct execute mode)."""
+    result = [None]
+
+    def apply_update():
+        try:
+            from .. import ui as _ui
+
+            _ui.notify_task_list(nvim, title, items)
+            result[0] = "ok"
+        except Exception as e:
+            result[0] = f"Error: {e}"
+
+    nvim.async_call(apply_update)
+
+    for _ in range(100):
+        await asyncio.sleep(0.05)
+        if result[0] is not None:
+            break
+
+    return result[0] or "Error: timeout"
+
+
 async def _nvim_ui_input(nvim, prompt: str, default: str = "") -> str:
     """Ask user for free-form text using vim.ui.input (direct Neovim mode)."""
     lua_prompt = prompt.replace('"', '\\"').replace("\n", "\\n")
@@ -566,8 +601,7 @@ end
 
     nvim.async_call(run_input)
 
-    start_time = asyncio.get_event_loop().time()
-    while asyncio.get_event_loop().time() - start_time < 300.0:
+    while True:
 
         def get_result():
             try:
@@ -582,13 +616,6 @@ end
 
         if result[0] is not None:
             return result[0]
-
-    nvim.async_call(
-        lambda: nvim.exec_lua(
-            "pcall(function() require('anya.text').resume_queue() end)"
-        )
-    )
-    return ""
 
 
 @function_tool(failure_error_function=create_error_handler)
@@ -792,7 +819,7 @@ async def execute(
         # Foreground execution (original behavior)
         if plugin_context.exec_callback:
             exec_task = asyncio.create_task(
-                plugin_context.exec_callback(command, cwd, 30, ui_dir=ui_dir)
+                plugin_context.exec_callback(command, cwd, None, ui_dir=ui_dir)
             )
             result = await _run_with_ui_requests(exec_task, ui_dir, plugin_context)
 
@@ -822,9 +849,7 @@ async def execute(
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            comm_task = asyncio.create_task(
-                asyncio.wait_for(process.communicate(), timeout=30.0)
-            )
+            comm_task = asyncio.create_task(process.communicate())
             stdout_bytes, stderr_bytes = await _run_with_ui_requests_nvim(
                 comm_task, ui_dir, plugin_context
             )

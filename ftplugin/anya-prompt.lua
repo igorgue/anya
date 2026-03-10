@@ -294,14 +294,17 @@ vim.keymap.set({ "n", "i" }, "<C-Right>", function()
   resize_pane(-2)
 end, { buffer = true, nowait = true, desc = "Grow side pane" })
 
--- Open system prompt
+vim.keymap.set({ "n", "i" }, "<localleader>t", function()
+  require("anya.task_list").show_latest()
+end, { buffer = true, desc = "Show latest task list" })
+
 vim.keymap.set("n", "<localleader>p", function()
   require("anya.system_prompt").show()
 end, { buffer = true, desc = "Open system prompt" })
 
 vim.keymap.set("n", "<localleader>u", function()
   vim.cmd("UpdateRemotePlugins")
-end, { buffer = true, desc = "Open system prompt" })
+end, { buffer = true, desc = "Update remote plugins" })
 
 -- Focus toggle between chat and prompt with Tab
 vim.keymap.set("n", "<Tab>", function()
@@ -407,29 +410,17 @@ vim.keymap.set("n", "<C-n>", function()
   cycle_history("next")
 end, { buffer = true, nowait = true, desc = "Next prompt in history" })
 
+local image_paste = require("anya.image_paste")
+image_paste.setup()
+
 -- Paste image with <C-v> in normal and insert mode
 vim.keymap.set({ "n", "i" }, "<C-v>", function()
-  -- Check if we have an image in clipboard
-  local has_image = vim.fn.system("wl-paste --list-types 2>/dev/null | grep -q image && echo yes || echo no")
-  if has_image:match("yes") then
-    -- Use img-clip to paste the image
-    local ok, img_clip = pcall(require, "img-clip")
-    if ok then
-      img_clip.paste_image()
-    else
-      vim.notify("img-clip.nvim not installed", vim.log.levels.WARN)
-    end
-  else
-    -- Normal paste
-    if vim.fn.mode() == "i" then
-      -- In insert mode, use <C-r>+ to paste from clipboard
-      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-r>+", true, false, true), "n", false)
-    else
-      -- In normal mode, use "+p
-      vim.api.nvim_feedkeys('"+p', "n", false)
-    end
-  end
+  image_paste.paste_from_clipboard(vim.fn.mode())
 end, { buffer = true, desc = "Paste (image-aware)" })
+
+vim.keymap.set({ "n", "i" }, "<localleader>v", function()
+  image_paste.paste_image(true)
+end, { buffer = true, desc = "Paste image" })
 
 -- Smart <CR> mapping for sending messages
 -- In normal mode: Always send the message

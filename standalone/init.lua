@@ -16,9 +16,9 @@ package.path = package.path .. ";" .. dir .. "/fidget/lua/?.lua;" .. dir .. "/fi
 package.path = package.path .. ";" .. dir .. "/blink-cmp/lua/?.lua;" .. dir .. "/blink-cmp/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/noice/lua/?.lua;" .. dir .. "/noice/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/nui/lua/?.lua;" .. dir .. "/nui/lua/?/init.lua"
-package.path = package.path .. ";" .. dir .. "/nvim-notify/lua/?.lua;" .. dir .. "/nvim-notify/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/mini-surround/lua/?.lua;" .. dir .. "/mini-surround/lua/?/init.lua"
 package.path = package.path .. ";" .. dir .. "/marks-nvim/lua/?.lua;" .. dir .. "/marks-nvim/lua/?/init.lua"
+package.path = package.path .. ";" .. dir .. "/img-clip/lua/?.lua;" .. dir .. "/img-clip/lua/?/init.lua"
 
 vim.opt.runtimepath:append(dir .. "/which-key")
 vim.opt.runtimepath:append(dir .. "/render-markdown")
@@ -27,6 +27,7 @@ vim.opt.runtimepath:append(dir .. "/vim-indent-object")
 vim.opt.runtimepath:append(dir .. "/mini-surround")
 vim.opt.runtimepath:append(dir .. "/marks-nvim")
 vim.opt.runtimepath:append(dir .. "/vim-matchup")
+vim.opt.runtimepath:append(dir .. "/img-clip")
 
 -- opts
 vim.opt.signcolumn = "auto"
@@ -131,8 +132,22 @@ vim.g.mapleader = " "
 vim.g.maplocalleader = "\\"
 
 -- plugin setup
-require("which-key").setup({})
-require("snacks").setup({ input = { enabled = true }, picker = { enabled = true, ui_select = true } })
+require("which-key").setup({
+  win = {
+    no_overlap = false,
+    padding = { 0, 0 },
+  },
+})
+require("snacks").setup({
+  input = { enabled = true },
+  picker = { enabled = true, ui_select = true },
+  notifier = {
+    enabled = true,
+    style = "fancy",
+  },
+})
+
+vim.notify = require("snacks.notifier").notify
 require("danger").setup({
   style = "dark",
   alacritty = false,
@@ -180,7 +195,7 @@ require("fidget").setup({
   },
 })
 require("render-markdown").setup({
-  file_types = { "anya-chat", "markdown" },
+  file_types = { "anya-chat", "markdown", "snacks_notif", "snacks_notif_history" },
   preset = "lazy",
   code = {
     disable_background = true,
@@ -195,12 +210,14 @@ require("render-markdown").setup({
     icons = false,
   },
 })
-require("notify").setup({})
 require("noice").setup({
   presets = {
     bottom_search = false,
     command_palette = false,
     long_message_to_split = false,
+  },
+  notify = {
+    enabled = false,
   },
 })
 require("blink.cmp").setup({
@@ -305,6 +322,7 @@ require("mini.surround").setup({})
 
 -- marks.nvim
 require("marks").setup({})
+require("anya.image_paste").setup()
 
 -- vim-matchup
 vim.g.matchup_surround_enabled = 1

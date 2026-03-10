@@ -29,7 +29,7 @@ def _ui_dir() -> str | None:
     return os.environ.get("ANYA_UI_DIR")
 
 
-def _send_request(kind: str, payload: dict, timeout: float = 300.0) -> str:
+def _send_request(kind: str, payload: dict, timeout: float | None = None) -> str:
     """Write a UI request file and block until the plugin writes a response.
 
     The request file is named  <id>.request.json  and the plugin writes
@@ -38,7 +38,7 @@ def _send_request(kind: str, payload: dict, timeout: float = 300.0) -> str:
     Args:
         kind: "select" or "input"
         payload: Dict with fields appropriate for the kind.
-        timeout: Seconds to wait before raising TimeoutError.
+        timeout: Seconds to wait before raising TimeoutError. Use None to wait indefinitely.
 
     Returns:
         The user's answer as a string.
@@ -63,8 +63,8 @@ def _send_request(kind: str, payload: dict, timeout: float = 300.0) -> str:
     with open(request_file, "w") as f:
         json.dump(request_data, f)
 
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while deadline is None or time.monotonic() < deadline:
         if os.path.exists(response_file):
             with open(response_file) as f:
                 response = json.load(f)
@@ -83,7 +83,7 @@ def _send_request(kind: str, payload: dict, timeout: float = 300.0) -> str:
     raise TimeoutError(f"UI request timed out after {timeout}s")
 
 
-def ask(prompt: str, options: list[str], timeout: float = 300.0) -> str:
+def ask(prompt: str, options: list[str], timeout: float | None = None) -> str:
     """Ask the user to pick one option from a list using vim.ui.select.
 
     Blocks until the user selects an option or dismisses the dialog.
@@ -92,7 +92,7 @@ def ask(prompt: str, options: list[str], timeout: float = 300.0) -> str:
     Args:
         prompt: Question or instruction shown to the user.
         options: List of choices to present (minimum 1).
-        timeout: Seconds to wait for a response (default 300).
+        timeout: Seconds to wait for a response. Use None to wait indefinitely.
 
     Returns:
         The selected option string, or "Cancel" if dismissed.
@@ -109,7 +109,7 @@ def ask(prompt: str, options: list[str], timeout: float = 300.0) -> str:
     return _send_request("select", {"prompt": prompt, "options": options}, timeout)
 
 
-def input(prompt: str, default: str = "", timeout: float = 300.0) -> str:
+def input(prompt: str, default: str = "", timeout: float | None = None) -> str:
     """Ask the user to type a value using vim.ui.input.
 
     Blocks until the user submits or cancels the input dialog.
@@ -118,7 +118,7 @@ def input(prompt: str, default: str = "", timeout: float = 300.0) -> str:
     Args:
         prompt: Label shown next to the input field.
         default: Pre-filled value (default: empty string).
-        timeout: Seconds to wait for a response (default 300).
+        timeout: Seconds to wait for a response. Use None to wait indefinitely.
 
     Returns:
         The text the user entered, or "" if cancelled.
@@ -133,12 +133,12 @@ def input(prompt: str, default: str = "", timeout: float = 300.0) -> str:
     return _send_request("input", {"prompt": prompt, "default": default}, timeout)
 
 
-def confirm(prompt: str, timeout: float = 300.0) -> bool:
+def confirm(prompt: str, timeout: float | None = None) -> bool:
     """Ask the user a yes/no question using vim.ui.select.
 
     Args:
         prompt: The yes/no question to show.
-        timeout: Seconds to wait for a response (default 300).
+        timeout: Seconds to wait for a response. Use None to wait indefinitely.
 
     Returns:
         True if the user selected "Yes", False otherwise.

@@ -101,9 +101,8 @@ def clean_assistant_content(text: str, record_markers: list | None = None) -> st
     Returns:
         Cleaned content with thinking blocks removed
     """
-    # Build set of line positions that are within thinking blocks.
+    # Build sets of line positions that should be hidden from LLM history.
     # Markers reference positions in the cleaned content (without marker lines).
-    # A thinking block starts at a fold_start+thinking marker and ends at a fold_end.
     thinking_ranges: list[tuple[int, int]] = []
     if record_markers:
         thinking_start: int | None = None
@@ -119,7 +118,7 @@ def clean_assistant_content(text: str, record_markers: list | None = None) -> st
     result = []
 
     for i, line in enumerate(lines):
-        # Skip lines within thinking ranges
+        # Skip lines within synthetic UI blocks
         if any(start <= i < end for start, end in thinking_ranges):
             continue
         result.append(line)

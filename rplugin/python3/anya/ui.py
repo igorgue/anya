@@ -256,6 +256,11 @@ def update_tool_header_line(nvim, bufnr, new_header: str):
     nvim.exec_lua(lua_code, bufnr, new_header)
 
 
+def notify_task_list(nvim, title, items):
+    """Show and remember the current task-list snapshot as a Vim notification."""
+    nvim.exec_lua("require('anya.task_list').update_and_notify(...)", title, items)
+
+
 def process_markers(nvim, bufnr, messages=None):
     """Process markers in the buffer via Lua.
 
@@ -395,7 +400,12 @@ def finalize_storage_tool_output(nvim, bufnr, ato_marker: str):
             if line:find(pending_marker, 1, true) then
                 local new_marker = line:gsub(pending_marker, success_marker) .. ato_marker
                 local header_line_idx = i - 1
-                if header_line_idx >= 1 and lines[header_line_idx]:match("^%*%*") then
+                local header_line = header_line_idx >= 1 and lines[header_line_idx] or nil
+                local is_tool_header = header_line and (
+                    header_line:match("^%*%*")
+                    or header_line:match("^%[%[.-%]%]$")
+                )
+                if is_tool_header then
                     -- Merge into header AND delete the old marker line
                     merge_header_and_delete_marker(header_line_idx, i, new_marker)
                 else

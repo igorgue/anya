@@ -620,7 +620,7 @@ function M._process_markers(bufnr, messages)
       local info = markers.parse_tool_output_marker(line)
       if info then
         local _line_count = info.line_count or 0
-        local is_header_line = line:match("^%*%*")
+        local is_header_line = line:match("^%*%*") or line:match("^%[%[.-%]%]")
         local target_line_idx = i - 1 -- 0-indexed for extmark
 
         if is_header_line then
@@ -633,6 +633,11 @@ function M._process_markers(bufnr, messages)
               end_col = #line,
               conceal = "",
             })
+          end
+          if line:find(markers.tool_success, 1, true) then
+            M._apply_header_highlight(bufnr, i, "AnyaToolSuccess", nil)
+          elseif line:find(markers.tool_failure, 1, true) then
+            M._apply_header_highlight(bufnr, i, "AnyaToolFailure", nil)
           end
           -- No virtual text - just conceal the markers
         else

@@ -1,5 +1,7 @@
 """Utility functions for text processing."""
 
+from typing import Any
+
 
 def filter_anya_markers(text: str, in_marker: bool) -> tuple[str, bool]:
     """Filter out anya marker comments from streaming text.
@@ -192,7 +194,7 @@ def create_error_handler(_ctx, error: Exception) -> str:
     return f"Error: {str(error)}"
 
 
-def nvim_call_sync(nvim, func: callable) -> any:
+def nvim_call_sync(nvim, func: callable) -> Any:
     """Call a function on the main Neovim thread and wait for result."""
     import threading
 
@@ -258,8 +260,7 @@ end
 
     nvim.async_call(run_select)
 
-    start_time = asyncio.get_event_loop().time()
-    while asyncio.get_event_loop().time() - start_time < 30.0:
+    while True:
         await asyncio.sleep(0.15)
         if os.path.exists(result_file):
             try:
@@ -269,10 +270,3 @@ end
                 return val
             except Exception:
                 return "Cancel"
-
-    nvim.async_call(
-        lambda: nvim.exec_lua(
-            "pcall(function() require('anya.text').resume_queue() end)"
-        )
-    )
-    return "Cancel"

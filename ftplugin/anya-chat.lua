@@ -34,6 +34,10 @@ end, { buffer = true, desc = "Cancel agent response" })
 -- Tool output viewing keymaps
 local tool_output = require("anya.tool_output")
 
+-- Hover hints for tool calls
+local hover_hints = require("anya.hover_hints")
+hover_hints.setup(vim.api.nvim_get_current_buf())
+
 -- Open code, tool output on <CR>, else toggle fold
 vim.keymap.set("n", "<CR>", function()
   if not tool_output.open_code_at_cursor() and not tool_output.open_at_cursor() then
@@ -261,6 +265,10 @@ end, { buffer = true, desc = "Stop Anya daemon" })
 vim.keymap.set("n", "<localleader>r", function()
   vim.cmd("Anya daemon restart")
 end, { buffer = true, desc = "Restart Anya daemon" })
+
+vim.keymap.set("n", "<localleader>t", function()
+  require("anya.task_list").show_latest()
+end, { buffer = true, desc = "Show latest task list" })
 
 -- Open system prompt
 vim.keymap.set("n", "<localleader>p", function()

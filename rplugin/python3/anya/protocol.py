@@ -65,6 +65,7 @@ class StreamEventType(Enum):
     CONVERSATION_COMPACTED = "conversation_compacted"
     # Buffer modification request
     MODIFY_BUFFER_REQUEST = "modify_buffer_request"
+    TASK_LIST_UPDATE = "task_list_update"
 
 
 @dataclass

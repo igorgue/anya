@@ -6,6 +6,7 @@ Handles agent execution and streams responses via ZeroMQ PUB socket.
 import asyncio
 import logging
 import os
+from typing import Any
 
 import zmq.asyncio
 from agents import Runner
@@ -477,13 +478,13 @@ class RequestHandler:
         return make_success_response(request.request_id)
 
     async def wait_for_confirmation(
-        self, confirmation_id: str, timeout: float = 300.0
+        self, confirmation_id: str, timeout: float | None = None
     ) -> str:
         """Wait for user confirmation from the plugin.
 
         Args:
             confirmation_id: Unique ID for this confirmation request
-            timeout: Timeout in seconds
+            timeout: Timeout in seconds, or None to wait indefinitely
 
         Returns:
             User's choice ("Execute", "Allow for this session", "Cancel", etc.)
@@ -497,6 +498,8 @@ class RequestHandler:
         self.confirmation_responses[confirmation_id] = future
 
         try:
+            if timeout is None:
+                return await future
             return await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError:
             return "Cancel"
@@ -603,8 +606,9 @@ class RequestHandler:
 
             # Wait for execution result (timeout + buffer for network latency)
             try:
+                effective_timeout = (timeout + 30.0) if timeout is not None else None
                 result = await self.wait_for_confirmation(
-                    confirmation_id, timeout=timeout + 30.0
+                    confirmation_id, timeout=effective_timeout
                 )
                 # Result should be a JSON string with stdout/stderr/returncode
                 if isinstance(result, dict):
@@ -670,6 +674,14 @@ class RequestHandler:
                 self.logger.error(f"Error waiting for modify buffer result: {e}")
                 return f"Error: {e}"
 
+        async def task_list_callback(payload: dict[str, Any]) -> None:
+            await self._send_stream_chunk(
+                session_id,
+                request_id,
+                StreamEventType.TASK_LIST_UPDATE,
+                payload,
+            )
+
         context = NvimPluginContext(
             nvim=None,  # No nvim in daemon
             session_id=session_id,
@@ -677,6 +689,7 @@ class RequestHandler:
             confirmation_callback=confirmation_callback,
             exec_callback=exec_callback,
             modify_buffer_callback=modify_buffer_callback,
+            task_list_callback=task_list_callback,
             cwd=nvim_context.cwd,
             current_buffer=nvim_context.current_buffer,
             open_buffers=nvim_context.open_buffers,
