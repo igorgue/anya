@@ -2291,13 +2291,13 @@ end)
             open_buffers=open_buffers,
             allowed_commands=[],
             agent_settings=request_agent_settings.to_dict(),
+            request_kind="do",
         )
 
         subscriber = StreamSubscriber(self.session_id, request_id)
 
         try:
             await subscriber.connect()
-            await asyncio.sleep(0.1)
 
             send_task = asyncio.create_task(
                 self._send_to_daemon(
@@ -2369,6 +2369,8 @@ end)
         target_path = chunk.data.get("target_path") or chunk.data.get("buf_path")
 
         result_container = [None]
+        loop = asyncio.get_running_loop()
+        done = asyncio.Event()
 
         def apply_modification():
             try:
@@ -2389,14 +2391,15 @@ end)
                 )
             except Exception as e:
                 result_container[0] = f"Error: {e}"
+            finally:
+                loop.call_soon_threadsafe(done.set)
 
         self.nvim.async_call(apply_modification)
 
-        # Wait for the async call to complete
-        for _ in range(100):
-            await asyncio.sleep(0.05)
-            if result_container[0] is not None:
-                break
+        try:
+            await asyncio.wait_for(done.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass
 
         result_str = result_container[0] or "Error: timeout"
 
@@ -2507,6 +2510,8 @@ end)
                                     "buf_path"
                                 )
                                 result_container = [None]
+                                loop = asyncio.get_running_loop()
+                                done = asyncio.Event()
 
                                 def _apply_modification(
                                     _content=buf_content,
@@ -2540,12 +2545,14 @@ end)
                                         )
                                     except Exception as e:
                                         result_container[0] = f"Error: {e}"
+                                    finally:
+                                        loop.call_soon_threadsafe(done.set)
 
                                 self.nvim.async_call(_apply_modification)
-                                for _ in range(100):
-                                    await asyncio.sleep(0.05)
-                                    if result_container[0] is not None:
-                                        break
+                                try:
+                                    await asyncio.wait_for(done.wait(), timeout=5.0)
+                                except asyncio.TimeoutError:
+                                    pass
                                 ui_result = result_container[0] or "Error: timeout"
                         except Exception as e:
                             ui_result = f"Error: {e}"

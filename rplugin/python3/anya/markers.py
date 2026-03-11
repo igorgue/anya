@@ -22,7 +22,6 @@ MESSAGE_PREFIX = "<!-- am:"
 MESSAGE_SUFFIX = "-->"
 
 
-
 def make_marker(*names: str) -> str:
     """Create a tool marker line with the given marker names."""
     return f"{PREFIX} {', '.join(names)} {SUFFIX}"

@@ -309,9 +309,14 @@ def system_context_block(nvim: Any | None = None, cwd: str | None = None) -> str
 
 
 def apply_system_prompt(
-    template: str, nvim: Any | None = None, cwd: str | None = None
+    template: str,
+    nvim: Any | None = None,
+    cwd: str | None = None,
+    *,
+    include_project_docs: bool = True,
+    include_skills: bool = True,
 ) -> str:
-    """Expand known placeholders, then append the system context block and AGENTS.md if present."""
+    """Expand placeholders and append runtime context, optionally including project docs."""
     expanded = expand_placeholders(template, nvim, cwd=cwd)
 
     # Ensure we append at the end of the instructions.
@@ -321,16 +326,16 @@ def apply_system_prompt(
 
     result = expanded.rstrip() + system_context_block(nvim, cwd=cwd) + "\n"
 
-    # Append AGENTS.md from current working directory if it exists
-    agent_md_content = read_agent_md_from_cwd(nvim, cwd=cwd)
-    if agent_md_content:
-        result += "\n---\n"
-        result += agent_md_content
-        result += "\n"
+    if include_project_docs:
+        agent_md_content = read_agent_md_from_cwd(nvim, cwd=cwd)
+        if agent_md_content:
+            result += "\n---\n"
+            result += agent_md_content
+            result += "\n"
 
-    # Append Agent Skills metadata if any skills are discovered
-    skills_block = read_skills_from_cwd(nvim, cwd=cwd)
-    if skills_block:
-        result += skills_block + "\n"
+    if include_skills:
+        skills_block = read_skills_from_cwd(nvim, cwd=cwd)
+        if skills_block:
+            result += skills_block + "\n"
 
     return result

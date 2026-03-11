@@ -362,8 +362,6 @@ def update_pending_markers_to_failure(nvim, bufnr, sync: bool = False):
     update_last_tool_pending_marker(nvim, bufnr, markers.TOOL_FAILURE, sync=sync)
 
 
-
-
 def append_to_last_line(nvim, bufnr, text):
     """Append text to the last line of the buffer (no new line)."""
     if not nvim.api.buf_is_valid(bufnr):

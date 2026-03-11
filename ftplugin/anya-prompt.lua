@@ -306,6 +306,10 @@ vim.keymap.set("n", "<localleader>u", function()
   vim.cmd("UpdateRemotePlugins")
 end, { buffer = true, desc = "Update remote plugins" })
 
+vim.keymap.set({ "n", "i" }, "<localleader>n", function()
+  Snacks.notifier.show_history()
+end, { buffer = true, desc = "Show latest task list" })
+
 -- Focus toggle between chat and prompt with Tab
 vim.keymap.set("n", "<Tab>", function()
   local wins = vim.api.nvim_tabpage_list_wins(0)

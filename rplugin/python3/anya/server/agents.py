@@ -14,7 +14,7 @@ import anyio
 import zmq.asyncio
 from agents import Agent
 
-from ..agents import CodeAgent
+from ..agents import CodeAgent, DoAgent
 from ..skills import discover_skills, skills_fingerprint
 from ..protocol import AgentSettings
 
@@ -83,6 +83,7 @@ class AgentManager:
         session_id: str,
         settings: AgentSettings | None = None,
         cwd: str | None = None,
+        request_kind: str = "chat",
     ) -> Agent:
         """Get or create the Code agent for a session with specific settings.
 
@@ -117,10 +118,15 @@ class AgentManager:
         settings_hash = settings.settings_hash()
 
         # Include CWD and skills fingerprint in cache key so each project
-        # gets its own agent, and the agent is recreated if skills change on disk
-        skills = discover_skills(cwd=cwd)
-        skill_fp = skills_fingerprint(skills)
-        cache_key = f"{settings_hash}:{cwd or ''}:{skill_fp}"
+        # gets its own agent, and the agent is recreated if skills change on disk.
+        # The lightweight `:Anya do` agent intentionally skips project docs/skills,
+        # so avoid that discovery work on its hot path.
+        if request_kind == "do":
+            skill_fp = "do"
+        else:
+            skills = discover_skills(cwd=cwd)
+            skill_fp = skills_fingerprint(skills)
+        cache_key = f"{request_kind}:{settings_hash}:{cwd or ''}:{skill_fp}"
 
         # Check if we have a cached agent for these settings
         if cache_key in session.agents:
@@ -131,12 +137,14 @@ class AgentManager:
             return session.agents[cache_key]
 
         # Create new agent for these settings
+        agent_label = "Do" if request_kind == "do" else "Code"
         self.logger.info(
-            f"Creating Code agent for session {session_id}, "
+            f"Creating {agent_label} agent for session {session_id}, "
             f"model={settings.model}, cwd={cwd}, cache_key={cache_key}"
         )
 
-        agent = await CodeAgent(
+        agent_factory = DoAgent if request_kind == "do" else CodeAgent
+        agent = await agent_factory(
             thinking_budget=settings.thinking_budget or self._thinking_budget,
             nvim=None,  # No nvim in daemon context
             settings=settings,
@@ -147,7 +155,7 @@ class AgentManager:
         session.agents[cache_key] = agent
         session.current_settings_hash = settings_hash
         self.logger.info(
-            f"Code agent created for session {session_id}, model={settings.model}"
+            f"{agent_label} agent created for session {session_id}, model={settings.model}"
         )
 
         return agent

@@ -315,6 +315,22 @@ vim.keymap.set("n", "<Esc>Ob", function()
   resize_prompt_height(-1)
 end, { buffer = true, desc = "Reduce prompt height (Alt CSI)" })
 
+vim.keymap.set({ "n", "i" }, "<localleader>t", function()
+  require("anya.task_list").show_latest()
+end, { buffer = true, desc = "Show latest task list" })
+
+vim.keymap.set("n", "<localleader>p", function()
+  require("anya.system_prompt").show()
+end, { buffer = true, desc = "Open system prompt" })
+
+vim.keymap.set("n", "<localleader>u", function()
+  vim.cmd("UpdateRemotePlugins")
+end, { buffer = true, desc = "Update remote plugins" })
+
+vim.keymap.set({ "n", "i" }, "<localleader>n", function()
+  Snacks.notifier.show_history()
+end, { buffer = true, desc = "Show latest task list" })
+
 -- Register which-key group for localleader keymaps (forces re-scan after ftplugin sets them)
 local wk_ok, wk = pcall(require, "which-key")
 if wk_ok then

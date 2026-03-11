@@ -268,6 +268,7 @@ class NvimContext:
     open_buffers: list[dict] = field(default_factory=list)
     allowed_commands: list[str] = field(default_factory=list)
     agent_settings: dict = field(default_factory=dict)  # AgentSettings as dict
+    request_kind: str = "chat"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -282,6 +283,7 @@ class NvimContext:
             open_buffers=data.get("open_buffers", []),
             allowed_commands=data.get("allowed_commands", []),
             agent_settings=data.get("agent_settings", {}),
+            request_kind=data.get("request_kind", "chat"),
         )
 
     def get_agent_settings(self) -> AgentSettings:

@@ -547,7 +547,10 @@ class RequestHandler:
         # CWD is part of the cache key so each project directory gets its own agent
         # with the correct system prompt and AGENTS.md.
         agent = await self.agent_manager.get_agent_for_session(
-            session_id, settings=agent_settings, cwd=nvim_context.cwd
+            session_id,
+            settings=agent_settings,
+            cwd=nvim_context.cwd,
+            request_kind=nvim_context.request_kind,
         )
         self.logger.info(f"Got agent for session {session_id}")
 
@@ -722,7 +725,7 @@ class RequestHandler:
             starting_agent=agent,
             input=llm_history,
             context=context,
-            max_turns=1000,
+            max_turns=8 if nvim_context.request_kind == "do" else 1000,
             run_config=run_config,
         )
 
