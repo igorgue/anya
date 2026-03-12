@@ -190,7 +190,7 @@ vim.api.nvim_create_autocmd("WinEnter", {
 
 -- Focus management: trap focus within Anya windows
 -- This prevents accidentally navigating to the layout container window
-vim.keymap.set({ "n", "i" }, "<C-w>h", function()
+vim.keymap.set("n", "<C-w>h", function()
   require("anya.float_focus").check_and_redirect()
 end, { buffer = true, desc = "Navigate left (trapped)" })
 
@@ -199,11 +199,11 @@ vim.keymap.set({ "n", "i" }, "<C-h>", function()
   require("anya.float_focus").focus_left()
 end, { buffer = true, nowait = true, desc = "Navigate left out of Anya pane" })
 
-vim.keymap.set({ "n", "i" }, "<C-w>j", function()
+vim.keymap.set("n", "<C-w>j", function()
   require("anya.float_focus").check_and_redirect()
 end, { buffer = true, desc = "Navigate down (trapped)" })
 
-vim.keymap.set({ "n", "i" }, "<C-w>k", function()
+vim.keymap.set("n", "<C-w>k", function()
   -- Allow navigating up to the chat window
   local wins = vim.api.nvim_tabpage_list_wins(0)
   for _, win in ipairs(wins) do
@@ -216,20 +216,20 @@ vim.keymap.set({ "n", "i" }, "<C-w>k", function()
   end
 end, { buffer = true, desc = "Navigate to chat window" })
 
-vim.keymap.set({ "n", "i" }, "<C-w>l", function()
+vim.keymap.set("n", "<C-w>l", function()
   require("anya.float_focus").check_and_redirect()
 end, { buffer = true, desc = "Navigate right (trapped)" })
 
 -- Also handle arrow variants
-vim.keymap.set({ "n", "i" }, "<C-w><Left>", function()
+vim.keymap.set("n", "<C-w><Left>", function()
   require("anya.float_focus").check_and_redirect()
 end, { buffer = true, desc = "Navigate left (trapped)" })
 
-vim.keymap.set({ "n", "i" }, "<C-w><Down>", function()
+vim.keymap.set("n", "<C-w><Down>", function()
   require("anya.float_focus").check_and_redirect()
 end, { buffer = true, desc = "Navigate down (trapped)" })
 
-vim.keymap.set({ "n", "i" }, "<C-w><Up>", function()
+vim.keymap.set("n", "<C-w><Up>", function()
   -- Allow navigating up to the chat window
   local wins = vim.api.nvim_tabpage_list_wins(0)
   for _, win in ipairs(wins) do
@@ -242,7 +242,7 @@ vim.keymap.set({ "n", "i" }, "<C-w><Up>", function()
   end
 end, { buffer = true, desc = "Navigate to chat window" })
 
-vim.keymap.set({ "n", "i" }, "<C-w><Right>", function()
+vim.keymap.set("n", "<C-w><Right>", function()
   require("anya.float_focus").check_and_redirect()
 end, { buffer = true, desc = "Navigate right (trapped)" })
 
