@@ -204,12 +204,14 @@ function M.open()
   -- Get current cwd for comparison
   local current_cwd = vim.loop.cwd() or ""
 
-  -- Get conversations from Python
-  local conversations = vim.fn.AnyaListConversations(20, 0)
-  if not conversations or #conversations == 0 then
+  -- Get all conversations from Python so the picker can search the full history
+  local conversation_count = vim.fn.AnyaCountConversations()
+  if not conversation_count or conversation_count == 0 then
     vim.notify("Anya: No conversations found.", vim.log.levels.INFO)
     return
   end
+
+  local conversations = vim.fn.AnyaListConversations(conversation_count, 0)
 
   -- Build items for the picker
   local items = {}
@@ -221,7 +223,13 @@ function M.open()
 
     table.insert(items, {
       idx = i,
-      text = title,
+      text = table.concat({
+        title,
+        conv.id or "",
+        conv_cwd,
+        as_string(conv.updated_at, ""),
+        as_string(conv.created_at, ""),
+      }, " "),
       id = conv.id,
       title = title,
       date = date,

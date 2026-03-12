@@ -177,14 +177,27 @@ def get_conversation(id: str) -> dict[str, Any] | None:
         conn.close()
 
 
-def list_conversations(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+def count_conversations() -> int:
+    """Return the total number of conversations."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute("SELECT COUNT(*) FROM conversations")
+        row = cursor.fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        conn.close()
+
+
+def list_conversations(limit: int | None = 50, offset: int = 0) -> list[dict[str, Any]]:
     """List recent conversations ordered by updated_at descending."""
     conn = get_connection()
     try:
-        cursor = conn.execute(
-            "SELECT id, title, cwd, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        )
+        query = "SELECT id, title, cwd, created_at, updated_at FROM conversations ORDER BY updated_at DESC"
+        params: tuple[int, ...] = ()
+        if limit is not None and limit >= 0:
+            query += " LIMIT ? OFFSET ?"
+            params = (limit, offset)
+        cursor = conn.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
     finally:
         conn.close()

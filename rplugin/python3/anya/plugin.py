@@ -2298,6 +2298,11 @@ end)
 
         try:
             await subscriber.connect()
+            # ZeroMQ PUB/SUB subscriptions are not instantaneous. Give the
+            # subscription a brief moment to propagate before sending, otherwise
+            # fast `:Anya do` runs can miss the first MODIFY_BUFFER_REQUEST and
+            # appear to do nothing.
+            await asyncio.sleep(0.05)
 
             send_task = asyncio.create_task(
                 self._send_to_daemon(
@@ -2309,6 +2314,9 @@ end)
                 )
             )
 
+            did_modify_buffer = False
+            final_status = "success"
+
             while True:
                 if self._do_cancelled:
                     raise asyncio.CancelledError()
@@ -2318,6 +2326,7 @@ end)
                     continue
 
                 if chunk.event_type == StreamEventType.MODIFY_BUFFER_REQUEST:
+                    did_modify_buffer = True
                     await self._handle_do_modify_buffer(chunk, request_id, buf_number)
 
                 elif chunk.event_type == StreamEventType.EXEC_REQUEST:
@@ -2325,6 +2334,12 @@ end)
                     asyncio.create_task(self._handle_do_exec_request(chunk))
 
                 elif chunk.event_type == StreamEventType.MESSAGE_END:
+                    if not did_modify_buffer:
+                        self.nvim.async_call(
+                            self.nvim.err_write,
+                            "Anya do: No buffer change was produced.\n",
+                        )
+                        final_status = "error"
                     break
 
                 elif chunk.event_type == StreamEventType.ERROR:
@@ -2333,6 +2348,7 @@ end)
                         self.nvim.err_write,
                         f"Anya do: Error: {error}\n",
                     )
+                    final_status = "error"
                     break
 
             try:
@@ -2340,7 +2356,7 @@ end)
             except Exception:
                 pass
 
-            self.nvim.async_call(self._finish_do, request_id, "success")
+            self.nvim.async_call(self._finish_do, request_id, final_status)
 
         except asyncio.CancelledError:
             self.nvim.async_call(self._finish_do, request_id, "cancelled")
@@ -3063,12 +3079,26 @@ Usage:
             markers=args[8] if len(args) > 8 else None,
         )
 
+    @pynvim.function("AnyaCountConversations", sync=True)
+    def count_conversations(self, args):
+        """Return the total number of conversations."""
+        self._ensure_db()
+        return db.count_conversations()
+
     @pynvim.function("AnyaListConversations", sync=True)
     def list_conversations(self, args):
         """List recent conversations."""
         self._ensure_db()
         limit = args[0] if args else 50
+        if limit is None or limit == "" or (isinstance(limit, int) and limit < 0):
+            limit = None
+        else:
+            limit = int(limit)
         offset = args[1] if len(args) > 1 else 0
+        if offset is None or offset == "":
+            offset = 0
+        else:
+            offset = int(offset)
         return db.list_conversations(limit, offset)
 
     @pynvim.function("AnyaLoadConversation", sync=True)
