@@ -268,8 +268,8 @@ function M.send_message()
   -- Process markers to create folds and extmarks
   text._process_markers(chat_buf)
 
-  -- Scroll chat buffer to bottom
-  text._autoscroll_to_bottom(chat_buf)
+  -- Force-enable autoscroll and scroll to bottom (user just sent a message)
+  text._force_autoscroll_to_bottom(chat_buf)
 
   -- Save prompt to history
   local history = require("anya.history")
@@ -456,7 +456,7 @@ function M._drain_pending_queue()
   vim.api.nvim_set_option_value("modifiable", was_modifiable, { buf = chat_buf })
 
   text._process_markers(chat_buf)
-  text._autoscroll_to_bottom(chat_buf)
+  text._force_autoscroll_to_bottom(chat_buf)
 
   -- Save to prompt history
   local history = require("anya.history")
@@ -505,6 +505,18 @@ function M.setup_request_tracking()
       M._request_started_at = nil
       -- Drain pending queue after a short delay to let the streaming queue flush
       vim.defer_fn(M._drain_pending_queue, 100)
+
+      -- Send a desktop notification if Anya is not focused
+      local cur_ft = vim.bo.filetype
+      if cur_ft ~= "anya-chat" and cur_ft ~= "anya-prompt" then
+        local ok, notify_send = pcall(require, "noice.view.backend.notify_send")
+        if ok and notify_send then
+          local view = notify_send({})
+          if view:is_available() then
+            view:_notify({ content = "Anya is ready", level = vim.log.levels.INFO })
+          end
+        end
+      end
     end,
     desc = "Track when Anya request finishes",
   })

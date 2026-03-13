@@ -23,6 +23,7 @@ M.get_queue_status = streaming.get_queue_status
 M._ensure_timer_running = streaming._ensure_timer_running
 M._append_to_buffer = streaming._append_to_buffer
 M._autoscroll_to_bottom = streaming._autoscroll_to_bottom
+M._force_autoscroll_to_bottom = streaming._force_autoscroll_to_bottom
 
 -- Export Markers UI functions
 M.update_edit_state = markers_ui.update_edit_state

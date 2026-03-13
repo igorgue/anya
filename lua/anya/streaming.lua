@@ -136,6 +136,17 @@ function M._autoscroll_to_bottom(bufnr)
   end
 end
 
+-- Force-enable autoscroll on all windows showing this buffer and scroll to bottom.
+-- Used when the user sends a message so streaming always auto-follows regardless of cursor position.
+function M._force_autoscroll_to_bottom(bufnr)
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(win) == bufnr and is_chat_window(win) then
+      M._set_autoscroll_enabled(win, true)
+    end
+  end
+  M._autoscroll_to_bottom(bufnr)
+end
+
 -- Queue text for animated output
 -- Text may contain marker lines which will be processed after streaming completes
 -- If the text starts with a marker line and the previous queued item ends with
