@@ -17,6 +17,80 @@ if _G.anya_stream_ui_block == nil then
   _G.anya_stream_ui_block = false -- Hard block for any writes while UI prompt is active
 end
 
+local AUTOSCROLL_WIN_VAR = "anya_chat_autoscroll"
+
+local function is_chat_window(win)
+  if not vim.api.nvim_win_is_valid(win) then
+    return false
+  end
+
+  local bufnr = vim.api.nvim_win_get_buf(win)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return false
+  end
+
+  return vim.api.nvim_get_option_value("filetype", { buf = bufnr }) == "anya-chat"
+end
+
+local function is_window_at_buffer_bottom(win)
+  if not is_chat_window(win) then
+    return false
+  end
+
+  local bufnr = vim.api.nvim_win_get_buf(win)
+  local cursor = vim.api.nvim_win_get_cursor(win)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  return cursor[1] >= line_count
+end
+
+function M._set_autoscroll_enabled(win, enabled)
+  if not vim.api.nvim_win_is_valid(win) then
+    return
+  end
+
+  pcall(vim.api.nvim_win_set_var, win, AUTOSCROLL_WIN_VAR, enabled == true)
+end
+
+function M._is_autoscroll_enabled(win)
+  if not is_chat_window(win) then
+    return false
+  end
+
+  local ok, enabled = pcall(vim.api.nvim_win_get_var, win, AUTOSCROLL_WIN_VAR)
+  if ok then
+    return enabled == true
+  end
+
+  local at_bottom = is_window_at_buffer_bottom(win)
+  M._set_autoscroll_enabled(win, at_bottom)
+  return at_bottom
+end
+
+function M._refresh_window_autoscroll_state(win)
+  if not is_chat_window(win) then
+    return
+  end
+
+  M._set_autoscroll_enabled(win, is_window_at_buffer_bottom(win))
+end
+
+function M._setup_autoscroll_tracking()
+  if _G.anya_chat_autoscroll_tracking_setup then
+    return
+  end
+  _G.anya_chat_autoscroll_tracking_setup = true
+
+  local group = vim.api.nvim_create_augroup("AnyaChatAutoscroll", { clear = true })
+
+  vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter", "CursorMoved", "CursorMovedI", "WinScrolled" }, {
+    group = group,
+    callback = function()
+      M._refresh_window_autoscroll_state(vim.api.nvim_get_current_win())
+    end,
+    desc = "Enable chat autoscroll only while cursor stays on the bottom line",
+  })
+end
+
 -- Append text chunk to buffer
 function M._append_to_buffer(bufnr, chunk)
   local line_count = vim.api.nvim_buf_line_count(bufnr)
@@ -42,13 +116,15 @@ end
 
 -- Autoscroll to bottom of buffer for all windows showing it
 function M._autoscroll_to_bottom(bufnr)
+  local ft = vim.api.nvim_get_option_value("filetype", { buf = bufnr })
+
   for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(win) == bufnr then
+    if vim.api.nvim_win_get_buf(win) == bufnr and M._is_autoscroll_enabled(win) then
       local new_line_count = vim.api.nvim_buf_line_count(bufnr)
       pcall(vim.api.nvim_win_set_cursor, win, { new_line_count, 0 })
+      M._set_autoscroll_enabled(win, true)
 
       -- Trigger render-markdown to refresh this buffer
-      local ft = vim.api.nvim_get_option_value("filetype", { buf = bufnr })
       if ft == "anya-chat" then
         vim.api.nvim_exec_autocmds("CursorMoved", { buffer = bufnr })
         -- Refresh @filepath highlights
@@ -405,5 +481,7 @@ function M.flush_queue(process_markers_after)
     end
   end)
 end
+
+M._setup_autoscroll_tracking()
 
 return M
