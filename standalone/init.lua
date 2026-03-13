@@ -356,6 +356,7 @@ require("anya").setup({})
 vim.cmd("colorscheme danger")
 
 -- keymaps
+vim.keymap.set("v", "<leader>y", '"+y', { desc = "Copy to clipboard" })
 vim.keymap.set("n", "<leader>q", "<cmd>qa!<CR>", { desc = "Quit" })
 vim.keymap.set({ "n", "i" }, "<C-q>", "<Esc><cmd>qa!<CR>", { desc = "Quit" })
 

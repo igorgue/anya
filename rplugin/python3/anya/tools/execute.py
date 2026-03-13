@@ -819,7 +819,7 @@ async def execute(
         # Foreground execution (original behavior)
         if plugin_context.exec_callback:
             exec_task = asyncio.create_task(
-                plugin_context.exec_callback(command, cwd, None, ui_dir=ui_dir)
+                plugin_context.exec_callback(command, cwd, 600, ui_dir=ui_dir)
             )
             result = await _run_with_ui_requests(exec_task, ui_dir, plugin_context)
 

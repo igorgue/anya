@@ -12,7 +12,7 @@ import os
 import subprocess
 
 
-def run(command: str, cwd: str | None = None, timeout: int = 30) -> str:
+def run(command: str, cwd: str | None = None, timeout: int = 120) -> str:
     """Execute a shell command and return its output.
 
     stdout is returned on success.  On failure both stdout and stderr are
@@ -21,7 +21,7 @@ def run(command: str, cwd: str | None = None, timeout: int = 30) -> str:
     Args:
         command: Shell command string to execute.
         cwd: Working directory (default: os.getcwd()).
-        timeout: Seconds before the command is killed (default 30).
+        timeout: Seconds before the command is killed (default 120).
 
     Returns:
         Command output as a string.
@@ -52,7 +52,7 @@ def run(command: str, cwd: str | None = None, timeout: int = 30) -> str:
     return "\n".join(parts)
 
 
-def gh(command: str, cwd: str | None = None, timeout: int = 30) -> str:
+def gh(command: str, cwd: str | None = None, timeout: int = 120) -> str:
     """Execute a GitHub CLI (gh) command and return its output.
 
     Automatically prepends 'gh ' if the command does not already start with it.
@@ -60,7 +60,7 @@ def gh(command: str, cwd: str | None = None, timeout: int = 30) -> str:
     Args:
         command: gh sub-command and flags (e.g. "pr list --author @me").
         cwd: Working directory (default: os.getcwd()).
-        timeout: Seconds before the command is killed (default 30).
+        timeout: Seconds before the command is killed (default 120).
 
     Returns:
         Command output as a string.

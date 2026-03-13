@@ -1341,19 +1341,29 @@ end)
                         import glob
                         import json
                         import subprocess
+                        import tempfile
 
                         try:
                             # Use the cwd from the request, or fall back to current
                             cwd = _exec_cwd or self.nvim.call("getcwd")
+
+                            # Redirect stdout/stderr to temp files to avoid
+                            # pipe-buffer deadlock when the subprocess produces
+                            # more output than the OS pipe buffer (~64 KB).
+                            stdout_file = tempfile.NamedTemporaryFile(
+                                mode="w+", suffix=".out", delete=False
+                            )
+                            stderr_file = tempfile.NamedTemporaryFile(
+                                mode="w+", suffix=".err", delete=False
+                            )
 
                             # Execute command locally
                             process = subprocess.Popen(
                                 _exec_command,
                                 shell=True,
                                 cwd=cwd,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                text=True,
+                                stdout=stdout_file,
+                                stderr=stderr_file,
                             )
 
                             # Poll for process completion while serving UI requests
@@ -1366,12 +1376,17 @@ end)
                             while result is None:
                                 poll = process.poll()
                                 if poll is not None:
-                                    stdout = (
-                                        process.stdout.read() if process.stdout else ""
-                                    )
-                                    stderr = (
-                                        process.stderr.read() if process.stderr else ""
-                                    )
+                                    stdout_file.close()
+                                    stderr_file.close()
+                                    with open(stdout_file.name, "r") as f:
+                                        stdout = f.read()
+                                    with open(stderr_file.name, "r") as f:
+                                        stderr = f.read()
+                                    try:
+                                        os.unlink(stdout_file.name)
+                                        os.unlink(stderr_file.name)
+                                    except OSError:
+                                        pass
                                     result = {
                                         "stdout": stdout,
                                         "stderr": stderr,
@@ -1383,6 +1398,13 @@ end)
                                     and asyncio.get_event_loop().time() > deadline
                                 ):
                                     process.kill()
+                                    stdout_file.close()
+                                    stderr_file.close()
+                                    try:
+                                        os.unlink(stdout_file.name)
+                                        os.unlink(stderr_file.name)
+                                    except OSError:
+                                        pass
                                     result = {
                                         "stdout": "",
                                         "stderr": "",
@@ -1490,8 +1512,12 @@ end
                                             elif kind == "modify_buffer":
                                                 buf_content_req = req.get("content", "")
                                                 buf_mode = req.get("mode", "replace")
-                                                set_modified_flag = req.get("set_modified", True)
-                                                buf_target_path = req.get("target_path") or req.get("buf_path")
+                                                set_modified_flag = req.get(
+                                                    "set_modified", True
+                                                )
+                                                buf_target_path = req.get(
+                                                    "target_path"
+                                                ) or req.get("buf_path")
 
                                                 result_slot = [None]
                                                 mod_done = asyncio.Event()
@@ -1504,27 +1530,44 @@ end
                                                     _set_mod=set_modified_flag,
                                                 ):
                                                     try:
-                                                        target_bufnr = self._find_open_buffer_number(_target)
+                                                        target_bufnr = self._find_open_buffer_number(
+                                                            _target
+                                                        )
                                                         if target_bufnr is None:
                                                             if _target:
-                                                                result_slot[0] = f"Error: Open buffer not found for path: {_target}"
+                                                                result_slot[0] = (
+                                                                    f"Error: Open buffer not found for path: {_target}"
+                                                                )
                                                             else:
-                                                                result_slot[0] = "Error: No current buffer available"
+                                                                result_slot[0] = (
+                                                                    "Error: No current buffer available"
+                                                                )
                                                             return
-                                                        result_slot[0] = self._apply_buffer_modification(
-                                                            target_bufnr, _content, _mode, _set_mod
+                                                        result_slot[0] = (
+                                                            self._apply_buffer_modification(
+                                                                target_bufnr,
+                                                                _content,
+                                                                _mode,
+                                                                _set_mod,
+                                                            )
                                                         )
                                                     except Exception as e:
                                                         result_slot[0] = f"Error: {e}"
                                                     finally:
-                                                        mod_loop.call_soon_threadsafe(mod_done.set)
+                                                        mod_loop.call_soon_threadsafe(
+                                                            mod_done.set
+                                                        )
 
                                                 self.nvim.async_call(_apply_mod)
                                                 try:
-                                                    await asyncio.wait_for(mod_done.wait(), timeout=5.0)
+                                                    await asyncio.wait_for(
+                                                        mod_done.wait(), timeout=5.0
+                                                    )
                                                 except asyncio.TimeoutError:
                                                     pass
-                                                ui_result = result_slot[0] or "Error: timeout"
+                                                ui_result = (
+                                                    result_slot[0] or "Error: timeout"
+                                                )
 
                                             elif kind == "input":
                                                 default = req.get("default", "")
@@ -1600,6 +1643,32 @@ end
                                         except Exception:
                                             pass
 
+                                    # Process fire-and-forget event files (e.g. task_list_update)
+                                    for evt_file in glob.glob(
+                                        os.path.join(_exec_ui_dir, "*.event.json")
+                                    ):
+                                        try:
+                                            with open(evt_file) as _ef:
+                                                evt = json.load(_ef)
+                                            os.unlink(evt_file)
+                                        except Exception:
+                                            try:
+                                                os.unlink(evt_file)
+                                            except OSError:
+                                                pass
+                                            continue
+
+                                        evt_kind = evt.get("kind", "")
+                                        if evt_kind == "task_list_update":
+                                            _tl_title = evt.get("title", "")
+                                            _tl_items = evt.get("items", [])
+                                            self.nvim.async_call(
+                                                ui.notify_task_list,
+                                                self.nvim,
+                                                _tl_title,
+                                                _tl_items,
+                                            )
+
                                 await asyncio.sleep(0.05)
 
                         except Exception as e:
@@ -1640,7 +1709,9 @@ end
                     buf_content_mod = chunk.data.get("content", "")
                     buf_mode_mod = chunk.data.get("mode", "replace")
                     set_modified_mod = chunk.data.get("set_modified", True)
-                    target_path_mod = chunk.data.get("target_path") or chunk.data.get("buf_path")
+                    target_path_mod = chunk.data.get("target_path") or chunk.data.get(
+                        "buf_path"
+                    )
 
                     async def handle_modify_buffer_request(
                         _confirmation_id=confirmation_id,
@@ -1657,12 +1728,18 @@ end
 
                         def _apply():
                             try:
-                                target_bufnr = self._find_open_buffer_number(_target_path)
+                                target_bufnr = self._find_open_buffer_number(
+                                    _target_path
+                                )
                                 if target_bufnr is None:
                                     if _target_path:
-                                        result_container[0] = f"Error: Open buffer not found for path: {_target_path}"
+                                        result_container[0] = (
+                                            f"Error: Open buffer not found for path: {_target_path}"
+                                        )
                                     else:
-                                        result_container[0] = "Error: No current buffer available"
+                                        result_container[0] = (
+                                            "Error: No current buffer available"
+                                        )
                                     return
                                 result_container[0] = self._apply_buffer_modification(
                                     target_bufnr, _content, _mode, _set_modified
@@ -2556,6 +2633,7 @@ end)
         import glob
         import json
         import subprocess
+        import tempfile
 
         confirmation_id = chunk.data.get("confirmation_id")
         exec_command = chunk.data.get("command", "")
@@ -2576,21 +2654,39 @@ end)
                     break
 
             cwd = exec_cwd or cwd_val[0] or ""
+
+            # Redirect stdout/stderr to temp files to avoid
+            # pipe-buffer deadlock when output exceeds ~64 KB.
+            stdout_file = tempfile.NamedTemporaryFile(
+                mode="w+", suffix=".out", delete=False
+            )
+            stderr_file = tempfile.NamedTemporaryFile(
+                mode="w+", suffix=".err", delete=False
+            )
+
             process = subprocess.Popen(
                 exec_command,
                 shell=True,
                 cwd=cwd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+                stdout=stdout_file,
+                stderr=stderr_file,
             )
             deadline = asyncio.get_event_loop().time() + exec_timeout
             result = None
             while result is None:
                 poll = process.poll()
                 if poll is not None:
-                    stdout = process.stdout.read() if process.stdout else ""
-                    stderr = process.stderr.read() if process.stderr else ""
+                    stdout_file.close()
+                    stderr_file.close()
+                    with open(stdout_file.name, "r") as f:
+                        stdout = f.read()
+                    with open(stderr_file.name, "r") as f:
+                        stderr = f.read()
+                    try:
+                        os.unlink(stdout_file.name)
+                        os.unlink(stderr_file.name)
+                    except OSError:
+                        pass
                     result = {
                         "stdout": stdout,
                         "stderr": stderr,
@@ -2599,6 +2695,13 @@ end)
                     break
                 if asyncio.get_event_loop().time() > deadline:
                     process.kill()
+                    stdout_file.close()
+                    stderr_file.close()
+                    try:
+                        os.unlink(stdout_file.name)
+                        os.unlink(stderr_file.name)
+                    except OSError:
+                        pass
                     result = {
                         "stdout": "",
                         "stderr": "",
@@ -2686,6 +2789,32 @@ end)
                                 json.dump({"result": ui_result}, _f)
                         except Exception:
                             pass
+
+                    # Process fire-and-forget event files (e.g. task_list_update)
+                    for evt_file in glob.glob(
+                        os.path.join(exec_ui_dir, "*.event.json")
+                    ):
+                        try:
+                            with open(evt_file) as _ef:
+                                evt = json.load(_ef)
+                            os.unlink(evt_file)
+                        except Exception:
+                            try:
+                                os.unlink(evt_file)
+                            except OSError:
+                                pass
+                            continue
+
+                        evt_kind = evt.get("kind", "")
+                        if evt_kind == "task_list_update":
+                            _tl_title = evt.get("title", "")
+                            _tl_items = evt.get("items", [])
+                            self.nvim.async_call(
+                                ui.notify_task_list,
+                                self.nvim,
+                                _tl_title,
+                                _tl_items,
+                            )
 
                 await asyncio.sleep(0.05)
         except Exception as e:

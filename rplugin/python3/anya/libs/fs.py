@@ -364,16 +364,38 @@ def search_code(
         target = os.path.join(base, target)
 
     for cmd in (
-        ["rg", "--line-number", "--no-heading", "--smart-case", query, target],
-        ["grep", "-rn", "-e", query, target],
+        [
+            "rg",
+            "--line-number",
+            "--no-heading",
+            "--smart-case",
+            "--no-require-git",
+            query,
+            target,
+        ],
+        [
+            "grep",
+            "-rn",
+            "--exclude-dir=.git",
+            "--exclude-dir=node_modules",
+            "--exclude-dir=.venv",
+            "--exclude-dir=__pycache__",
+            "-e",
+            query,
+            target,
+        ],
     ):
         exe = shutil.which(cmd[0])
         if exe:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-            )
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            except subprocess.TimeoutExpired:
+                return f"Search timed out after 30s for '{query}' in {target}"
             output = result.stdout.strip()
             if output:
                 if len(output) > max_chars:
