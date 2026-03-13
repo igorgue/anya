@@ -1487,6 +1487,45 @@ end
                                                         )
                                                     )
 
+                                            elif kind == "modify_buffer":
+                                                buf_content_req = req.get("content", "")
+                                                buf_mode = req.get("mode", "replace")
+                                                set_modified_flag = req.get("set_modified", True)
+                                                buf_target_path = req.get("target_path") or req.get("buf_path")
+
+                                                result_slot = [None]
+                                                mod_done = asyncio.Event()
+                                                mod_loop = asyncio.get_running_loop()
+
+                                                def _apply_mod(
+                                                    _content=buf_content_req,
+                                                    _mode=buf_mode,
+                                                    _target=buf_target_path,
+                                                    _set_mod=set_modified_flag,
+                                                ):
+                                                    try:
+                                                        target_bufnr = self._find_open_buffer_number(_target)
+                                                        if target_bufnr is None:
+                                                            if _target:
+                                                                result_slot[0] = f"Error: Open buffer not found for path: {_target}"
+                                                            else:
+                                                                result_slot[0] = "Error: No current buffer available"
+                                                            return
+                                                        result_slot[0] = self._apply_buffer_modification(
+                                                            target_bufnr, _content, _mode, _set_mod
+                                                        )
+                                                    except Exception as e:
+                                                        result_slot[0] = f"Error: {e}"
+                                                    finally:
+                                                        mod_loop.call_soon_threadsafe(mod_done.set)
+
+                                                self.nvim.async_call(_apply_mod)
+                                                try:
+                                                    await asyncio.wait_for(mod_done.wait(), timeout=5.0)
+                                                except asyncio.TimeoutError:
+                                                    pass
+                                                ui_result = result_slot[0] or "Error: timeout"
+
                                             elif kind == "input":
                                                 default = req.get("default", "")
                                                 lua_prompt = prompt.replace(
@@ -1595,6 +1634,75 @@ end
                             )
 
                     asyncio.create_task(handle_exec_request())
+
+                elif chunk.event_type == StreamEventType.MODIFY_BUFFER_REQUEST:
+                    confirmation_id = chunk.data.get("confirmation_id")
+                    buf_content_mod = chunk.data.get("content", "")
+                    buf_mode_mod = chunk.data.get("mode", "replace")
+                    set_modified_mod = chunk.data.get("set_modified", True)
+                    target_path_mod = chunk.data.get("target_path") or chunk.data.get("buf_path")
+
+                    async def handle_modify_buffer_request(
+                        _confirmation_id=confirmation_id,
+                        _content=buf_content_mod,
+                        _mode=buf_mode_mod,
+                        _set_modified=set_modified_mod,
+                        _target_path=target_path_mod,
+                    ):
+                        import functools
+
+                        result_container = [None]
+                        loop = asyncio.get_running_loop()
+                        done = asyncio.Event()
+
+                        def _apply():
+                            try:
+                                target_bufnr = self._find_open_buffer_number(_target_path)
+                                if target_bufnr is None:
+                                    if _target_path:
+                                        result_container[0] = f"Error: Open buffer not found for path: {_target_path}"
+                                    else:
+                                        result_container[0] = "Error: No current buffer available"
+                                    return
+                                result_container[0] = self._apply_buffer_modification(
+                                    target_bufnr, _content, _mode, _set_modified
+                                )
+                            except Exception as e:
+                                result_container[0] = f"Error: {e}"
+                            finally:
+                                loop.call_soon_threadsafe(done.set)
+
+                        self.nvim.async_call(_apply)
+                        try:
+                            await asyncio.wait_for(done.wait(), timeout=5.0)
+                        except asyncio.TimeoutError:
+                            pass
+
+                        result_str = result_container[0] or "Error: timeout"
+
+                        try:
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(
+                                None,
+                                functools.partial(
+                                    self._confirmation_client.send_request,
+                                    RequestType.TOOL_CONFIRMATION_RESPONSE,
+                                    self.session_id,
+                                    _confirmation_id,
+                                    {
+                                        "confirmation_id": _confirmation_id,
+                                        "choice": result_str,
+                                    },
+                                    5.0,
+                                ),
+                            )
+                        except Exception as e:
+                            self.nvim.async_call(
+                                self.nvim.err_write,
+                                f"Anya: Error sending modify buffer response: {e}\n",
+                            )
+
+                    asyncio.create_task(handle_modify_buffer_request())
 
                 elif chunk.event_type == StreamEventType.ERROR:
                     error = chunk.data.get("error", "Unknown error")
