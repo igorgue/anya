@@ -46,6 +46,8 @@ class AnyaPlugin:
         self._current_task = None  # Track current agent task for cancellation
         self._current_request_id = None  # Track current request ID
         self._cancel_in_progress = False  # Prevent cancel spam
+        self._silent_cancel_requested = False
+        self._silent_cancel_request_ids = set()
         self._streaming_started = False  # Track if we've received any content
         self._request_cancelled = False  # Flag for async handler to check
         self.session_id = str(uuid.uuid4())  # Session ID for this Neovim instance
@@ -748,6 +750,7 @@ class AnyaPlugin:
         self._current_request_id = request_id
         self._streaming_started = False  # Reset streaming flag for new request
         self._request_cancelled = False  # Reset cancellation flag for new request
+        self._silent_cancel_requested = False
         self._current_task = asyncio.run_coroutine_threadsafe(
             self._run_agent_via_daemon(
                 text,
@@ -1921,7 +1924,11 @@ end
                 "AnyaRequestFinished",
                 {
                     "id": request_id,
-                    "status": "cancelled",
+                    "status": (
+                        "superseded"
+                        if request_id in self._silent_cancel_request_ids
+                        else "cancelled"
+                    ),
                 },
             )
 
@@ -1966,6 +1973,8 @@ end
             self._current_task = None
             self._current_request_id = None
             self._request_cancelled = False
+            self._silent_cancel_requested = False
+            self._silent_cancel_request_ids.discard(request_id)
 
             def _safe_set_tool_fold_open():
                 try:
@@ -2862,7 +2871,7 @@ pcall(vim.keymap.del, "n", "<C-c>")
         self._do_cancelled = False
         self._do_buf_number = None
 
-    def cancel_agent(self):
+    def cancel_agent(self, silent=False):
         """Cancel the current agent response and flush the queue."""
         # Only allow cancellation if streaming has actually started
         if not self._streaming_started or self._current_task is None:
@@ -2879,13 +2888,18 @@ pcall(vim.keymap.del, "n", "<C-c>")
         # Mark cancel as in progress to prevent spam
         self._cancel_in_progress = True
         self._request_cancelled = True  # Signal async handler to abort
+        self._silent_cancel_requested = silent
+        cancel_request_id = self._current_request_id
+        if silent and cancel_request_id:
+            self._silent_cancel_request_ids.add(cancel_request_id)
 
         # Send cancel request to daemon first (so daemon stops the agent)
         if self._current_request_id:
             try:
                 self._client.cancel_request(self.session_id, self._current_request_id)
             except Exception as e:
-                self.nvim.err_write(f"Anya: Failed to send cancel to daemon: {e}\n")
+                if not silent:
+                    self.nvim.err_write(f"Anya: Failed to send cancel to daemon: {e}\n")
 
         # Cancel the concurrent.futures.Future (this doesn't cancel the coroutine,
         # but we've already set _request_cancelled which the coroutine checks)
@@ -2900,13 +2914,10 @@ pcall(vim.keymap.del, "n", "<C-c>")
         # Force reset the request state in Lua to unlock the UI
         self.nvim.exec_lua("require('anya.conversation').force_reset_request_state()")
 
-        # Only show cancellation message if streaming actually started
         if self._streaming_started:
-            # Close any open code blocks in the buffer before adding cancellation message
             buffer_content = buffers.get_buffer_content(self.nvim, chat_buf.number)
             fixed_content = utils.close_open_code_blocks(buffer_content)
 
-            # If blocks were closed, we need to append the closing fences
             if len(fixed_content) > len(buffer_content):
                 original_lines = buffer_content.split("\n")
                 fixed_lines = fixed_content.split("\n")
@@ -2917,17 +2928,17 @@ pcall(vim.keymap.del, "n", "<C-c>")
                         self.nvim, chat_buf.number, added_content + "\n"
                     )
 
-            # Write cancellation message to chat buffer
-            cancel_msg = "\n> cancelled  "
-            ui.append_to_chat_buffer(self.nvim, chat_buf.number, cancel_msg)
+            if not silent:
+                cancel_msg = "\n> cancelled  "
+                ui.append_to_chat_buffer(self.nvim, chat_buf.number, cancel_msg)
 
         # Always emit finish event to notify Lua that request is done
         fidget.emit_user_event(
             self.nvim,
             "AnyaRequestFinished",
             {
-                "id": "cancelled",
-                "status": "cancelled",
+                "id": cancel_request_id or "cancelled",
+                "status": "superseded" if silent else "cancelled",
             },
         )
 
@@ -2936,6 +2947,13 @@ pcall(vim.keymap.del, "n", "<C-c>")
         self._current_request_id = None
         self._streaming_started = False
         self._cancel_in_progress = False
+
+    @pynvim.function("AnyaCancel", sync=True)
+    def anya_cancel(self, args):
+        """Cancel the current request. Pass a truthy arg for silent cancellation."""
+        silent = bool(args and args[0])
+        self.cancel_agent(silent=silent)
+        return True
 
     @pynvim.function("AnyaSend", sync=True)
     def anya_send(self, args):

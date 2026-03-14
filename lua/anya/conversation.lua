@@ -154,13 +154,17 @@ function M.send_message()
     return false
   end
 
-  -- If another request is in progress, queue the message instead of blocking
+  -- If another request is in progress, replace the queue with the latest prompt
+  -- and silently cancel the current response so the new prompt can run next.
   if is_send_blocked() then
     vim.api.nvim_set_option_value("modifiable", true, { buf = prompt_buf })
     vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, { "" })
-    table.insert(M._pending_queue, prompt_text)
-    local n = #M._pending_queue
-    vim.notify("Anya: Message queued" .. (n > 1 and (" (" .. n .. " pending)") or "") .. ".", vim.log.levels.INFO)
+    M._pending_queue = { prompt_text }
+
+    if M._sending_in_progress or M._request_in_progress then
+      pcall(vim.fn.AnyaCancel, true)
+    end
+
     return true
   end
 

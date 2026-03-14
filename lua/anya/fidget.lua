@@ -75,6 +75,12 @@ function M:init()
       if handle then
         -- Wait for streaming queue to empty before showing completion
         M:wait_for_queue_empty(function()
+          if event.data.status == "superseded" then
+            M:pop_progress_handle(event.data.id)
+            handle:finish()
+            return
+          end
+
           M:report_exit_status(handle, event)
           -- Display completion message for at least 1 second
           vim.defer_fn(function()
@@ -297,6 +303,8 @@ function M:init()
       if handle then
         if event.data.status == "success" then
           handle.message = "done"
+        elseif event.data.status == "superseded" then
+          handle.message = nil
         elseif event.data.status == "cancelled" then
           handle.message = "cancelled"
         else
@@ -351,6 +359,8 @@ function M:report_exit_status(handle, event)
         handle.message = "done"
       elseif event.data.status == "error" then
         handle.message = "error"
+      elseif event.data.status == "superseded" then
+        handle.message = nil
       else
         handle.message = "cancelled"
       end
@@ -360,6 +370,8 @@ function M:report_exit_status(handle, event)
       handle.message = "done"
     elseif event.data.status == "error" then
       handle.message = "error"
+    elseif event.data.status == "superseded" then
+      handle.message = nil
     else
       handle.message = "cancelled"
     end
