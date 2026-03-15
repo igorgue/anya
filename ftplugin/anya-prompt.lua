@@ -181,6 +181,16 @@ vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
   desc = "Schedule @filepath and /command reference highlighting",
 })
 
+vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
+  buffer = bufnr,
+  callback = function()
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      highlight_refs()
+    end
+  end,
+  desc = "Highlight references immediately on buffer enter",
+})
+
 -- Track leaving/entering prompt for navigation
 vim.api.nvim_create_autocmd("WinLeave", {
   buffer = bufnr,
@@ -194,6 +204,12 @@ vim.api.nvim_create_autocmd("WinEnter", {
   buffer = bufnr,
   callback = function()
     vim.g.anya_left_anya_win = false
+    -- Re-apply highlights after render-markdown finishes re-rendering
+    vim.schedule(function()
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        highlight_refs()
+      end
+    end)
     if anya_config.start_in_insert and vim.api.nvim_get_mode().mode ~= "i" then
       vim.schedule(function()
         if vim.api.nvim_get_current_buf() == bufnr then

@@ -92,8 +92,9 @@ end, { buffer = true, desc = "Jump to previous header" })
 -- Edit approval keymaps are set up by edit_view.setup_keymaps() when edit blocks are rendered
 -- This ensures the 1/2 keys only work within edit block extmark ranges
 
--- Highlight @filepath references and /commands using extmarks (works with treesitter)
+-- Highlight @filepath, #conv_id, and /commands using extmarks (works with treesitter)
 vim.api.nvim_set_hl(0, "AnyaFileRef", { link = "Constant", default = true })
+vim.api.nvim_set_hl(0, "AnyaConvRef", { link = "Function", default = true })
 vim.api.nvim_set_hl(0, "AnyaSlashCommand", { link = "Special", default = true })
 
 local highlight_ns = vim.api.nvim_create_namespace("anya_highlights")
@@ -118,6 +119,18 @@ local function highlight_refs()
       end
 
       vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaFileRef", line_idx, start_col - 1, end_col)
+      pos = end_col + 1
+    end
+
+    -- Find all #conv_id references
+    pos = 1
+    while true do
+      local start_col, end_col = line:find("#[A-Za-z0-9_-]+", pos)
+      if not start_col then
+        break
+      end
+
+      vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaConvRef", line_idx, start_col - 1, end_col)
       pos = end_col + 1
     end
 
@@ -339,7 +352,29 @@ if wk_ok then
   })
 end
 
--- Expose globally so streaming can call it
-_G.anya_highlight_chat_file_refs = highlight_refs
+-- Deferred highlight: fires after render-markdown re-renders.
+-- render-markdown uses vim.schedule (not vim.defer_fn), so one extra
+-- vim.schedule hop is enough to land after its render callback.
+-- Self-debouncing: only one pending call is ever in flight at a time.
+local highlight_deferred_pending = false
+local function highlight_refs_deferred()
+  if highlight_deferred_pending then
+    return
+  end
+  highlight_deferred_pending = true
+  -- First hop: let render-markdown's TextChanged → vim.schedule callback run.
+  -- Second hop: apply our highlights on top of the freshly rendered buffer.
+  vim.schedule(function()
+    vim.schedule(function()
+      highlight_deferred_pending = false
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        highlight_refs()
+      end
+    end)
+  end)
+end
+
+-- Expose globally so streaming can call the deferred version
+_G.anya_highlight_chat_file_refs = highlight_refs_deferred
 
 highlight_refs()

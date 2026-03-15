@@ -3245,11 +3245,6 @@ For more help, see :h anya"""
 
         self._trigger_compaction(conversation_id, llm_history)
 
-    @pynvim.function("AnyaCancel", sync=False)
-    def anya_cancel(self, args):
-        """Cancel the current agent response."""
-        self.cancel_agent()
-
     @pynvim.function("AnyaNewConversationId", sync=True)
     def new_conversation_id(self, args):
         """Generate a new conversation ID."""

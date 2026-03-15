@@ -51,11 +51,14 @@ def apply_reasoning_settings(model_settings: Any, api_type: str, thinking_budget
         effort = "medium"
 
     if effort == "none":
-        if api_type in {"chat_completions", "responses"}:
-            model_settings.reasoning = None
+        if api_type == "responses":
+            from agents.model_settings import Reasoning
+
+            model_settings.reasoning = Reasoning(effort="none")
+        elif api_type == "chat_completions":
             model_settings.extra_body = _merge_extra_body(
                 getattr(model_settings, "extra_body", None),
-                {"reasoning": {"enabled": False}},
+                {"reasoning_effort": "none"},
             )
         elif api_type == "anthropic":
             model_settings.extra_body = _merge_extra_body(
@@ -70,8 +73,11 @@ def apply_reasoning_settings(model_settings: Any, api_type: str, thinking_budget
 
 
 def build_openai_reasoning_params(api_type: str, reasoning_effort: str | None) -> dict[str, Any]:
-    if reasoning_effort == "none" and api_type in {"chat_completions", "responses"}:
-        return {"extra_body": {"reasoning": {"enabled": False}}}
+    if reasoning_effort == "none" and api_type == "responses":
+        return {"reasoning": {"effort": "none"}}
+
+    if reasoning_effort == "none" and api_type == "chat_completions":
+        return {"extra_body": {"reasoning_effort": "none"}}
 
     if reasoning_effort is None:
         return {}

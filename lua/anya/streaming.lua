@@ -127,12 +127,14 @@ function M._autoscroll_to_bottom(bufnr)
       -- Trigger render-markdown to refresh this buffer
       if ft == "anya-chat" then
         vim.api.nvim_exec_autocmds("CursorMoved", { buffer = bufnr })
-        -- Refresh @filepath highlights
-        if _G.anya_highlight_chat_file_refs then
-          _G.anya_highlight_chat_file_refs()
-        end
       end
     end
+  end
+
+  -- Always refresh @filepath/#conv_id highlights after render-markdown may have re-rendered,
+  -- regardless of whether any window was autoscrolling (cursor may be in the prompt buffer)
+  if ft == "anya-chat" and _G.anya_highlight_chat_file_refs then
+    _G.anya_highlight_chat_file_refs()
   end
 end
 
@@ -262,6 +264,12 @@ function M._ensure_timer_running()
       -- NOTE: Don't process markers here - let callers do it explicitly
       -- to avoid duplicate processing during tool calls
       table.remove(_G.anya_stream_queue, 1)
+
+      -- If queue is now empty, do a final deferred highlight so the completed
+      -- response is always highlighted regardless of cursor position.
+      if #_G.anya_stream_queue == 0 and _G.anya_highlight_chat_file_refs then
+        _G.anya_highlight_chat_file_refs()
+      end
     end
   end
 
