@@ -23,9 +23,6 @@ DO_AGENT_NAME = "Do"
 MAIN_ASSISTANT_NAME = "Anya"
 
 
-
-
-
 def _build_do_instructions(cwd: str | None = None) -> str:
     instructions = dedent(
         """

@@ -117,9 +117,7 @@ def init_db() -> None:
         conn.close()
 
 
-def search_conversation_mentions(
-    query: str, limit: int = 20
-) -> list[dict[str, Any]]:
+def search_conversation_mentions(query: str, limit: int = 20) -> list[dict[str, Any]]:
     """Search conversations for mention completion.
 
     Searches conversation titles for fuzzy matching.
@@ -154,12 +152,12 @@ def search_conversation_mentions(
                 (limit,),
             )
         results = [dict(row) for row in cursor.fetchall()]
-        
+
         # Set default title for untitled conversations
         for conv in results:
             if not conv.get("title"):
                 conv["title"] = "Untitled conversation"
-        
+
         return results
     finally:
         conn.close()
@@ -183,13 +181,13 @@ def get_conversation_content_for_mention(
     conv = load_conversation(conversation_id)
     if not conv:
         return None
-    
+
     conversation = conv["conversation"]
     messages = conv["messages"]
-    
+
     # Rebuild buffer content
     buffer_content = rebuild_buffer_content(conversation, messages)
-    
+
     # Strip marker lines
     lines = buffer_content.split("\n")
     clean_lines = []
@@ -199,15 +197,14 @@ def get_conversation_content_for_mention(
         if stripped.startswith("<!-- at:") or stripped.startswith("<!-- am:"):
             continue
         clean_lines.append(line)
-    
+
     content = "\n".join(clean_lines).strip()
-    
+
     # Cap to max_chars
     if len(content) > max_chars:
         content = content[:max_chars] + "\n... (truncated)"
-    
-    return content
 
+    return content
 
 
 def save_conversation(id: str, timestamp: str, cwd: str | None = None) -> bool:

@@ -42,7 +42,9 @@ def _merge_extra_body(existing: Any, updates: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-def apply_reasoning_settings(model_settings: Any, api_type: str, thinking_budget: str | None) -> None:
+def apply_reasoning_settings(
+    model_settings: Any, api_type: str, thinking_budget: str | None
+) -> None:
     effort = parse_reasoning_effort(thinking_budget)
     if thinking_budget is None:
         return
@@ -72,7 +74,9 @@ def apply_reasoning_settings(model_settings: Any, api_type: str, thinking_budget
         model_settings.reasoning.summary = "auto"
 
 
-def build_openai_reasoning_params(api_type: str, reasoning_effort: str | None) -> dict[str, Any]:
+def build_openai_reasoning_params(
+    api_type: str, reasoning_effort: str | None
+) -> dict[str, Any]:
     if reasoning_effort == "none" and api_type == "responses":
         return {"reasoning": {"effort": "none"}}
 
@@ -91,7 +95,9 @@ def build_openai_reasoning_params(api_type: str, reasoning_effort: str | None) -
     return {}
 
 
-def build_anthropic_thinking_param(reasoning_effort: str | None) -> dict[str, Any] | None:
+def build_anthropic_thinking_param(
+    reasoning_effort: str | None,
+) -> dict[str, Any] | None:
     if reasoning_effort == "none":
         return {"type": "disabled"}
     return None

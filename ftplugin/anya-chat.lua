@@ -97,13 +97,20 @@ vim.api.nvim_set_hl(0, "AnyaFileRef", { link = "Constant", default = true })
 vim.api.nvim_set_hl(0, "AnyaConvRef", { link = "Function", default = true })
 vim.api.nvim_set_hl(0, "AnyaSlashCommand", { link = "Special", default = true })
 
-local highlight_ns = vim.api.nvim_create_namespace("anya_highlights")
+local highlight_ns = vim.api.nvim_create_namespace("anya_chat_highlights")
 local bufnr = vim.api.nvim_get_current_buf()
 
 local highlight_timer = nil
 local highlight_pending = false
+local highlight_scheduled = false
 
 local function highlight_refs()
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    highlight_pending = false
+    highlight_scheduled = false
+    return
+  end
+
   vim.api.nvim_buf_clear_namespace(bufnr, highlight_ns, 0, -1)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
@@ -118,7 +125,13 @@ local function highlight_refs()
         break
       end
 
-      vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaFileRef", line_idx, start_col - 1, end_col)
+      vim.api.nvim_buf_set_extmark(
+        bufnr,
+        highlight_ns,
+        line_idx,
+        start_col - 1,
+        { end_col = end_col, hl_group = "AnyaFileRef", priority = 200 }
+      )
       pos = end_col + 1
     end
 
@@ -130,7 +143,13 @@ local function highlight_refs()
         break
       end
 
-      vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaConvRef", line_idx, start_col - 1, end_col)
+      vim.api.nvim_buf_set_extmark(
+        bufnr,
+        highlight_ns,
+        line_idx,
+        start_col - 1,
+        { end_col = end_col, hl_group = "AnyaConvRef", priority = 200 }
+      )
       pos = end_col + 1
     end
 
@@ -148,7 +167,13 @@ local function highlight_refs()
       local followed_ok = end_col == #line or line:sub(end_col + 1, end_col + 1) == " "
 
       if preceded_ok and followed_ok then
-        vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaSlashCommand", line_idx, start_col - 1, end_col)
+        vim.api.nvim_buf_set_extmark(
+          bufnr,
+          highlight_ns,
+          line_idx,
+          start_col - 1,
+          { end_col = end_col, hl_group = "AnyaSlashCommand", priority = 200 }
+        )
       end
 
       pos = end_col + 1
@@ -352,29 +377,27 @@ if wk_ok then
   })
 end
 
--- Deferred highlight: fires after render-markdown re-renders.
--- render-markdown uses vim.schedule (not vim.defer_fn), so one extra
--- vim.schedule hop is enough to land after its render callback.
--- Self-debouncing: only one pending call is ever in flight at a time.
-local highlight_deferred_pending = false
-local function highlight_refs_deferred()
-  if highlight_deferred_pending then
+local function schedule_render_safe_highlight()
+  if highlight_scheduled then
     return
   end
-  highlight_deferred_pending = true
-  -- First hop: let render-markdown's TextChanged → vim.schedule callback run.
-  -- Second hop: apply our highlights on top of the freshly rendered buffer.
+  highlight_scheduled = true
   vim.schedule(function()
-    vim.schedule(function()
-      highlight_deferred_pending = false
-      if vim.api.nvim_buf_is_valid(bufnr) then
-        highlight_refs()
-      end
-    end)
+    highlight_scheduled = false
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      highlight_refs()
+    end
   end)
 end
 
--- Expose globally so streaming can call the deferred version
-_G.anya_highlight_chat_file_refs = highlight_refs_deferred
+vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+  buffer = bufnr,
+  callback = schedule_render_safe_highlight,
+  desc = "Re-apply reference highlights after render-markdown updates",
+})
+
+_G.anya_highlight_chat_file_refs = schedule_render_safe_highlight
+_G.anya_highlight_chat_refs = schedule_render_safe_highlight
 
 highlight_refs()
+schedule_render_safe_highlight()

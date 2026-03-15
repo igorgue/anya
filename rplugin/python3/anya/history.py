@@ -255,9 +255,13 @@ def inject_conversation_context(text: str, max_chars_per_conv: int = 8000) -> st
     context_parts = []
     for conv_id in conv_ids:
         try:
-            content = db.get_conversation_content_for_mention(conv_id, max_chars_per_conv)
+            content = db.get_conversation_content_for_mention(
+                conv_id, max_chars_per_conv
+            )
             if content:
-                context_parts.append(f"<context from conversation {conv_id}>\n{content}\n</context>")
+                context_parts.append(
+                    f"<context from conversation {conv_id}>\n{content}\n</context>"
+                )
         except Exception:
             # Silently skip conversations that can't be loaded
             pass

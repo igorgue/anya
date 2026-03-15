@@ -92,14 +92,22 @@ vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP" }, {
 
 -- Highlight @filepath references and /commands using extmarks (works with treesitter)
 vim.api.nvim_set_hl(0, "AnyaFileRef", { link = "Constant", default = true })
+vim.api.nvim_set_hl(0, "AnyaConvRef", { link = "Function", default = true })
 vim.api.nvim_set_hl(0, "AnyaSlashCommand", { link = "Special", default = true })
 
-local highlight_ns = vim.api.nvim_create_namespace("anya_highlights")
+local highlight_ns = vim.api.nvim_create_namespace("anya_prompt_highlights")
 
 local highlight_timer = nil
 local highlight_pending = false
+local highlight_scheduled = false
 
 local function highlight_refs()
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    highlight_pending = false
+    highlight_scheduled = false
+    return
+  end
+
   vim.api.nvim_buf_clear_namespace(bufnr, highlight_ns, 0, -1)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
@@ -109,12 +117,18 @@ local function highlight_refs()
 
     -- Find #conversation_id mentions first (highlight with AnyaConvRef)
     while true do
-      local start_col, end_col = line:find("#[A-Za-z0-9]+", pos)
+      local start_col, end_col = line:find("#[A-Za-z0-9_-]+", pos)
       if not start_col then
         break
       end
 
-      vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "Function", line_idx, start_col - 1, end_col)
+      vim.api.nvim_buf_set_extmark(
+        bufnr,
+        highlight_ns,
+        line_idx,
+        start_col - 1,
+        { end_col = end_col, hl_group = "AnyaConvRef", priority = 200 }
+      )
       pos = end_col + 1
     end
 
@@ -130,7 +144,13 @@ local function highlight_refs()
       -- Check if this is actually a # pattern we already highlighted
       local matched_text = line:sub(start_col, end_col)
       if not matched_text:match("^#") then
-        vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaFileRef", line_idx, start_col - 1, end_col)
+        vim.api.nvim_buf_set_extmark(
+          bufnr,
+          highlight_ns,
+          line_idx,
+          start_col - 1,
+          { end_col = end_col, hl_group = "AnyaFileRef", priority = 200 }
+        )
       end
       pos = end_col + 1
     end
@@ -149,7 +169,13 @@ local function highlight_refs()
       local followed_ok = end_col == #line or line:sub(end_col + 1, end_col + 1) == " "
 
       if preceded_ok and followed_ok then
-        vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaSlashCommand", line_idx, start_col - 1, end_col)
+        vim.api.nvim_buf_set_extmark(
+          bufnr,
+          highlight_ns,
+          line_idx,
+          start_col - 1,
+          { end_col = end_col, hl_group = "AnyaSlashCommand", priority = 200 }
+        )
       end
 
       pos = end_col + 1
@@ -372,8 +398,25 @@ end
 vim.keymap.set("n", "<C-k>", focus_chat, { buffer = true, nowait = true, desc = "Focus chat window" })
 vim.keymap.set("i", "<C-k>", focus_chat, { buffer = true, nowait = true, desc = "Focus chat window" })
 
+local function schedule_render_safe_highlight()
+  if highlight_scheduled then
+    return
+  end
+  highlight_scheduled = true
+  vim.schedule(function()
+    highlight_scheduled = false
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      highlight_refs()
+    end
+  end)
+end
+
+_G.anya_highlight_prompt_refs = schedule_render_safe_highlight
+_G.anya_highlight_prompt_file_refs = schedule_render_safe_highlight
+
 -- Initial highlight
 vim.schedule(highlight_refs)
+schedule_render_safe_highlight()
 
 -- Trigger completions with @ for file mentions
 -- This integrates with blink.cmp or other completion engines

@@ -146,6 +146,9 @@ local function load_conversation(conversation_id, new_cwd, title)
   -- Process markers to create folds and extmarks
   local text = require("anya.text")
   text._process_markers(chat_buf)
+  if _G.anya_highlight_chat_file_refs then
+    _G.anya_highlight_chat_file_refs()
+  end
 
   -- Scroll to bottom
   text._autoscroll_to_bottom(chat_buf)

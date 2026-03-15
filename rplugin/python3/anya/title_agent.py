@@ -43,9 +43,6 @@ def _clean_content(text: str) -> str:
     return text[:_MAX_CONTENT_CHARS]
 
 
-
-
-
 def _build_openai_request_kwargs(
     *,
     api_type: str,

@@ -37,12 +37,12 @@ local function is_conversation_mention_context(line, cursor_col)
   if not at_pos then
     return false, at_pos, query
   end
-  
+
   -- If query contains / or . it's likely a file path, not a conversation ID
   if query:match("[/.]") then
     return false, at_pos, query
   end
-  
+
   return true, at_pos, query
 end
 
@@ -74,7 +74,7 @@ function mentions.new(_opts)
 
       -- Search conversations via RPC
       local results = vim.fn.AnyaSearchMentions(query or "", 20)
-      
+
       if not results or type(results) ~= "table" then
         callback({
           items = {},
@@ -88,7 +88,7 @@ function mentions.new(_opts)
       for _, conv in ipairs(results) do
         local conv_id = conv.id or ""
         local title = conv.title or "Untitled"
-        
+
         -- Show ID in the completion menu with title as description
         table.insert(items, {
           label = conv_id,

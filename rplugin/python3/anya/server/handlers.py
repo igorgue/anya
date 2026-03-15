@@ -1123,7 +1123,7 @@ class RequestHandler:
         """
         query = request.payload.get("query", "")
         limit = request.payload.get("limit", 20)
-        
+
         try:
             results = db.search_conversation_mentions(query, limit)
             return make_success_response(request.request_id, {"results": results})
@@ -1138,14 +1138,18 @@ class RequestHandler:
         """
         conversation_id = request.payload.get("conversation_id")
         max_chars = request.payload.get("max_chars", 8000)
-        
+
         if not conversation_id:
             return make_error_response(request.request_id, "conversation_id required")
-        
+
         try:
-            content = db.get_conversation_content_for_mention(conversation_id, max_chars)
+            content = db.get_conversation_content_for_mention(
+                conversation_id, max_chars
+            )
             if content is None:
-                return make_error_response(request.request_id, f"Conversation {conversation_id} not found")
+                return make_error_response(
+                    request.request_id, f"Conversation {conversation_id} not found"
+                )
             return make_success_response(request.request_id, {"content": content})
         except Exception as e:
             self.logger.exception(f"Error getting mention content: {e}")

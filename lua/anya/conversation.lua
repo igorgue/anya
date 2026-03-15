@@ -2,6 +2,46 @@
 -- Handles creating conversations and sending user messages to the chat buffer
 
 local M = {}
+
+function M._force_chat_highlight_refresh(chat_win, prompt_win)
+  vim.schedule(function()
+    if not (chat_win and vim.api.nvim_win_is_valid(chat_win)) then
+      return
+    end
+
+    local return_win = nil
+    if prompt_win and vim.api.nvim_win_is_valid(prompt_win) then
+      return_win = prompt_win
+    else
+      local cur = vim.api.nvim_get_current_win()
+      if cur and vim.api.nvim_win_is_valid(cur) then
+        return_win = cur
+      end
+    end
+
+    pcall(vim.api.nvim_set_current_win, chat_win)
+    pcall(vim.cmd, "redraw")
+
+    vim.schedule(function()
+      if return_win and vim.api.nvim_win_is_valid(return_win) then
+        pcall(vim.api.nvim_set_current_win, return_win)
+        pcall(vim.cmd, "redraw")
+      end
+
+      vim.schedule(function()
+        if _G.anya_highlight_chat_file_refs then
+          pcall(_G.anya_highlight_chat_file_refs)
+        end
+        if _G.anya_highlight_prompt_refs then
+          pcall(_G.anya_highlight_prompt_refs)
+        end
+      end)
+    end)
+  end)
+end
+
+_G.anya_force_chat_highlight_refresh = M._force_chat_highlight_refresh
+
 local markers = require("anya.markers")
 local text = require("anya.text")
 
@@ -178,6 +218,9 @@ function M.send_message()
   -- Ensure buffer is modifiable (might be set to non-modifiable by history navigation)
   vim.api.nvim_set_option_value("modifiable", true, { buf = prompt_buf })
   vim.api.nvim_buf_set_lines(prompt_buf, 0, -1, false, { "" })
+  if _G.anya_highlight_prompt_refs then
+    _G.anya_highlight_prompt_refs()
+  end
 
   -- Single RPC call: send text, get back IDs, schedules agent task
   -- Server handles: ID generation, timestamp, database save
@@ -271,6 +314,15 @@ function M.send_message()
 
   -- Process markers to create folds and extmarks
   text._process_markers(chat_buf)
+  if _G.anya_highlight_chat_file_refs then
+    _G.anya_highlight_chat_file_refs()
+  end
+
+  local chat_win = vim.fn.bufwinid(chat_buf)
+  local prompt_win = vim.fn.bufwinid(prompt_buf)
+  if chat_win ~= -1 then
+    M._force_chat_highlight_refresh(chat_win, prompt_win ~= -1 and prompt_win or nil)
+  end
 
   -- Force-enable autoscroll and scroll to bottom (user just sent a message)
   text._force_autoscroll_to_bottom(chat_buf)
@@ -460,6 +512,9 @@ function M._drain_pending_queue()
   vim.api.nvim_set_option_value("modifiable", was_modifiable, { buf = chat_buf })
 
   text._process_markers(chat_buf)
+  if _G.anya_highlight_chat_file_refs then
+    _G.anya_highlight_chat_file_refs()
+  end
   text._force_autoscroll_to_bottom(chat_buf)
 
   -- Save to prompt history

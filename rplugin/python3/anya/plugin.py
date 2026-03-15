@@ -3775,17 +3775,17 @@ Usage:
     @pynvim.function("AnyaSearchMentions", sync=True)
     def anya_search_mentions(self, args):
         """Search conversations for @mention completion.
-        
+
         Args:
             args[0]: query string
             args[1]: limit (optional, default 20)
-        
+
         Returns:
             List of conversation dicts with id, title, updated_at, cwd
         """
         query = args[0] if args else ""
         limit = args[1] if len(args) > 1 else 20
-        
+
         try:
             self._ensure_db()
             return db.search_conversation_mentions(query, limit)
@@ -3795,23 +3795,25 @@ Usage:
     @pynvim.function("AnyaGetMentionContent", sync=True)
     def anya_get_mention_content(self, args):
         """Get content of a conversation for mention context injection.
-        
+
         Args:
             args[0]: conversation_id
             args[1]: max_chars (optional, default 8000)
-        
+
         Returns:
             Dict with 'content' field or 'error' field
         """
         if not args:
             return {"error": "conversation_id required"}
-        
+
         conversation_id = args[0]
         max_chars = args[1] if len(args) > 1 else 8000
-        
+
         try:
             self._ensure_db()
-            content = db.get_conversation_content_for_mention(conversation_id, max_chars)
+            content = db.get_conversation_content_for_mention(
+                conversation_id, max_chars
+            )
             if content is None:
                 return {"error": f"Conversation {conversation_id} not found"}
             return {"content": content}

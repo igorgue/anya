@@ -131,8 +131,7 @@ function M._autoscroll_to_bottom(bufnr)
     end
   end
 
-  -- Always refresh @filepath/#conv_id highlights after render-markdown may have re-rendered,
-  -- regardless of whether any window was autoscrolling (cursor may be in the prompt buffer)
+  -- Always refresh @filepath/#conv_id highlights after buffer writes.
   if ft == "anya-chat" and _G.anya_highlight_chat_file_refs then
     _G.anya_highlight_chat_file_refs()
   end
@@ -265,10 +264,27 @@ function M._ensure_timer_running()
       -- to avoid duplicate processing during tool calls
       table.remove(_G.anya_stream_queue, 1)
 
-      -- If queue is now empty, do a final deferred highlight so the completed
-      -- response is always highlighted regardless of cursor position.
-      if #_G.anya_stream_queue == 0 and _G.anya_highlight_chat_file_refs then
-        _G.anya_highlight_chat_file_refs()
+      if #_G.anya_stream_queue == 0 then
+        if _G.anya_highlight_chat_file_refs then
+          _G.anya_highlight_chat_file_refs()
+        end
+
+        if _G.anya_force_chat_highlight_refresh then
+          local chat_win = nil
+          local prompt_win = nil
+          for _, win in ipairs(vim.api.nvim_list_wins()) do
+            local buf = vim.api.nvim_win_get_buf(win)
+            if vim.api.nvim_buf_is_valid(buf) then
+              local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
+              if ft == "anya-chat" and not chat_win then
+                chat_win = win
+              elseif ft == "anya-prompt" and not prompt_win then
+                prompt_win = win
+              end
+            end
+          end
+          pcall(_G.anya_force_chat_highlight_refresh, chat_win, prompt_win)
+        end
       end
     end
   end
