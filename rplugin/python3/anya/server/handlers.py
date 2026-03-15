@@ -709,6 +709,7 @@ class RequestHandler:
         thinking_started = False
         thinking_finalized = False
         thinking_source = None
+        assistant_text_started = False
         parallel_tools = []
         parallel_skip_tools = []
         pending_tool_outputs = []
@@ -788,9 +789,25 @@ class RequestHandler:
 
                 # Handle reasoning events
                 if is_reasoning_event:
+                    # Some chat_completions providers (including OpenRouter models)
+                    # can emit trailing reasoning events after assistant text has
+                    # already started. Those are duplicates/bookkeeping, not a new
+                    # visible thinking phase, and reopening thinking here creates an
+                    # empty dangling block at the end of the message.
+                    if assistant_text_started:
+                        continue
+
+                    # Ignore empty reasoning bookkeeping events. Some SDK streams
+                    # emit trailing reasoning-shaped events with no visible text;
+                    # opening a new thinking fold for those creates an empty block
+                    # at the end of the assistant message.
+                    if not reasoning_text:
+                        continue
+
                     # A new reasoning block may arrive after a previous one was
                     # finalized (e.g., the model thinks again after seeing tool
-                    # results).  Reset state so we open a fresh thinking fold.
+                    # results). Reset state only when we have actual visible
+                    # reasoning text to show.
                     if thinking_finalized:
                         thinking_started = False
                         thinking_finalized = False
@@ -805,18 +822,29 @@ class RequestHandler:
                             {},
                         )
 
-                    if reasoning_text:
-                        await self._send_stream_chunk(
-                            session_id,
-                            request_id,
-                            StreamEventType.THINKING_DELTA,
-                            {"text": reasoning_text},
-                        )
+                    await self._send_stream_chunk(
+                        session_id,
+                        request_id,
+                        StreamEventType.THINKING_DELTA,
+                        {"text": reasoning_text},
+                    )
 
                     continue
 
-                # Handle finalization transition
-                if thinking_started and not thinking_finalized:
+                # Finalize an open thinking block only when actual assistant text
+                # starts streaming. Raw response events include many non-reasoning
+                # bookkeeping events between reasoning deltas; closing on those
+                # fragments the UI into many tiny thinking folds.
+                should_finalize_thinking = (
+                    thinking_started
+                    and not thinking_finalized
+                    and hasattr(event, "data")
+                    and isinstance(event.data, ResponseTextDeltaEvent)
+                    and bool(getattr(event.data, "delta", ""))
+                )
+
+                # Handle run item events
+                if should_finalize_thinking:
                     thinking_finalized = True
                     await self._send_stream_chunk(
                         session_id,
@@ -825,13 +853,18 @@ class RequestHandler:
                         {},
                     )
 
-                # Handle run item events
                 if event.type == "run_item_stream_event":
                     item = event.item
                     item_type = getattr(item, "type", None)
 
                     # Handle reasoning items
                     if item_type == "reasoning_item":
+                        # Some providers emit a reasoning_item after assistant text
+                        # has already started streaming. Ignore it so we don't open
+                        # a trailing empty thinking block.
+                        if assistant_text_started:
+                            continue
+
                         # Reset state so a new thinking block can open after
                         # the model saw tool results and thinks again.
                         if thinking_started and thinking_finalized:
@@ -881,6 +914,21 @@ class RequestHandler:
                                     {},
                                 )
                             continue
+
+                    # Close an open thinking block when a non-reasoning run item
+                    # arrives (tool call, tool output, message output, etc.).
+                    if (
+                        item_type != "reasoning_item"
+                        and thinking_started
+                        and not thinking_finalized
+                    ):
+                        thinking_finalized = True
+                        await self._send_stream_chunk(
+                            session_id,
+                            request_id,
+                            StreamEventType.THINKING_END,
+                            {},
+                        )
 
                     # Handle tool calls
                     if item_type == "tool_call_item":
@@ -978,6 +1026,7 @@ class RequestHandler:
                 ):
                     raw_delta = event.data.delta
                     if raw_delta:
+                        assistant_text_started = True
                         # Filter anya markers for display
                         delta, in_anya_marker = utils.filter_anya_markers(
                             raw_delta, in_anya_marker
@@ -1054,8 +1103,12 @@ class RequestHandler:
                 self.logger.warning(f"Error sending token usage: {e}", exc_info=True)
 
         finally:
-            # Ensure thinking is closed even on exception/cancellation
+            # Ensure thinking is closed if it was actually opened and left open.
+            # Do not emit a trailing THINKING_END for already self-contained
+            # reasoning-item folds, otherwise the UI creates an empty extra
+            # thinking block at the end.
             if thinking_started and not thinking_finalized:
+                thinking_finalized = True
                 await self._send_stream_chunk(
                     session_id,
                     request_id,

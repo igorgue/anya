@@ -29,24 +29,44 @@ function! s:get_python_host_prog() abort
   return exepath('python3')
 endfunction
 
+function! s:on_install_exit(python, job, code, event) abort
+  if a:code != 0
+    echohl WarningMsg
+    echom 'Anya: failed to install into ' .. a:python
+    echohl None
+    return
+  endif
+
+  silent! UpdateRemotePlugins
+endfunction
+
+function! s:install_anya_async(python) abort
+  call jobstart([a:python, '-m', 'pip', 'install', '-e', s:plugin_root], {
+        \ 'stdout_buffered': v:true,
+        \ 'stderr_buffered': v:true,
+        \ 'on_exit': function('s:on_install_exit', [a:python]),
+        \ })
+endfunction
+
+function! s:on_import_check_exit(python, job, code, event) abort
+  if a:code == 0
+    return
+  endif
+
+  call s:install_anya_async(a:python)
+endfunction
+
 function! s:ensure_anya_installed() abort
   let l:python = s:get_python_host_prog()
   if empty(l:python)
     return
   endif
 
-  call system([l:python, '-c', 'import anya'])
-  if v:shell_error == 0
-    return
-  endif
-
-  let l:output = system([l:python, '-m', 'pip', 'install', '-e', s:plugin_root])
-  if v:shell_error != 0
-    echohl WarningMsg
-    echom 'Anya: failed to install into ' .. l:python
-    echom l:output
-    echohl None
-  endif
+  call jobstart([l:python, '-c', 'import anya'], {
+        \ 'stdout_buffered': v:true,
+        \ 'stderr_buffered': v:true,
+        \ 'on_exit': function('s:on_import_check_exit', [l:python]),
+        \ })
 endfunction
 
 call s:ensure_anya_installed()

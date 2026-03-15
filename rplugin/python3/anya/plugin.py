@@ -74,12 +74,7 @@ class AnyaPlugin:
         self._system_listener_task = None
         self._system_listener_running = False
 
-        # Start daemon check in background on plugin load
-        try:
-            loop = self._ensure_loop()
-            asyncio.run_coroutine_threadsafe(self._ensure_daemon_running(), loop)
-        except Exception as e:
-            self.nvim.err_write(f"Anya: Error starting daemon check: {e}\n")
+        # Daemon startup is deferred until first actual use.
 
     def _ensure_loop(self):
         """Ensure the asyncio event loop is running (lazy initialization)."""
@@ -161,6 +156,15 @@ class AnyaPlugin:
                 self.nvim.err_write,
                 f"Anya: Error checking daemon: {e}\n",
             )
+
+    def _ensure_daemon_running_sync(self):
+        """Ensure the daemon is running before making a request."""
+        if self._daemon_check_done:
+            return
+
+        loop = self._ensure_loop()
+        future = asyncio.run_coroutine_threadsafe(self._ensure_daemon_running(), loop)
+        future.result()
 
     async def _start_system_event_listener(self):
         """Start listening for daemon system events (MCP status, etc.)."""
@@ -1016,18 +1020,22 @@ class AnyaPlugin:
                         )
 
                 elif chunk.event_type == StreamEventType.THINKING_START:
-                    thinking_started = True
-                    thinking_header = spacing_manager.format_content(
-                        "**thinking**", ContentType.THINKING, ["fold_start", "thinking"]
-                    )
-                    collected_content.append(thinking_header)
-                    if not self._request_cancelled:
-                        self.nvim.async_call(
-                            ui.stream_text_to_buffer,
-                            self.nvim,
-                            chat_bufnr,
-                            thinking_header,
+                    if not thinking_started or thinking_finalized:
+                        thinking_started = True
+                        thinking_finalized = False
+                        thinking_header = spacing_manager.format_content(
+                            "**thinking**",
+                            ContentType.THINKING,
+                            ["fold_start", "thinking"],
                         )
+                        collected_content.append(thinking_header)
+                        if not self._request_cancelled:
+                            self.nvim.async_call(
+                                ui.stream_text_to_buffer,
+                                self.nvim,
+                                chat_bufnr,
+                                thinking_header,
+                            )
 
                 elif chunk.event_type == StreamEventType.THINKING_DELTA:
                     delta = chunk.data.get("text", "")
@@ -1062,19 +1070,21 @@ class AnyaPlugin:
                         )
 
                 elif chunk.event_type == StreamEventType.THINKING_END:
-                    thinking_finalized = True
-                    thinking_footer = spacing_manager.format_content(
-                        "", ContentType.MARKER, ["fold_end"]
-                    )
-                    collected_content.append(thinking_footer)
-                    if not self._request_cancelled:
-                        # Use sync to ensure fold_end is written before any tool fold_start
-                        self.nvim.async_call(
-                            ui.stream_text_to_buffer_sync,
-                            self.nvim,
-                            chat_bufnr,
-                            thinking_footer,
+                    if thinking_started and not thinking_finalized:
+                        thinking_finalized = True
+                        thinking_started = False
+                        thinking_footer = spacing_manager.format_content(
+                            "", ContentType.MARKER, ["fold_end"]
                         )
+                        collected_content.append(thinking_footer)
+                        if not self._request_cancelled:
+                            # Use sync to ensure fold_end is written before any tool fold_start
+                            self.nvim.async_call(
+                                ui.stream_text_to_buffer_sync,
+                                self.nvim,
+                                chat_bufnr,
+                                thinking_footer,
+                            )
 
                 elif chunk.event_type == StreamEventType.TOOL_CALL_START:
                     tool_name = chunk.data.get("tool_name", "")
@@ -1826,16 +1836,10 @@ end
             except Exception as e:
                 self.nvim.err_write(f"Anya: Error sending request: {e}\n")
 
-            # Ensure thinking is closed
-            if thinking_started and not thinking_finalized:
-                thinking_footer = "\n" + markers.make_marker("fold_end") + "\n"
-                collected_content.append(thinking_footer)
-                self.nvim.async_call(
-                    ui.stream_text_to_buffer,
-                    self.nvim,
-                    chat_bufnr,
-                    thinking_footer,
-                )
+            # Do not synthesize a trailing thinking close here.
+            # The daemon is the single source of truth for THINKING_END events;
+            # adding a local fold_end at stream teardown can create an empty
+            # extra thinking block when the server already finalized reasoning.
 
             # Save message to database
             now = datetime.now(timezone.utc)
@@ -3271,6 +3275,7 @@ For more help, see :h anya"""
 
     @pynvim.function("AnyaDo", sync=False)
     def anya_do(self, args):
+        self._ensure_daemon_running_sync()
         """Run :Anya do programmatically from Lua."""
         if not args:
             self.nvim.err_write("AnyaDo requires an instruction argument.\n")
@@ -3774,6 +3779,7 @@ Usage:
 
     @pynvim.function("AnyaSearchMentions", sync=True)
     def anya_search_mentions(self, args):
+        self._ensure_daemon_running_sync()
         """Search conversations for @mention completion.
 
         Args:
@@ -3794,6 +3800,7 @@ Usage:
 
     @pynvim.function("AnyaGetMentionContent", sync=True)
     def anya_get_mention_content(self, args):
+        self._ensure_daemon_running_sync()
         """Get content of a conversation for mention context injection.
 
         Args:
