@@ -5,10 +5,7 @@ from typing import TYPE_CHECKING
 from agents import Agent
 from agents.models.default_models import get_default_model_settings
 
-from .dynamic_instructions import (
-    generate_dynamic_code_instructions,
-    update_agent_instructions,
-)
+from .dynamic_instructions import update_agent_instructions
 
 from .utils import get_instructions
 from ..system_prompt import apply_system_prompt
@@ -70,15 +67,12 @@ async def CodeAgent(
     # Get base instructions
     base_instructions = get_instructions("code.md")
 
-    # Generate dynamic instructions
-    dynamic_instructions = await generate_dynamic_code_instructions([])
-
-    # Append built-in libs section (auto-discovered from anya.libs)
+    # Append built-in libs section (auto-discovered from anya.libs), including
+    # dynamically generated MCP server/tool documentation.
     libs_instructions = get_libs_prompt()
 
     # Combine instructions
-    instructions = update_agent_instructions(base_instructions, dynamic_instructions)
-    instructions = update_agent_instructions(instructions, libs_instructions)
+    instructions = update_agent_instructions(base_instructions, libs_instructions)
 
     # Expand placeholders and append environment context at the end.
     instructions = apply_system_prompt(instructions, nvim=nvim, cwd=cwd)

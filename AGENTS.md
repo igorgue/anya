@@ -200,12 +200,12 @@ from anya.libs import fs
 
 | Function | Description |
 |----------|-------------|
-| `read_file(path, range_spec)` | Read file with line numbers. Default 300 lines. Supports `@start-end`, `@50-100`. |
+| `read_file(path_with_range, cwd=None)` | Read file with line numbers. Default 300 lines. Use `file.py@start-end` syntax for ranges. |
 | `read_many_files(paths)` | Read multiple files efficiently in one call. |
-| `list_files(directory)` | List files recursively (respects .gitignore via fd). |
-| `search_code(pattern, directory)` | Search for patterns using ripgrep. |
-| `create_file(path, content)` | Create a new file (raises if exists). |
-| `write_file(path, content)` | Write to file, creating directories as needed. |
+| `list_files(path=".", max_results=200, cwd=None)` | List files recursively (respects .gitignore via fd). |
+| `search_code(query, path=None, max_chars=4000, cwd=None)` | Search for patterns using ripgrep. |
+| `create_file(path, content=None, lines=None, cwd=None)` | Create a new file (raises if exists). |
+| `write_file(path, content=None, lines=None, cwd=None)` | Write to file, creating directories as needed. |
 
 ### Shell & Git (`shell`)
 

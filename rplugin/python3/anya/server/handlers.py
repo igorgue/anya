@@ -788,10 +788,13 @@ class RequestHandler:
 
                 # Handle reasoning events
                 if is_reasoning_event:
-                    # Don't send reasoning events after thinking has been finalized
-                    # (e.g., when a tool call has started)
+                    # A new reasoning block may arrive after a previous one was
+                    # finalized (e.g., the model thinks again after seeing tool
+                    # results).  Reset state so we open a fresh thinking fold.
                     if thinking_finalized:
-                        continue
+                        thinking_started = False
+                        thinking_finalized = False
+                        thinking_source = None
 
                     if not thinking_started:
                         thinking_started = True
@@ -828,49 +831,56 @@ class RequestHandler:
                     item_type = getattr(item, "type", None)
 
                     # Handle reasoning items
-                    if item_type == "reasoning_item" and not thinking_started:
-                        raw_item = getattr(item, "raw_item", None)
-                        summary_parts = (
-                            getattr(raw_item, "summary", None) if raw_item else None
-                        )
-                        content_parts = (
-                            getattr(raw_item, "content", None) if raw_item else None
-                        )
+                    if item_type == "reasoning_item":
+                        # Reset state so a new thinking block can open after
+                        # the model saw tool results and thinks again.
+                        if thinking_started and thinking_finalized:
+                            thinking_started = False
+                            thinking_finalized = False
+                            thinking_source = None
+                        if not thinking_started:
+                            raw_item = getattr(item, "raw_item", None)
+                            summary_parts = (
+                                getattr(raw_item, "summary", None) if raw_item else None
+                            )
+                            content_parts = (
+                                getattr(raw_item, "content", None) if raw_item else None
+                            )
 
-                        summary_text = "\n".join(
-                            getattr(p, "text", "")
-                            for p in (summary_parts or [])
-                            if getattr(p, "text", "")
-                        )
-                        content_text = "\n".join(
-                            getattr(p, "text", "")
-                            for p in (content_parts or [])
-                            if getattr(p, "text", "")
-                        )
-                        display_text = summary_text or content_text
+                            summary_text = "\n".join(
+                                getattr(p, "text", "")
+                                for p in (summary_parts or [])
+                                if getattr(p, "text", "")
+                            )
+                            content_text = "\n".join(
+                                getattr(p, "text", "")
+                                for p in (content_parts or [])
+                                if getattr(p, "text", "")
+                            )
+                            display_text = summary_text or content_text
 
-                        if display_text:
-                            thinking_started = True
-                            thinking_finalized = True
-                            await self._send_stream_chunk(
-                                session_id,
-                                request_id,
-                                StreamEventType.THINKING_START,
-                                {},
-                            )
-                            await self._send_stream_chunk(
-                                session_id,
-                                request_id,
-                                StreamEventType.THINKING_DELTA,
-                                {"text": display_text},
-                            )
-                            await self._send_stream_chunk(
-                                session_id,
-                                request_id,
-                                StreamEventType.THINKING_END,
-                                {},
-                            )
-                        continue
+                            if display_text:
+                                thinking_started = True
+                                thinking_finalized = True
+                                await self._send_stream_chunk(
+                                    session_id,
+                                    request_id,
+                                    StreamEventType.THINKING_START,
+                                    {},
+                                )
+                                await self._send_stream_chunk(
+                                    session_id,
+                                    request_id,
+                                    StreamEventType.THINKING_DELTA,
+                                    {"text": display_text},
+                                )
+                                await self._send_stream_chunk(
+                                    session_id,
+                                    request_id,
+                                    StreamEventType.THINKING_END,
+                                    {},
+                                )
+                            continue
 
                     # Handle tool calls
                     if item_type == "tool_call_item":
@@ -1087,20 +1097,15 @@ class RequestHandler:
         try:
             # Build the system prompt the same way as when creating an agent
             from ..agents.utils import get_instructions
-            from ..agents.dynamic_instructions import (
-                generate_dynamic_code_instructions,
-                update_agent_instructions,
-            )
+            from ..agents.dynamic_instructions import update_agent_instructions
             from ..system_prompt import apply_system_prompt
             from ..libs import get_libs_prompt
 
             base_instructions = get_instructions("code.md")
-            dynamic_instructions = await generate_dynamic_code_instructions([])
             libs_instructions = get_libs_prompt()
             instructions = update_agent_instructions(
-                base_instructions, dynamic_instructions
+                base_instructions, libs_instructions
             )
-            instructions = update_agent_instructions(instructions, libs_instructions)
             instructions = apply_system_prompt(instructions, nvim=None, cwd=cwd)
 
             return make_success_response(

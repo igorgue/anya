@@ -269,7 +269,9 @@ function M._ensure_timer_running()
           _G.anya_highlight_chat_file_refs()
         end
 
-        if _G.anya_force_chat_highlight_refresh then
+        local current_buf = vim.api.nvim_get_current_buf()
+        local current_ft = vim.api.nvim_get_option_value("filetype", { buf = current_buf })
+        if current_ft == "anya-prompt" and _G.anya_force_chat_highlight_refresh then
           local chat_win = nil
           local prompt_win = nil
           for _, win in ipairs(vim.api.nvim_list_wins()) do

@@ -3,7 +3,17 @@
 
 local M = {}
 
+local function should_force_focus_refresh()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local ok, ft = pcall(vim.api.nvim_buf_get_option, bufnr, "filetype")
+  return ok and ft == "anya-prompt"
+end
+
 function M._force_chat_highlight_refresh(chat_win, prompt_win, opts)
+  if not should_force_focus_refresh() then
+    return
+  end
+
   opts = opts or {}
 
   local delay_ms = opts.delay_ms or 0
