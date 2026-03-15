@@ -351,7 +351,7 @@ vim.keymap.set("n", "<c-space>", "<cmd>normal viI<cr>", { desc = "Inner Indent L
 vim.keymap.set("x", "<c-space>", "<cmd>normal iI<cr>", { desc = "Inner Indent Level" })
 
 require("anya").setup({
-  start_in_insert = true,
+  -- start_in_insert = true,
 })
 
 -- colorscheme
