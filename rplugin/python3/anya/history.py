@@ -11,6 +11,9 @@ from typing import Any
 MESSAGE_PATTERN = re.compile(r"^<!-- am: (.+) -->$")
 TOOLS_PATTERN = re.compile(r"^<!-- at: (.+) -->$")
 
+# Pattern for conversation mentions: #abc12345
+CONV_MENTION_PATTERN = re.compile(r"#([A-Za-z0-9]+)")
+
 
 @dataclass
 class Marker:
@@ -210,6 +213,63 @@ def parse_buffer_content(
     return records
 
 
+def extract_conv_mentions(text: str) -> list[str]:
+    """Extract conversation IDs from # mentions in text.
+
+    Args:
+        text: Text that may contain #conversation_id mentions
+
+    Returns:
+        List of unique conversation IDs found
+    """
+    matches = CONV_MENTION_PATTERN.findall(text)
+    # Return unique IDs in order of first appearance
+    seen = set()
+    result = []
+    for conv_id in matches:
+        if conv_id not in seen:
+            seen.add(conv_id)
+            result.append(conv_id)
+    return result
+
+
+def inject_conversation_context(text: str, max_chars_per_conv: int = 8000) -> str:
+    """Inject context from # mentions into the text.
+
+    For each #conversation_id mention in the text, fetches the
+    conversation content and injects it as context before the message.
+
+    Args:
+        text: Text that may contain #conversation_id mentions
+        max_chars_per_conv: Maximum characters to include per conversation
+
+    Returns:
+        Text with conversation context injected
+    """
+    from . import db
+
+    conv_ids = extract_conv_mentions(text)
+    if not conv_ids:
+        return text
+
+    context_parts = []
+    for conv_id in conv_ids:
+        try:
+            content = db.get_conversation_content_for_mention(conv_id, max_chars_per_conv)
+            if content:
+                context_parts.append(f"<context from conversation {conv_id}>\n{content}\n</context>")
+        except Exception:
+            # Silently skip conversations that can't be loaded
+            pass
+
+    if not context_parts:
+        return text
+
+    # Inject context at the beginning of the message
+    context_block = "\n\n".join(context_parts)
+    return f"{context_block}\n\n{text}"
+
+
 def build_llm_history(
     records: list[MessageRecord],
 ) -> list[dict[str, str]]:
@@ -228,6 +288,8 @@ def build_llm_history(
             content = record.content
             if record.role == "user":
                 content = strip_blockquote(content)
+                # Inject conversation context from # mentions
+                content = inject_conversation_context(content)
             elif record.role == "assistant":
                 # Clean assistant content to remove thinking blocks
                 content = clean_assistant_content(content, record.markers)

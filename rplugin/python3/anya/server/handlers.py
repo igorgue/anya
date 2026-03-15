@@ -185,6 +185,10 @@ class RequestHandler:
                 return await self._handle_compact_conversation(request)
             elif request.type == RequestType.GET_SYSTEM_PROMPT:
                 return await self._handle_get_system_prompt(request)
+            elif request.type == RequestType.SEARCH_MENTIONS:
+                return await self._handle_search_mentions(request)
+            elif request.type == RequestType.GET_MENTION_CONTENT:
+                return await self._handle_get_mention_content(request)
             else:
                 return make_error_response(
                     request.request_id,
@@ -1110,4 +1114,39 @@ class RequestHandler:
             )
         except Exception as e:
             self.logger.exception(f"Error getting system prompt: {e}")
+            return make_error_response(request.request_id, str(e))
+
+    async def _handle_search_mentions(self, request: Request) -> Response:
+        """Handle a SEARCH_MENTIONS request.
+
+        Search conversations for @mention completion.
+        """
+        query = request.payload.get("query", "")
+        limit = request.payload.get("limit", 20)
+        
+        try:
+            results = db.search_conversation_mentions(query, limit)
+            return make_success_response(request.request_id, {"results": results})
+        except Exception as e:
+            self.logger.exception(f"Error searching mentions: {e}")
+            return make_error_response(request.request_id, str(e))
+
+    async def _handle_get_mention_content(self, request: Request) -> Response:
+        """Handle a GET_MENTION_CONTENT request.
+
+        Get the content of a conversation for mention context injection.
+        """
+        conversation_id = request.payload.get("conversation_id")
+        max_chars = request.payload.get("max_chars", 8000)
+        
+        if not conversation_id:
+            return make_error_response(request.request_id, "conversation_id required")
+        
+        try:
+            content = db.get_conversation_content_for_mention(conversation_id, max_chars)
+            if content is None:
+                return make_error_response(request.request_id, f"Conversation {conversation_id} not found")
+            return make_success_response(request.request_id, {"content": content})
+        except Exception as e:
+            self.logger.exception(f"Error getting mention content: {e}")
             return make_error_response(request.request_id, str(e))

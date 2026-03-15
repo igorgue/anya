@@ -132,6 +132,7 @@ OPENROUTER_CONTEXT_WINDOWS = {
     "openai/o4-mini-deep-research": 200000,
     "openai/o4-mini-high": 200000,
     "openrouter/free": 200000,
+    "openrouter/hunter-alpha": 1000000,
     "perplexity/sonar-pro": 200000,
     "perplexity/sonar-pro-search": 200000,
     "minimax/minimax-m2": 196608,

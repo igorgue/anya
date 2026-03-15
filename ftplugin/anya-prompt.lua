@@ -107,14 +107,31 @@ local function highlight_refs()
     local line_idx = lnum - 1
     local pos = 1
 
-    -- Find all @filepath references first
+    -- Find #conversation_id mentions first (highlight with AnyaConvRef)
+    while true do
+      local start_col, end_col = line:find("#[A-Za-z0-9]+", pos)
+      if not start_col then
+        break
+      end
+
+      vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "Function", line_idx, start_col - 1, end_col)
+      pos = end_col + 1
+    end
+
+    -- Find all @filepath references (highlight with AnyaFileRef)
+    -- Skip # patterns to avoid double-highlighting
+    pos = 1
     while true do
       local start_col, end_col = line:find("@[A-Za-z0-9_.~/-]+", pos)
       if not start_col then
         break
       end
 
-      vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaFileRef", line_idx, start_col - 1, end_col)
+      -- Check if this is actually a # pattern we already highlighted
+      local matched_text = line:sub(start_col, end_col)
+      if not matched_text:match("^#") then
+        vim.api.nvim_buf_add_highlight(bufnr, highlight_ns, "AnyaFileRef", line_idx, start_col - 1, end_col)
+      end
       pos = end_col + 1
     end
 

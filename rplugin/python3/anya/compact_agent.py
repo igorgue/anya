@@ -9,6 +9,12 @@ import os
 import logging
 from typing import TYPE_CHECKING
 
+from .reasoning import (
+    build_anthropic_thinking_param,
+    build_openai_reasoning_params,
+    get_reasoning_effort,
+)
+
 if TYPE_CHECKING:
     from .protocol import AgentSettings
 
@@ -143,32 +149,47 @@ async def compact_conversation(
 
     try:
         client, model_name, api_type = await _build_client(settings)
+        reasoning_effort = get_reasoning_effort(settings)
 
         prompt = _build_compaction_prompt(history)
 
         if api_type == "anthropic":
-            response = await client.messages.create(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=4096,
-                temperature=0.1,
-            )
+            anthropic_kwargs = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 4096,
+                "temperature": 0.1,
+            }
+            thinking = build_anthropic_thinking_param(reasoning_effort)
+            if thinking is not None:
+                anthropic_kwargs["thinking"] = thinking
+            response = await client.messages.create(**anthropic_kwargs)
             summary = response.content[0].text if response.content else ""
         elif api_type == "responses":
-            response = await client.responses.create(
-                model=model_name,
-                input=prompt,
-                max_output_tokens=4096,
-                temperature=0.1,
-            )
+            kwargs = {
+                "model": model_name,
+                "input": prompt,
+                "max_output_tokens": 4096,
+            }
+            reasoning_params = build_openai_reasoning_params(api_type, reasoning_effort)
+            if reasoning_params:
+                kwargs.update(reasoning_params)
+            else:
+                kwargs["temperature"] = 0.1
+            response = await client.responses.create(**kwargs)
             summary = response.output_text or ""
         else:
-            response = await client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-                max_completion_tokens=4096,
-                temperature=0.1,
-            )
+            kwargs = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_completion_tokens": 4096,
+            }
+            reasoning_params = build_openai_reasoning_params(api_type, reasoning_effort)
+            if reasoning_params:
+                kwargs.update(reasoning_params)
+            else:
+                kwargs["temperature"] = 0.1
+            response = await client.chat.completions.create(**kwargs)
             summary = response.choices[0].message.content or ""
 
         summary = summary.strip()

@@ -21,6 +21,8 @@ class RequestType(Enum):
     GENERATE_TITLE = "generate_title"
     COMPACT_CONVERSATION = "compact_conversation"
     GET_SYSTEM_PROMPT = "get_system_prompt"
+    SEARCH_MENTIONS = "search_mentions"
+    GET_MENTION_CONTENT = "get_mention_content"
 
 
 class ResponseType(Enum):

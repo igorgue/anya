@@ -1,6 +1,7 @@
 local files = {}
 
 -- Helper function to find @ symbol and return the query after it
+-- Returns: prefix_pos, query
 local function get_at_symbol_query(line, cursor_col)
   local at_pos = nil
 
@@ -10,10 +11,7 @@ local function get_at_symbol_query(line, cursor_col)
       at_pos = i
       break
     elseif char == " " then
-      -- Only break if we haven't found @ yet
-      if not at_pos then
-        break
-      end
+      break
     end
   end
 
@@ -21,9 +19,35 @@ local function get_at_symbol_query(line, cursor_col)
     return nil, nil
   end
 
-  -- Include everything after @ up to the cursor position
   local query = line:sub(at_pos + 1, cursor_col)
   return at_pos, query
+end
+
+-- Helper function to find # symbol and return the query after it
+-- Allows spaces in the query (conversation titles have spaces)
+-- Returns: hash_pos, query
+local function get_hash_symbol_query(line, cursor_col)
+  local hash_pos = nil
+
+  for i = cursor_col, 1, -1 do
+    local char = line:sub(i, i)
+    if char == "#" then
+      hash_pos = i
+      break
+    end
+  end
+
+  if not hash_pos then
+    return nil, nil
+  end
+
+  -- Make sure # is at start of line or preceded by a space (not mid-word)
+  if hash_pos > 1 and line:sub(hash_pos - 1, hash_pos - 1) ~= " " then
+    return nil, nil
+  end
+
+  local query = line:sub(hash_pos + 1, cursor_col)
+  return hash_pos, query
 end
 
 -- Simple fuzzy match: check if all characters in pattern appear in str in order
@@ -182,26 +206,67 @@ function files.new(_opts)
     end,
 
     get_trigger_characters = function()
-      return { "@", ".", "/" }
+      return { "@", ".", "/", "#", " " }
     end,
 
     get_completions = function(_self, ctx, callback)
       local line = vim.api.nvim_buf_get_lines(ctx.bufnr, ctx.cursor[1] - 1, ctx.cursor[1], false)[1]
       local cursor_col = ctx.cursor[2]
 
+      local empty = { items = {}, is_incomplete_backward = false, is_incomplete_forward = false }
+
+      -- Check for # prefix first (conversation mentions)
+      local hash_pos, hash_query = get_hash_symbol_query(line, cursor_col)
+      if hash_pos then
+        local items = {}
+        local conv_results = vim.fn.AnyaSearchMentions(hash_query or "", 15)
+        if conv_results and type(conv_results) == "table" then
+          for _, conv in ipairs(conv_results) do
+            local conv_id = conv.id or ""
+            local title = conv.title or "Untitled conversation"
+            table.insert(items, {
+              label = title,
+              filterText = "#" .. (hash_query or ""),
+              kind = 18, -- Reference
+              detail = "#" .. conv_id,
+              documentation = {
+                kind = "markdown",
+                value = string.format("**%s**\n\nID: `%s`", title, conv_id),
+              },
+              textEdit = {
+                newText = "#" .. conv_id,
+                range = {
+                  start = {
+                    line = ctx.cursor[1] - 1,
+                    character = hash_pos - 1,
+                  },
+                  ["end"] = {
+                    line = ctx.cursor[1] - 1,
+                    character = cursor_col,
+                  },
+                },
+              },
+            })
+          end
+        end
+
+        callback({
+          items = items,
+          is_incomplete_backward = true,
+          is_incomplete_forward = true,
+        })
+        return function() end
+      end
+
+      -- Check for @ prefix (file mentions)
       local at_pos, query = get_at_symbol_query(line, cursor_col)
 
-      -- For dot trigger, we need to ensure we're still in a @ completion context
       if not at_pos then
-        callback({
-          items = {},
-          is_incomplete_backward = false,
-          is_incomplete_forward = false,
-        })
+        callback(empty)
         return
       end
 
-      -- If triggered by a dot but there's no @ before it, don't provide completions
+      -- For dot trigger, we need to ensure we're still in a @ completion context
       if ctx.trigger_character == "." then
         local has_at_before = false
         for i = cursor_col - 1, 1, -1 do
@@ -214,14 +279,13 @@ function files.new(_opts)
           end
         end
         if not has_at_before then
-          callback({
-            items = {},
-            is_incomplete_backward = false,
-            is_incomplete_forward = false,
-          })
+          callback(empty)
           return
         end
       end
+
+      local items = {}
+      local scored_items = {}
 
       local project_root = get_project_root()
 
@@ -232,11 +296,8 @@ function files.new(_opts)
         collect_files(project_root, file_cache, 5000)
       end
 
-      local items = {}
-      local scored_items = {}
-
       for _, file_path in ipairs(file_cache) do
-        local matches, score = fuzzy_match(file_path, query)
+        local matches, score = fuzzy_match(file_path, query or "")
         if matches then
           table.insert(scored_items, { path = file_path, score = score })
         end
@@ -250,13 +311,13 @@ function files.new(_opts)
       -- Limit results
       local max_results = 50
       for i = 1, math.min(#scored_items, max_results) do
-        local file_path = scored_items[i].path
+        local item_data = scored_items[i]
         table.insert(items, {
-          label = file_path,
+          label = item_data.path,
           kind = 17, -- File
-          insertText = file_path,
+          insertText = item_data.path,
           textEdit = {
-            newText = file_path,
+            newText = item_data.path,
             range = {
               start = {
                 line = ctx.cursor[1] - 1,

@@ -406,6 +406,10 @@ class AnthropicModel:
         if model_settings and getattr(model_settings, "stop", None):
             stop = model_settings.stop
             params["stop_sequences"] = stop if isinstance(stop, list) else [stop]
+        if model_settings and getattr(model_settings, "extra_body", None):
+            extra_body = model_settings.extra_body
+            if isinstance(extra_body, dict):
+                params.update(extra_body)
         return params
 
     def _convert_input(self, input: str | list) -> list:

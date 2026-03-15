@@ -10,6 +10,12 @@ import os
 import re
 from typing import TYPE_CHECKING
 
+from .reasoning import (
+    build_anthropic_thinking_param,
+    build_openai_reasoning_params,
+    get_reasoning_effort,
+)
+
 if TYPE_CHECKING:
     from .protocol import AgentSettings
 
@@ -37,27 +43,7 @@ def _clean_content(text: str) -> str:
     return text[:_MAX_CONTENT_CHARS]
 
 
-def _parse_reasoning_effort(value: str | None) -> str | None:
-    if value is None:
-        return None
 
-    effort = str(value).strip().lower()
-    if not effort:
-        return None
-
-    allowed = {"none", "minimal", "low", "medium", "high", "xhigh"}
-    return effort if effort in allowed else None
-
-
-def _get_reasoning_effort(settings: "AgentSettings | None") -> str | None:
-    raw = None
-    if settings is not None:
-        raw = settings.thinking_budget
-    if raw is None:
-        raw = os.environ.get("ANYA_THINKING_BUDGET")
-    if raw is None or not str(raw).strip():
-        return None
-    return _parse_reasoning_effort(raw) or "medium"
 
 
 def _build_openai_request_kwargs(
@@ -75,11 +61,9 @@ def _build_openai_request_kwargs(
             "input": prompt,
             "max_output_tokens": max_tokens,
         }
-        if reasoning_effort is not None:
-            kwargs["reasoning"] = {
-                "effort": reasoning_effort,
-                "summary": "auto",
-            }
+        reasoning_params = build_openai_reasoning_params(api_type, reasoning_effort)
+        if reasoning_params:
+            kwargs.update(reasoning_params)
         else:
             kwargs["temperature"] = temperature
         return kwargs
@@ -89,8 +73,9 @@ def _build_openai_request_kwargs(
         "messages": [{"role": "user", "content": prompt}],
         "max_completion_tokens": max_tokens,
     }
-    if reasoning_effort is not None:
-        kwargs["reasoning_effort"] = reasoning_effort
+    reasoning_params = build_openai_reasoning_params(api_type, reasoning_effort)
+    if reasoning_params:
+        kwargs.update(reasoning_params)
     else:
         kwargs["temperature"] = temperature
     return kwargs
@@ -167,7 +152,7 @@ async def generate_title(
     """Generate a short title for a conversation."""
     try:
         client, model_name, api_type = await _build_client(settings)
-        reasoning_effort = _get_reasoning_effort(settings)
+        reasoning_effort = get_reasoning_effort(settings)
 
         user_snippet = _clean_content(user_message)
         assistant_snippet = _clean_content(assistant_message)
@@ -182,12 +167,16 @@ async def generate_title(
         )
 
         if api_type == "anthropic":
-            response = await client.messages.create(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=30,
-                temperature=0.3,
-            )
+            anthropic_kwargs = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 30,
+                "temperature": 0.3,
+            }
+            thinking = build_anthropic_thinking_param(reasoning_effort)
+            if thinking is not None:
+                anthropic_kwargs["thinking"] = thinking
+            response = await client.messages.create(**anthropic_kwargs)
             raw = response.content[0].text if response.content else ""
         elif api_type == "responses":
             response = await client.responses.create(

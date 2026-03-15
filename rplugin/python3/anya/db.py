@@ -117,6 +117,99 @@ def init_db() -> None:
         conn.close()
 
 
+def search_conversation_mentions(
+    query: str, limit: int = 20
+) -> list[dict[str, Any]]:
+    """Search conversations for mention completion.
+
+    Searches conversation titles for fuzzy matching.
+
+    Args:
+        query: Search query (title text)
+        limit: Maximum number of results
+
+    Returns:
+        List of conversation dicts with id, title, updated_at, cwd
+    """
+    conn = get_connection()
+    try:
+        # Split query into words and require each word to match independently
+        words = query.split()
+        if words:
+            where_clauses = " AND ".join("title LIKE ?" for _ in words)
+            params: list[Any] = [f"%{w}%" for w in words]
+            params.append(limit)
+            cursor = conn.execute(
+                f"""SELECT id, title, updated_at, cwd FROM conversations
+                   WHERE {where_clauses}
+                   ORDER BY updated_at DESC
+                   LIMIT ?""",
+                params,
+            )
+        else:
+            cursor = conn.execute(
+                """SELECT id, title, updated_at, cwd FROM conversations
+                   ORDER BY updated_at DESC
+                   LIMIT ?""",
+                (limit,),
+            )
+        results = [dict(row) for row in cursor.fetchall()]
+        
+        # Set default title for untitled conversations
+        for conv in results:
+            if not conv.get("title"):
+                conv["title"] = "Untitled conversation"
+        
+        return results
+    finally:
+        conn.close()
+
+
+def get_conversation_content_for_mention(
+    conversation_id: str, max_chars: int = 8000
+) -> str | None:
+    """Get bounded conversation content for mention context.
+
+    Rebuilds the conversation content from the database, strips markers,
+    and caps to a maximum character count.
+
+    Args:
+        conversation_id: The conversation ID
+        max_chars: Maximum characters to include
+
+    Returns:
+        Formatted conversation content string, or None if not found
+    """
+    conv = load_conversation(conversation_id)
+    if not conv:
+        return None
+    
+    conversation = conv["conversation"]
+    messages = conv["messages"]
+    
+    # Rebuild buffer content
+    buffer_content = rebuild_buffer_content(conversation, messages)
+    
+    # Strip marker lines
+    lines = buffer_content.split("\n")
+    clean_lines = []
+    for line in lines:
+        stripped = line.strip()
+        # Skip marker lines (at: and am:)
+        if stripped.startswith("<!-- at:") or stripped.startswith("<!-- am:"):
+            continue
+        clean_lines.append(line)
+    
+    content = "\n".join(clean_lines).strip()
+    
+    # Cap to max_chars
+    if len(content) > max_chars:
+        content = content[:max_chars] + "\n... (truncated)"
+    
+    return content
+
+
+
 def save_conversation(id: str, timestamp: str, cwd: str | None = None) -> bool:
     """Insert a new conversation."""
     conn = get_connection()

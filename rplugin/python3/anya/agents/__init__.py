@@ -13,6 +13,7 @@ from .dynamic_instructions import (
 from .utils import get_instructions
 from ..system_prompt import apply_system_prompt
 from ..libs import get_libs_prompt
+from ..reasoning import apply_reasoning_settings
 
 if TYPE_CHECKING:
     from ..protocol import AgentSettings
@@ -22,15 +23,7 @@ DO_AGENT_NAME = "Do"
 MAIN_ASSISTANT_NAME = "Anya"
 
 
-def _parse_reasoning_effort(value: str | None) -> str | None:
-    if value is None:
-        return None
-    v = str(value).strip().lower()
-    if not v:
-        return None
 
-    allowed = {"none", "minimal", "low", "medium", "high", "xhigh"}
-    return v if v in allowed else None
 
 
 def _build_do_instructions(cwd: str | None = None) -> str:
@@ -134,10 +127,7 @@ async def CodeAgent(
     if thinking_budget is None:
         thinking_budget = _get_setting("thinking_budget", "ANYA_THINKING_BUDGET")
 
-    if thinking_budget is not None and model_settings_obj.reasoning is not None:
-        effort = _parse_reasoning_effort(thinking_budget) or "medium"
-        model_settings_obj.reasoning.effort = effort
-        model_settings_obj.reasoning.summary = "auto"
+    apply_reasoning_settings(model_settings_obj, api_type, thinking_budget)
 
     # Enable parallel tool calls by default for explicit control
     model_settings_obj.parallel_tool_calls = True
@@ -196,10 +186,7 @@ async def DoAgent(
     if thinking_budget is None:
         thinking_budget = _get_setting("thinking_budget", "ANYA_THINKING_BUDGET")
 
-    if thinking_budget is not None and model_settings_obj.reasoning is not None:
-        effort = _parse_reasoning_effort(thinking_budget) or "medium"
-        model_settings_obj.reasoning.effort = effort
-        model_settings_obj.reasoning.summary = "auto"
+    apply_reasoning_settings(model_settings_obj, api_type, thinking_budget)
 
     model_settings_obj.parallel_tool_calls = False
 

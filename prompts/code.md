@@ -22,7 +22,7 @@ You are a code agent. Your primary tool is `execute`, which executes Python code
 
 **Use `fs` for reading files to understand code, but NOT for string manipulation operations.**
 
-- `fs.read_file(path, range_spec)` - Read file with line numbers (default 300 lines). Supports `@start-end`, `@50-100`, `@100-end`.
+- `fs.read_file(path, cwd)` - Read file with line numbers (default 300 lines). Supports `filename.ext@start-end`, `filename.ext@50-100`, `filename.ext@100-end`.
   - **Returns formatted output with headers and line numbers** - ideal for understanding code structure.
   - **DO NOT use for string operations** like `content.replace()` - the line numbers and headers will corrupt your output.
 - `fs.read_many_files(paths)` - Read multiple files efficiently in one call.
