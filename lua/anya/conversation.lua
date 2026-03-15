@@ -3,41 +3,73 @@
 
 local M = {}
 
-function M._force_chat_highlight_refresh(chat_win, prompt_win)
-  vim.schedule(function()
-    if not (chat_win and vim.api.nvim_win_is_valid(chat_win)) then
-      return
-    end
+function M._force_chat_highlight_refresh(chat_win, prompt_win, opts)
+  opts = opts or {}
 
-    local return_win = nil
-    if prompt_win and vim.api.nvim_win_is_valid(prompt_win) then
-      return_win = prompt_win
-    else
-      local cur = vim.api.nvim_get_current_win()
-      if cur and vim.api.nvim_win_is_valid(cur) then
-        return_win = cur
-      end
-    end
+  local delay_ms = opts.delay_ms or 0
+  local max_typing_delay_ms = opts.max_typing_delay_ms or 800
+  local last_typed_at = _G.anya_prompt_last_typed_at or 0
+  local now = vim.loop.now()
+  local typing_grace_ms = _G.anya_prompt_typing_grace_ms or 350
+  local since_typed = now - last_typed_at
 
-    pcall(vim.api.nvim_set_current_win, chat_win)
-    pcall(vim.cmd, "redraw")
+  if opts.defer_while_typing ~= false and since_typed >= 0 and since_typed < typing_grace_ms then
+    local wait_ms = math.min(math.max(typing_grace_ms - since_typed, 0), max_typing_delay_ms)
+    vim.defer_fn(function()
+      M._force_chat_highlight_refresh(
+        chat_win,
+        prompt_win,
+        vim.tbl_extend("force", opts, {
+          defer_while_typing = false,
+          delay_ms = 0,
+        })
+      )
+    end, wait_ms)
+    return
+  end
 
+  local function do_refresh()
     vim.schedule(function()
-      if return_win and vim.api.nvim_win_is_valid(return_win) then
-        pcall(vim.api.nvim_set_current_win, return_win)
-        pcall(vim.cmd, "redraw")
+      if not (chat_win and vim.api.nvim_win_is_valid(chat_win)) then
+        return
       end
+
+      local return_win = nil
+      if prompt_win and vim.api.nvim_win_is_valid(prompt_win) then
+        return_win = prompt_win
+      else
+        local cur = vim.api.nvim_get_current_win()
+        if cur and vim.api.nvim_win_is_valid(cur) then
+          return_win = cur
+        end
+      end
+
+      pcall(vim.api.nvim_set_current_win, chat_win)
+      pcall(vim.cmd, "redraw")
 
       vim.schedule(function()
-        if _G.anya_highlight_chat_file_refs then
-          pcall(_G.anya_highlight_chat_file_refs)
+        if return_win and vim.api.nvim_win_is_valid(return_win) then
+          pcall(vim.api.nvim_set_current_win, return_win)
+          pcall(vim.cmd, "redraw")
         end
-        if _G.anya_highlight_prompt_refs then
-          pcall(_G.anya_highlight_prompt_refs)
-        end
+
+        vim.schedule(function()
+          if _G.anya_highlight_chat_file_refs then
+            pcall(_G.anya_highlight_chat_file_refs)
+          end
+          if _G.anya_highlight_prompt_refs then
+            pcall(_G.anya_highlight_prompt_refs)
+          end
+        end)
       end)
     end)
-  end)
+  end
+
+  if delay_ms > 0 then
+    vim.defer_fn(do_refresh, delay_ms)
+  else
+    do_refresh()
+  end
 end
 
 _G.anya_force_chat_highlight_refresh = M._force_chat_highlight_refresh

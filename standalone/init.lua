@@ -350,7 +350,9 @@ vim.keymap.set("n", "<leader>mD", "<cmd>delmarks!<cr><cmd>delmarks A-Z<cr>", { d
 vim.keymap.set("n", "<c-space>", "<cmd>normal viI<cr>", { desc = "Inner Indent Level" })
 vim.keymap.set("x", "<c-space>", "<cmd>normal iI<cr>", { desc = "Inner Indent Level" })
 
-require("anya").setup({})
+require("anya").setup({
+  start_in_insert = true,
+})
 
 -- colorscheme
 vim.cmd("colorscheme danger")

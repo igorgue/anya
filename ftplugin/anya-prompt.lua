@@ -101,6 +101,13 @@ local highlight_timer = nil
 local highlight_pending = false
 local highlight_scheduled = false
 
+_G.anya_prompt_last_typed_at = _G.anya_prompt_last_typed_at or 0
+_G.anya_prompt_typing_grace_ms = _G.anya_prompt_typing_grace_ms or 350
+
+local function mark_prompt_typed()
+  _G.anya_prompt_last_typed_at = vim.loop.now()
+end
+
 local function highlight_refs()
   if not vim.api.nvim_buf_is_valid(bufnr) then
     highlight_pending = false
@@ -203,7 +210,10 @@ end
 
 vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
   buffer = bufnr,
-  callback = schedule_highlight,
+  callback = function()
+    mark_prompt_typed()
+    schedule_highlight()
+  end,
   desc = "Schedule @filepath and /command reference highlighting",
 })
 

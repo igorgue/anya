@@ -283,7 +283,12 @@ function M._ensure_timer_running()
               end
             end
           end
-          pcall(_G.anya_force_chat_highlight_refresh, chat_win, prompt_win)
+          pcall(
+            _G.anya_force_chat_highlight_refresh,
+            chat_win,
+            prompt_win,
+            { defer_while_typing = true, max_typing_delay_ms = 1000 }
+          )
         end
       end
     end
