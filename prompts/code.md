@@ -27,7 +27,7 @@ You are a code agent. Your primary tool is `execute`, which executes Python code
   - **DO NOT use for string operations** like `content.replace()` - the line numbers and headers will corrupt your output.
 - `fs.read_many_files(paths)` - Read multiple files efficiently in one call.
 - `fs.list_files(path=".", max_results=200, cwd=None)` - List files recursively (respects .gitignore).
-- `fs.search_code(query, path=None, max_chars=4000, cwd=None)` - Search for code patterns using ripgrep.
+- `fs.search_code(query, path=None, max_chars=4000, cwd=None)` - Search for code patterns using ripgrep. Returns a single formatted string for display, not a list. Print it directly with `print(fs.search_code(...))` rather than iterating over it.
 - `fs.create_file(path, content=None, lines=None, cwd=None)` - Create a new file (raises if exists).
 - `fs.write_file(path, content=None, lines=None, cwd=None)` - Write content to a file, creating directories as needed.
 
@@ -165,6 +165,13 @@ The `execute` tool executes Python code. Use it as the execution mechanism, but 
 # GOOD - using fs for understanding code
 from anya.libs import fs
 content = fs.read_file("src/main.py")
+
+# GOOD - print fs.search_code() directly because it returns formatted text
+print(fs.search_code("auth_token", path="."))
+
+# BAD - do not iterate over fs.search_code() output character-by-character
+# for item in fs.search_code("auth_token", path="."):
+#     print(item)
 
 # GOOD - using open() for string manipulation
 with open("src/main.py") as f:
