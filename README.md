@@ -195,7 +195,7 @@ don't need to manage it manually.
 | `<C-n>` | Normal / Insert | Next prompt in history |
 | `<C-j>` | Normal / Insert | Insert blank line |
 | `<C-k>` | Normal / Insert | Focus chat window |
-| `<Tab>` | Normal | Toggle focus to chat window |
+| `<Tab>` | Normal / Insert | Toggle focus to chat window |
 | `<C-Up>` / `<C-Down>` | Normal / Insert | Increase / decrease prompt height |
 | `<C-Left>` / `<C-Right>` | Normal / Insert | Resize side pane (pane layout) |
 | `<C-a>` / `<C-e>` | Normal / Insert | Jump to start / end of line |
@@ -209,7 +209,7 @@ don't need to manage it manually.
 |-----|------|--------|
 | `<CR>` | Normal | Open code block / tool output, or toggle fold |
 | `<Space>` | Normal | Open code block or tool output |
-| `<Tab>` | Normal | Toggle focus to prompt window |
+| `<Tab>` | Normal / Insert | Toggle focus to prompt window |
 | `<C-c>` | Normal | Cancel current response |
 | `]]` / `[[` | Normal | Jump to next / previous message header |
 | `<localleader>h` | Normal | Open conversation history |

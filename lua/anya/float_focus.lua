@@ -78,15 +78,20 @@ function M.focus_chat()
   local windows = vim.api.nvim_list_wins()
   for _, win_id in ipairs(windows) do
     if vim.api.nvim_win_is_valid(win_id) then
+      local cfg = vim.api.nvim_win_get_config(win_id)
       local buf = vim.api.nvim_win_get_buf(win_id)
       local ft = vim.api.nvim_buf_get_option(buf, "filetype")
-      if ft == "anya-chat" and win_id ~= current_win then
-        vim.api.nvim_set_current_win(win_id)
-        vim.g.anya_last_float_ft = "anya-chat"
-        return
+      if ft == "anya-chat" and win_id ~= current_win and cfg.focusable ~= false then
+        local ok = pcall(vim.api.nvim_set_current_win, win_id)
+        if ok then
+          vim.g.anya_last_float_ft = "anya-chat"
+          return true
+        end
       end
     end
   end
+
+  return false
 end
 
 ---Focus the prompt window
@@ -96,15 +101,20 @@ function M.focus_prompt()
   local windows = vim.api.nvim_list_wins()
   for _, win_id in ipairs(windows) do
     if vim.api.nvim_win_is_valid(win_id) then
+      local cfg = vim.api.nvim_win_get_config(win_id)
       local buf = vim.api.nvim_win_get_buf(win_id)
       local ft = vim.api.nvim_buf_get_option(buf, "filetype")
-      if ft == "anya-prompt" and win_id ~= current_win then
-        vim.api.nvim_set_current_win(win_id)
-        vim.g.anya_last_float_ft = "anya-prompt"
-        return
+      if ft == "anya-prompt" and win_id ~= current_win and cfg.focusable ~= false then
+        local ok = pcall(vim.api.nvim_set_current_win, win_id)
+        if ok then
+          vim.g.anya_last_float_ft = "anya-prompt"
+          return true
+        end
       end
     end
   end
+
+  return false
 end
 
 ---Track when leaving a float window so we know if navigation came from inside.

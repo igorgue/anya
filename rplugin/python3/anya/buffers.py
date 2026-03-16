@@ -691,24 +691,10 @@ def new(
         -- Focus chat window with Ctrl+k
         local focus_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Focus chat window" }}
         vim.keymap.set("n", "<C-k>", function()
-            for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-                local buf = vim.api.nvim_win_get_buf(win)
-                local ft = vim.api.nvim_get_option_value("filetype", {{ buf = buf }})
-                if ft == "anya-chat" then
-                    vim.api.nvim_set_current_win(win)
-                    return
-                end
-            end
+            require("anya.float_focus").focus_chat()
         end, focus_opts)
         vim.keymap.set("i", "<C-k>", function()
-            for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-                local buf = vim.api.nvim_win_get_buf(win)
-                local ft = vim.api.nvim_get_option_value("filetype", {{ buf = buf }})
-                if ft == "anya-chat" then
-                    vim.api.nvim_set_current_win(win)
-                    return
-                end
-            end
+            require("anya.float_focus").focus_chat()
         end, focus_opts)
     end
 

@@ -381,32 +381,30 @@ end, { buffer = true, desc = "Show latest task list" })
 
 -- Focus toggle between chat and prompt with Tab
 vim.keymap.set("n", "<Tab>", function()
-  local wins = vim.api.nvim_tabpage_list_wins(0)
-  for _, win in ipairs(wins) do
-    local buf = vim.api.nvim_win_get_buf(win)
-    local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
-    if ft == "anya-chat" then
-      vim.api.nvim_set_current_win(win)
-      return
-    end
+  require("anya.float_focus").focus_chat()
+end, { buffer = true, nowait = true, desc = "Switch to chat window" })
+
+vim.keymap.set("i", "<Tab>", function()
+  if vim.fn.pumvisible() ~= 0 or vim.fn.wildmenumode() == 1 then
+    return "<Tab>"
   end
-end, { buffer = true, desc = "Switch to chat window" })
+
+  vim.schedule(function()
+    pcall(vim.cmd, "stopinsert")
+    require("anya.float_focus").focus_chat()
+  end)
+
+  return ""
+end, { buffer = true, nowait = true, expr = true, replace_keycodes = false, desc = "Switch to chat window" })
 
 -- Focus chat window with Ctrl+k (also set in buffers.py, but ftplugin ensures it's always available)
-local function focus_chat()
-  local wins = vim.api.nvim_tabpage_list_wins(0)
-  for _, win in ipairs(wins) do
-    local buf = vim.api.nvim_win_get_buf(win)
-    local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
-    if ft == "anya-chat" then
-      vim.api.nvim_set_current_win(win)
-      return
-    end
-  end
-end
+vim.keymap.set("n", "<C-k>", function()
+  require("anya.float_focus").focus_chat()
+end, { buffer = true, nowait = true, desc = "Focus chat window" })
 
-vim.keymap.set("n", "<C-k>", focus_chat, { buffer = true, nowait = true, desc = "Focus chat window" })
-vim.keymap.set("i", "<C-k>", focus_chat, { buffer = true, nowait = true, desc = "Focus chat window" })
+vim.keymap.set("i", "<C-k>", function()
+  require("anya.float_focus").focus_chat()
+end, { buffer = true, nowait = true, desc = "Focus chat window" })
 
 local function schedule_render_safe_highlight()
   if highlight_scheduled then

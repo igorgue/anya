@@ -325,7 +325,21 @@ end, { buffer = true, nowait = true, desc = "Navigate left out of Anya pane" })
 -- Focus toggle between chat and prompt with Tab
 vim.keymap.set("n", "<Tab>", function()
   require("anya.float_focus").focus_prompt()
-end, { buffer = true, desc = "Switch to prompt window" })
+end, { buffer = true, nowait = true, desc = "Switch to prompt window" })
+
+vim.keymap.set("i", "<Tab>", function()
+  if vim.fn.pumvisible() ~= 0 or vim.fn.wildmenumode() == 1 then
+    return "<Tab>"
+  end
+
+  vim.schedule(function()
+    pcall(vim.cmd, "stopinsert")
+    require("anya.float_focus").focus_prompt()
+  end)
+
+  return ""
+end, { buffer = true, nowait = true, expr = true, replace_keycodes = false, desc = "Switch to prompt window" })
+
 
 -- Resize prompt height from chat window too
 local function resize_prompt_height(delta)
