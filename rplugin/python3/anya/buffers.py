@@ -696,6 +696,21 @@ def new(
         vim.keymap.set("i", "<C-k>", function()
             require("anya.float_focus").focus_chat()
         end, focus_opts)
+        vim.keymap.set("n", "<Tab>", function()
+            require("anya.float_focus").focus_chat()
+        end, {{ buffer = true, nowait = true, desc = "Switch to chat window" }})
+        vim.keymap.set("i", "<Tab>", function()
+            if vim.fn.pumvisible() ~= 0 or vim.fn.wildmenumode() == 1 then
+                return "<Tab>"
+            end
+
+            vim.schedule(function()
+                pcall(vim.cmd, "stopinsert")
+                require("anya.float_focus").focus_chat()
+            end)
+
+            return ""
+        end, {{ buffer = true, nowait = true, expr = true, replace_keycodes = false, desc = "Switch to chat window" }})
     end
 
     -- Apply immediately
