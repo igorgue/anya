@@ -95,9 +95,53 @@ def build_openai_reasoning_params(
     return {}
 
 
+
+
+def _build_openai_request_kwargs(
+    *,
+    api_type: str,
+    model_name: str,
+    prompt: str,
+    max_tokens: int,
+    temperature: float | None,
+    reasoning_effort: str | None,
+) -> dict[str, Any]:
+    """Build request kwargs for OpenAI API calls with reasoning support.
+
+    This is a helper function used by title_agent and compact_agent.
+    """
+    if api_type == "responses":
+        kwargs: dict[str, Any] = {
+            "model": model_name,
+            "input": prompt,
+            "max_output_tokens": max_tokens,
+        }
+        reasoning_params = build_openai_reasoning_params(api_type, reasoning_effort)
+        if reasoning_params:
+            kwargs.update(reasoning_params)
+        elif temperature is not None:
+            kwargs["temperature"] = temperature
+        return kwargs
+
+    kwargs = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_completion_tokens": max_tokens,
+    }
+    reasoning_params = build_openai_reasoning_params(api_type, reasoning_effort)
+    if reasoning_params:
+        kwargs.update(reasoning_params)
+    elif temperature is not None:
+        kwargs["temperature"] = temperature
+    return kwargs
+
 def build_anthropic_thinking_param(
     reasoning_effort: str | None,
 ) -> dict[str, Any] | None:
     if reasoning_effort == "none":
         return {"type": "disabled"}
     return None
+
+
+# Alias for backward compatibility with tests
+_get_reasoning_effort = get_reasoning_effort

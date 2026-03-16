@@ -174,15 +174,28 @@ plugin/anya.vim     # Vimscript bootstrap, sets load flags
 
 ## The Tooling Interface
 
-- **Standard tools** (Python side; see `tools/__init__.py`):
-    - `create_file`, `edit`, `exec`, `exec_lua`, `read_file`, `read_many_files`, `list_files`, `replace_file`, `search_code`, `gh`, `parrot`, `buffer_name`
-- **Tool Definitions**
-    - Tools are Python functions or async methods, assigned input/output signatures (see schema in `tools` modules)
-    - Tools can be called from agent reasoning, shown to user as actions, or invoked explicitly by LLM plans
-    - Some tools (e.g. `edit`) require editor-side confirmation: a folding marker is inserted, user applies or rejects it, then the daemon continues
-    - MCP/remote tools are loaded dynamically via network connection, appearing as a single multiplexed tool
-- **Adding Tools**
-    - Write your new tool in Python under the tools/ directory, register in `__init__.py`, and update agent config if optional
+### Single-Tool Architecture
+
+**Anya uses one and ONLY one tool: `execute`.** All agent capabilities are exposed as **libs** (`anya.libs.*`), not as separate tools. The agent calls `execute` with Python code that imports and uses the appropriate lib. This keeps the tool surface minimal, avoids tool sprawl, and makes the agent's capabilities composable via normal Python code.
+
+- **Never add new tools.** If you need a new capability, implement it as a lib under `rplugin/python3/anya/libs/` and use it via `execute`.
+- The only exception is MCP tools, which are loaded dynamically as a single multiplexed remote tool.
+
+### Standard Libs (used via `execute`)
+    - `fs` — `create_file`, `read_file`, `read_many_files`, `list_files`, `search_code`, `write_file`
+    - `shell` — `run` (exec), `gh` (GitHub CLI)
+    - `buffer` — `modify`, `modify_file`, `list_open_buffers`, `is_open`
+    - `ui` — `ask`, `confirm`, `input`
+    - `web` — `fetch_markdown`, `fetch_text`, `fetch_json`
+    - `search` — `web`, `news`
+    - `mcp` — `call` (remote MCP server tools)
+    - `background` — `list_jobs`, `get_job`, `tail_logs`, `read_logs`, `is_running`, `stop_job`, `wait_for_job`
+
+### Adding New Capabilities
+    - Write your new lib as a Python module under `rplugin/python3/anya/libs/`
+    - Export it from `rplugin/python3/anya/libs/__init__.py`
+    - Document it in this file and in the agent prompts
+    - **Do NOT create a new tool** — use `execute` with the new lib instead
 
 
 ---

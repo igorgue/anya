@@ -12,13 +12,6 @@ import zmq.asyncio
 from agents import Runner
 from openai.types.responses import ResponseTextDeltaEvent
 
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-    before_sleep_log,
-)
 
 from ..model_provider import get_run_config
 from ..protocol import (
@@ -43,7 +36,11 @@ from ..agents.context import NvimPluginContext
 from .. import db
 from .. import utils
 from .. import tools as tools_module
-from ..spacing import SpacingManager
+from ..memory_agent import (
+    extract_memories_from_message,
+    make_memory_record,
+)
+from ..libs.memory import format_memories, search_memories as retrieve_memories
 from .agents import AgentManager
 
 
@@ -105,39 +102,90 @@ def _detect_filetype(tool_name: str, content: str) -> str | None:
 
 
 def _is_retryable_error(exception: Exception) -> bool:
-    """Check if an exception represents a retryable API error."""
-    # Check for dict-style errors (like the one in the issue)
-    if isinstance(exception, dict):
-        error = exception.get("error", {})
-        code = str(error.get("code", ""))
-        # Retry on 5xx errors
-        return code.startswith("5")
-
-    # Check for string representation of dict errors
+    """Check if an exception represents a retryable transient API/network error."""
     error_str = str(exception)
-    if "'code': '5" in error_str or '"code": "5' in error_str:
-        return True
-    if "'code': 5" in error_str or '"code": 5' in error_str:
+    error_lower = error_str.lower()
+
+    def _dict_is_retryable(error_payload: dict) -> bool:
+        error = error_payload.get("error", {}) if isinstance(error_payload, dict) else {}
+        code = str(error.get("code", "") or error_payload.get("code", ""))
+        message = str(error.get("message", "") or error_payload.get("message", "")).lower()
+        err_type = str(error.get("type", "") or error_payload.get("type", "")).lower()
+
+        if code.startswith("5"):
+            return True
+        if err_type in {"server_error", "api_connection_error", "timeout_error"}:
+            return True
+        transient_markers = (
+            "internal network failure",
+            "network failure",
+            "connection reset",
+            "connection aborted",
+            "temporarily unavailable",
+            "service unavailable",
+            "gateway timeout",
+            "bad gateway",
+            "timed out",
+            "timeout",
+        )
+        return any(marker in message for marker in transient_markers)
+
+    if isinstance(exception, dict):
+        return _dict_is_retryable(exception)
+
+    if (
+        "'code': '5" in error_str
+        or '"code": "5' in error_str
+        or "'code': 5" in error_str
+        or '"code": 5' in error_str
+    ):
         return True
 
-    # Check for OpenAI API errors
+    transient_markers = (
+        "internal network failure",
+        "network failure",
+        "connection reset",
+        "connection aborted",
+        "connection error",
+        "connection interrupted",
+        "temporarily unavailable",
+        "service unavailable",
+        "gateway timeout",
+        "bad gateway",
+        "timed out",
+        "timeout",
+    )
+    if any(marker in error_lower for marker in transient_markers):
+        return True
+
     try:
         from openai import APIError, APIConnectionError, APITimeoutError, RateLimitError
 
         if isinstance(exception, (APIConnectionError, APITimeoutError, RateLimitError)):
             return True
-        # Retry on 5xx API errors
-        if isinstance(exception, APIError) and hasattr(exception, "status_code"):
-            return exception.status_code >= 500
+        if isinstance(exception, APIError):
+            status_code = getattr(exception, "status_code", None)
+            body = getattr(exception, "body", None)
+            if status_code is not None and status_code >= 500:
+                return True
+            if isinstance(body, dict) and _dict_is_retryable(body):
+                return True
     except ImportError:
         pass
 
-    # Check for common network/timeout errors
     import asyncio
     import httpx
 
     if isinstance(
-        exception, (asyncio.TimeoutError, httpx.TimeoutException, httpx.NetworkError)
+        exception,
+        (
+            asyncio.TimeoutError,
+            httpx.TimeoutException,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+            httpx.ReadError,
+            httpx.WriteError,
+        ),
     ):
         return True
 
@@ -147,6 +195,13 @@ def _is_retryable_error(exception: Exception) -> bool:
 def _should_retry(exception: Exception) -> bool:
     """Determine if we should retry based on the exception type."""
     return _is_retryable_error(exception)
+
+
+def _retry_delay_seconds(attempt: int) -> float:
+    """Backoff schedule for transient LLM/API failures."""
+    delays = [1.0, 2.0, 5.0]
+    index = max(0, min(attempt - 1, len(delays) - 1))
+    return delays[index]
 
 
 class RequestHandler:
@@ -241,12 +296,29 @@ class RequestHandler:
         )
 
         try:
+            nvim_context = NvimContext.from_dict(payload.nvim_context)
+            agent_settings = nvim_context.get_agent_settings()
+
+            memory_task = asyncio.create_task(
+                self._store_memories_background(
+                    session_id,
+                    request_id,
+                    payload,
+                    agent_settings,
+                )
+            )
+
             # Run agent streaming
             await self._run_agent_streaming(
                 session_id,
                 request_id,
                 payload,
             )
+
+            try:
+                await memory_task
+            except Exception as e:
+                self.logger.warning(f"Memory background task failed: {e}")
 
             # Send stream end
             await self._send_stream_chunk(
@@ -344,6 +416,7 @@ class RequestHandler:
     ):
         """Generate a conversation title using the same API client as the coding agent."""
         title = None
+        success = False
 
         # Skip if the conversation already has a title
         try:
@@ -376,7 +449,26 @@ class RequestHandler:
             from ..title_agent import generate_title
 
             settings = AgentSettings.from_dict(settings_dict) if settings_dict else None
-            title = await generate_title(user_message, assistant_message, settings)
+            self.logger.info(
+                "Starting title generation for conversation %s (session %s)",
+                conversation_id,
+                session_id,
+            )
+            title = await asyncio.wait_for(
+                generate_title(user_message, assistant_message, settings),
+                timeout=35.0,
+            )
+            success = bool(title)
+            self.logger.info(
+                "Finished title generation for conversation %s: success=%s",
+                conversation_id,
+                success,
+            )
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                "Title generation timed out for conversation %s",
+                conversation_id,
+            )
         except Exception as e:
             self.logger.warning(f"Title generation failed: {e}")
 
@@ -390,12 +482,18 @@ class RequestHandler:
             data={
                 "conversation_id": conversation_id,
                 "title": title or "",
-                "success": bool(title),
+                "success": success,
                 "originating_session_id": session_id,
             },
         )
         try:
             await self.pub_socket.send(result_chunk.serialize())
+            self.logger.info(
+                "Emitted TITLE_GENERATED for conversation %s (session %s, success=%s)",
+                conversation_id,
+                session_id,
+                success,
+            )
         except Exception as e:
             self.logger.warning(f"Failed to emit TITLE_GENERATED event: {e}")
 
@@ -449,6 +547,56 @@ class RequestHandler:
             await self.pub_socket.send(result_chunk.serialize())
         except Exception as e:
             self.logger.warning(f"Failed to emit CONVERSATION_COMPACTED event: {e}")
+
+    async def _store_memories_background(
+        self,
+        session_id: str,
+        request_id: str,
+        payload: SendMessagePayload,
+        agent_settings: AgentSettings | None = None,
+    ) -> None:
+        """Extract and persist durable memories from the latest user message."""
+        conversation_id = payload.conversation_id
+        message_id = request_id
+
+        try:
+            extracted = await extract_memories_from_message(
+                payload.text, agent_settings
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self.logger.warning(f"Memory extraction failed: {e}")
+            return
+
+        stored_count = 0
+        for memory in extracted:
+            try:
+                record = make_memory_record(
+                    memory,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                )
+                if db.memory_exists(record.get("deduplication_key", "")):
+                    continue
+                saved = db.save_memory(record)
+                if not saved:
+                    continue
+                stored_count += 1
+                await self._send_stream_chunk(
+                    session_id,
+                    request_id,
+                    StreamEventType.MEMORY_STORED,
+                    {
+                        "text": record["text"],
+                        "category": record["category"],
+                        "count": stored_count,
+                    },
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger.warning(f"Failed to persist memory: {e}")
 
     async def _handle_cancel_request(self, request: Request) -> Response:
         """Handle a CANCEL_REQUEST request."""
@@ -528,6 +676,18 @@ class RequestHandler:
         self.logger.debug(f"Sending stream chunk: {event_type.value}")
         await self.pub_socket.send(chunk.serialize())
 
+    def _build_memory_context(self, payload: SendMessagePayload) -> str | None:
+        """Build lightweight memory context from the latest user text before agent run."""
+        query = (payload.text or "").strip()
+        if not query:
+            return None
+
+        memories = retrieve_memories(query=query, limit=5)
+        if not memories:
+            return None
+
+        return format_memories(memories)
+
     async def _run_agent_streaming(
         self,
         session_id: str,
@@ -537,35 +697,31 @@ class RequestHandler:
         """Run the agent with streaming, sending events via PUB socket."""
         self.logger.info(f"Starting agent streaming for session {session_id}")
 
-        # Build context from payload
         nvim_context = NvimContext.from_dict(payload.nvim_context)
-
-        # Extract agent settings from context (client-side env vars override daemon's)
         agent_settings = nvim_context.get_agent_settings()
         self.logger.info(
             f"Using agent settings: model={agent_settings.model}, "
             f"api_base={agent_settings.api_base}, api_type={agent_settings.api_type}"
         )
 
-        # Get or create agent for this session with the specified settings and CWD.
-        # CWD is part of the cache key so each project directory gets its own agent
-        # with the correct system prompt and AGENTS.md.
+        memory_context = (
+            None if nvim_context.request_kind == "do"
+            else self._build_memory_context(payload)
+        )
+
         agent = await self.agent_manager.get_agent_for_session(
             session_id,
             settings=agent_settings,
             cwd=nvim_context.cwd,
             request_kind=nvim_context.request_kind,
+            memory_context=memory_context,
         )
         self.logger.info(f"Got agent for session {session_id}")
 
-        # Create confirmation callback that sends requests to the plugin
         import uuid
 
         async def confirmation_callback(prompt: str, options: list[str]) -> str:
-            """Ask user for confirmation via the plugin."""
             confirmation_id = str(uuid.uuid4())
-
-            # Send confirmation request to plugin
             await self._send_stream_chunk(
                 session_id,
                 request_id,
@@ -576,9 +732,6 @@ class RequestHandler:
                     "options": options,
                 },
             )
-
-            # Wait for user response using the wait_for_confirmation method
-            # This creates a future and waits for _handle_confirmation_response to set the result
             try:
                 choice = await self.wait_for_confirmation(confirmation_id)
                 return choice
@@ -589,15 +742,7 @@ class RequestHandler:
         async def exec_callback(
             command: str, cwd: str, timeout: int, ui_dir: str | None = None
         ) -> dict:
-            """Request command execution on the plugin (user's machine).
-
-            Sends the command to the plugin which executes it locally and
-            returns the result. This ensures commands run on the user's
-            machine even if the daemon is running remotely.
-            """
             confirmation_id = str(uuid.uuid4())
-
-            # Send exec request to plugin
             await self._send_stream_chunk(
                 session_id,
                 request_id,
@@ -610,14 +755,11 @@ class RequestHandler:
                     "ui_dir": ui_dir or "",
                 },
             )
-
-            # Wait for execution result (timeout + buffer for network latency)
             try:
                 effective_timeout = (timeout + 30.0) if timeout is not None else None
                 result = await self.wait_for_confirmation(
                     confirmation_id, timeout=effective_timeout
                 )
-                # Result should be a JSON string with stdout/stderr/returncode
                 if isinstance(result, dict):
                     return result
                 elif isinstance(result, str):
@@ -653,13 +795,7 @@ class RequestHandler:
             mode: str,
             set_modified: bool,
         ) -> str:
-            """Request buffer modification on the plugin (user's machine).
-
-            Sends the modification request to the plugin which executes it locally.
-            """
             confirmation_id = str(uuid.uuid4())
-
-            # Send modify buffer request to plugin
             await self._send_stream_chunk(
                 session_id,
                 request_id,
@@ -672,8 +808,6 @@ class RequestHandler:
                     "set_modified": set_modified,
                 },
             )
-
-            # Wait for result
             try:
                 result = await self.wait_for_confirmation(confirmation_id, timeout=30.0)
                 return result
@@ -690,7 +824,7 @@ class RequestHandler:
             )
 
         context = NvimPluginContext(
-            nvim=None,  # No nvim in daemon
+            nvim=None,
             session_id=session_id,
             allowed_commands=set(nvim_context.allowed_commands),
             confirmation_callback=confirmation_callback,
@@ -702,10 +836,7 @@ class RequestHandler:
             open_buffers=nvim_context.open_buffers,
         )
 
-        # Use provided history or empty
         llm_history = payload.history
-
-        # Tracking state
         thinking_started = False
         thinking_finalized = False
         thinking_source = None
@@ -717,396 +848,359 @@ class RequestHandler:
         tool_was_called = False
         in_anya_marker = False
 
-        # Get custom run config for OpenRouter models (models with '/' or ':' in name)
-        # Pass agent_settings so it uses client's settings, not daemon's environment
         run_config = get_run_config(agent_settings)
         if run_config:
             self.logger.info(
                 f"Using custom run config for model provider (model={agent_settings.model})"
             )
 
-        # Run the agent
-        result = Runner.run_streamed(
-            starting_agent=agent,
-            input=llm_history,
-            context=context,
-            max_turns=8 if nvim_context.request_kind == "do" else 1000,
-            run_config=run_config,
-        )
+        max_retries = 3
+        attempt = 0
 
         try:
-            async for event in result.stream_events():
-                # Check for cancellation
-                if self.agent_manager.is_request_cancelled(session_id):
-                    raise asyncio.CancelledError()
-
-                # Detect reasoning/thinking content
-                is_reasoning_event = False
-                reasoning_text = None
-
-                if event.type == "raw_response_event" and hasattr(event, "data"):
-                    data = event.data
-                    data_type = getattr(data, "type", "")
-
-                    if isinstance(data_type, str) and data_type.startswith(
-                        "response.reasoning"
-                    ):
-                        is_reasoning_event = True
-
-                        if data_type == "response.reasoning_summary_text.delta":
-                            if thinking_source is None or thinking_source == "summary":
-                                thinking_source = "summary"
-                                reasoning_text = getattr(data, "delta", "")
-                        elif data_type in (
-                            "response.reasoning_text.delta",
-                            "response.reasoning_content.delta",
-                        ):
-                            if thinking_source is None:
-                                thinking_source = "content"
-                                reasoning_text = getattr(data, "delta", "")
-                            elif thinking_source == "content":
-                                reasoning_text = getattr(data, "delta", "")
-
-                    if (
-                        not reasoning_text
-                        and hasattr(data, "delta")
-                        and thinking_source != "summary"
-                    ):
-                        delta = data.delta
-                        if (
-                            hasattr(delta, "reasoning_content")
-                            and delta.reasoning_content
-                        ):
-                            is_reasoning_event = True
-                            if thinking_source is None:
-                                thinking_source = "content"
-                            reasoning_text = delta.reasoning_content
-                        elif hasattr(delta, "reasoning") and delta.reasoning:
-                            is_reasoning_event = True
-                            if thinking_source is None:
-                                thinking_source = "content"
-                            reasoning_text = delta.reasoning
-
-                # Handle reasoning events
-                if is_reasoning_event:
-                    # Some chat_completions providers (including OpenRouter models)
-                    # can emit trailing reasoning events after assistant text has
-                    # already started. Those are duplicates/bookkeeping, not a new
-                    # visible thinking phase, and reopening thinking here creates an
-                    # empty dangling block at the end of the message.
-                    if assistant_text_started:
-                        continue
-
-                    # Ignore empty reasoning bookkeeping events. Some SDK streams
-                    # emit trailing reasoning-shaped events with no visible text;
-                    # opening a new thinking fold for those creates an empty block
-                    # at the end of the assistant message.
-                    if not reasoning_text:
-                        continue
-
-                    # A new reasoning block may arrive after a previous one was
-                    # finalized (e.g., the model thinks again after seeing tool
-                    # results). Reset state only when we have actual visible
-                    # reasoning text to show.
-                    if thinking_finalized:
-                        thinking_started = False
-                        thinking_finalized = False
-                        thinking_source = None
-
-                    if not thinking_started:
-                        thinking_started = True
-                        await self._send_stream_chunk(
-                            session_id,
-                            request_id,
-                            StreamEventType.THINKING_START,
-                            {},
-                        )
-
-                    await self._send_stream_chunk(
-                        session_id,
-                        request_id,
-                        StreamEventType.THINKING_DELTA,
-                        {"text": reasoning_text},
-                    )
-
-                    continue
-
-                # Finalize an open thinking block only when actual assistant text
-                # starts streaming. Raw response events include many non-reasoning
-                # bookkeeping events between reasoning deltas; closing on those
-                # fragments the UI into many tiny thinking folds.
-                should_finalize_thinking = (
-                    thinking_started
-                    and not thinking_finalized
-                    and hasattr(event, "data")
-                    and isinstance(event.data, ResponseTextDeltaEvent)
-                    and bool(getattr(event.data, "delta", ""))
+            while True:
+                attempt += 1
+                result = Runner.run_streamed(
+                    starting_agent=agent,
+                    input=llm_history,
+                    context=context,
+                    max_turns=8 if nvim_context.request_kind == "do" else 1000,
+                    run_config=run_config,
                 )
 
-                # Handle run item events
-                if should_finalize_thinking:
-                    thinking_finalized = True
-                    await self._send_stream_chunk(
-                        session_id,
-                        request_id,
-                        StreamEventType.THINKING_END,
-                        {},
-                    )
+                try:
+                    async for event in result.stream_events():
+                        if self.agent_manager.is_request_cancelled(session_id):
+                            raise asyncio.CancelledError()
 
-                if event.type == "run_item_stream_event":
-                    item = event.item
-                    item_type = getattr(item, "type", None)
+                        is_reasoning_event = False
+                        reasoning_text = None
 
-                    # Handle reasoning items
-                    if item_type == "reasoning_item":
-                        # Some providers emit a reasoning_item after assistant text
-                        # has already started streaming. Ignore it so we don't open
-                        # a trailing empty thinking block.
-                        if assistant_text_started:
-                            continue
+                        if event.type == "raw_response_event" and hasattr(event, "data"):
+                            data = event.data
+                            data_type = getattr(data, "type", "")
 
-                        # Reset state so a new thinking block can open after
-                        # the model saw tool results and thinks again.
-                        if thinking_started and thinking_finalized:
-                            thinking_started = False
-                            thinking_finalized = False
-                            thinking_source = None
-                        if not thinking_started:
-                            raw_item = getattr(item, "raw_item", None)
-                            summary_parts = (
-                                getattr(raw_item, "summary", None) if raw_item else None
-                            )
-                            content_parts = (
-                                getattr(raw_item, "content", None) if raw_item else None
-                            )
+                            if isinstance(data_type, str) and data_type.startswith(
+                                "response.reasoning"
+                            ):
+                                is_reasoning_event = True
+                                if data_type == "response.reasoning_summary_text.delta":
+                                    if thinking_source is None or thinking_source == "summary":
+                                        thinking_source = "summary"
+                                        reasoning_text = getattr(data, "delta", "")
+                                elif data_type in (
+                                    "response.reasoning_text.delta",
+                                    "response.reasoning_content.delta",
+                                ):
+                                    if thinking_source is None:
+                                        thinking_source = "content"
+                                        reasoning_text = getattr(data, "delta", "")
+                                    elif thinking_source == "content":
+                                        reasoning_text = getattr(data, "delta", "")
 
-                            summary_text = "\n".join(
-                                getattr(p, "text", "")
-                                for p in (summary_parts or [])
-                                if getattr(p, "text", "")
-                            )
-                            content_text = "\n".join(
-                                getattr(p, "text", "")
-                                for p in (content_parts or [])
-                                if getattr(p, "text", "")
-                            )
-                            display_text = summary_text or content_text
+                            if (
+                                not reasoning_text
+                                and hasattr(data, "delta")
+                                and thinking_source != "summary"
+                            ):
+                                delta = data.delta
+                                if (
+                                    hasattr(delta, "reasoning_content")
+                                    and delta.reasoning_content
+                                ):
+                                    is_reasoning_event = True
+                                    if thinking_source is None:
+                                        thinking_source = "content"
+                                    reasoning_text = delta.reasoning_content
+                                elif hasattr(delta, "reasoning") and delta.reasoning:
+                                    is_reasoning_event = True
+                                    if thinking_source is None:
+                                        thinking_source = "content"
+                                    reasoning_text = delta.reasoning
 
-                            if display_text:
+                        if is_reasoning_event:
+                            if assistant_text_started or not reasoning_text:
+                                continue
+                            if thinking_finalized:
+                                thinking_started = False
+                                thinking_finalized = False
+                                thinking_source = None
+                            if not thinking_started:
                                 thinking_started = True
-                                thinking_finalized = True
                                 await self._send_stream_chunk(
                                     session_id,
                                     request_id,
                                     StreamEventType.THINKING_START,
                                     {},
                                 )
-                                await self._send_stream_chunk(
-                                    session_id,
-                                    request_id,
-                                    StreamEventType.THINKING_DELTA,
-                                    {"text": display_text},
-                                )
+                            await self._send_stream_chunk(
+                                session_id,
+                                request_id,
+                                StreamEventType.THINKING_DELTA,
+                                {"text": reasoning_text},
+                            )
+                            continue
+
+                        should_finalize_thinking = (
+                            thinking_started
+                            and not thinking_finalized
+                            and hasattr(event, "data")
+                            and isinstance(event.data, ResponseTextDeltaEvent)
+                            and bool(getattr(event.data, "delta", ""))
+                        )
+                        if should_finalize_thinking:
+                            thinking_finalized = True
+                            await self._send_stream_chunk(
+                                session_id,
+                                request_id,
+                                StreamEventType.THINKING_END,
+                                {},
+                            )
+
+                        if event.type == "run_item_stream_event":
+                            item = event.item
+                            item_type = getattr(item, "type", None)
+
+                            if item_type == "reasoning_item":
+                                if assistant_text_started:
+                                    continue
+                                if thinking_started and thinking_finalized:
+                                    thinking_started = False
+                                    thinking_finalized = False
+                                    thinking_source = None
+                                if not thinking_started:
+                                    raw_item = getattr(item, "raw_item", None)
+                                    summary_parts = (
+                                        getattr(raw_item, "summary", None)
+                                        if raw_item
+                                        else None
+                                    )
+                                    content_parts = (
+                                        getattr(raw_item, "content", None)
+                                        if raw_item
+                                        else None
+                                    )
+                                    summary_text = "\n".join(
+                                        getattr(p, "text", "")
+                                        for p in (summary_parts or [])
+                                        if getattr(p, "text", "")
+                                    )
+                                    content_text = "\n".join(
+                                        getattr(p, "text", "")
+                                        for p in (content_parts or [])
+                                        if getattr(p, "text", "")
+                                    )
+                                    display_text = summary_text or content_text
+
+                                    if display_text:
+                                        thinking_started = True
+                                        thinking_finalized = True
+                                        await self._send_stream_chunk(
+                                            session_id,
+                                            request_id,
+                                            StreamEventType.THINKING_START,
+                                            {},
+                                        )
+                                        await self._send_stream_chunk(
+                                            session_id,
+                                            request_id,
+                                            StreamEventType.THINKING_DELTA,
+                                            {"text": display_text},
+                                        )
+                                        await self._send_stream_chunk(
+                                            session_id,
+                                            request_id,
+                                            StreamEventType.THINKING_END,
+                                            {},
+                                        )
+                                    continue
+
+                            if (
+                                item_type != "reasoning_item"
+                                and thinking_started
+                                and not thinking_finalized
+                            ):
+                                thinking_finalized = True
                                 await self._send_stream_chunk(
                                     session_id,
                                     request_id,
                                     StreamEventType.THINKING_END,
                                     {},
                                 )
-                            continue
 
-                    # Close an open thinking block when a non-reasoning run item
-                    # arrives (tool call, tool output, message output, etc.).
-                    if (
-                        item_type != "reasoning_item"
-                        and thinking_started
-                        and not thinking_finalized
-                    ):
-                        thinking_finalized = True
-                        await self._send_stream_chunk(
-                            session_id,
-                            request_id,
-                            StreamEventType.THINKING_END,
-                            {},
-                        )
-
-                    # Handle tool calls
-                    if item_type == "tool_call_item":
-                        raw_item = getattr(item, "raw_item", None)
-                        tool_name = getattr(item, "name", None) or (
-                            getattr(raw_item, "name", "") if raw_item else ""
-                        )
-                        tool_args = getattr(item, "arguments", "") or (
-                            getattr(raw_item, "arguments", "") if raw_item else ""
-                        )
-
-                        if tool_name:
-                            tool_was_called = True
-
-                            # Check if tool should skip output
-                            tool_func = getattr(tools_module, tool_name, None)
-                            skip_output = (
-                                getattr(tool_func, "skip_output", False)
-                                if tool_func
-                                else False
-                            )
-
-                            if skip_output:
-                                expected_outputs += 1
-                                parallel_skip_tools.append(
-                                    {"name": tool_name, "args": tool_args}
+                            if item_type == "tool_call_item":
+                                raw_item = getattr(item, "raw_item", None)
+                                tool_name = getattr(item, "name", None) or (
+                                    getattr(raw_item, "name", "") if raw_item else ""
                                 )
-                            else:
-                                status = "tool_pending"
-                                parallel_tools.append(
-                                    {
-                                        "name": tool_name,
-                                        "args": tool_args,
-                                        "status": status,
-                                    }
+                                tool_args = getattr(item, "arguments", "") or (
+                                    getattr(raw_item, "arguments", "") if raw_item else ""
                                 )
-                                expected_outputs += 1
 
+                                if tool_name:
+                                    tool_was_called = True
+                                    tool_func = getattr(tools_module, tool_name, None)
+                                    skip_output = (
+                                        getattr(tool_func, "skip_output", False)
+                                        if tool_func
+                                        else False
+                                    )
+
+                                    if skip_output:
+                                        expected_outputs += 1
+                                        parallel_skip_tools.append(
+                                            {"name": tool_name, "args": tool_args}
+                                        )
+                                    else:
+                                        status = "tool_pending"
+                                        parallel_tools.append(
+                                            {
+                                                "name": tool_name,
+                                                "args": tool_args,
+                                                "status": status,
+                                            }
+                                        )
+                                        expected_outputs += 1
+                                        await self._send_stream_chunk(
+                                            session_id,
+                                            request_id,
+                                            StreamEventType.TOOL_CALL_START,
+                                            {
+                                                "tool_name": tool_name,
+                                                "tool_args": tool_args,
+                                                "status": status,
+                                                "parallel_tools": parallel_tools,
+                                                "is_first": len(parallel_tools) == 1,
+                                            },
+                                        )
+                                        self._active_tools[session_id] = {
+                                            "tools": parallel_tools + parallel_skip_tools,
+                                            "is_edit": False,
+                                            "was_called": tool_was_called,
+                                        }
+
+                            elif item_type == "tool_call_output_item":
+                                tool_output = getattr(item, "output", "")
+                                pending_tool_outputs.append(tool_output)
+
+                                if (
+                                    len(pending_tool_outputs) >= expected_outputs
+                                    and expected_outputs > 0
+                                ):
+                                    has_failure = any(
+                                        o.strip().startswith("Error:")
+                                        for o in pending_tool_outputs
+                                        if isinstance(o, str)
+                                    )
+                                    await self._send_stream_chunk(
+                                        session_id,
+                                        request_id,
+                                        StreamEventType.TOOL_CALL_END,
+                                        {
+                                            "tools": parallel_tools + parallel_skip_tools,
+                                            "has_failure": has_failure,
+                                            "skip_output": bool(parallel_skip_tools)
+                                            and not parallel_tools,
+                                        },
+                                    )
+                                    self._active_tools.pop(session_id, None)
+                                    pending_tool_outputs = []
+                                    expected_outputs = 0
+                                    tool_was_called = False
+                                    parallel_tools = []
+                                    parallel_skip_tools = []
+
+                        if hasattr(event, "data") and isinstance(
+                            event.data, ResponseTextDeltaEvent
+                        ):
+                            raw_delta = event.data.delta
+                            if raw_delta:
+                                assistant_text_started = True
+                                delta, in_anya_marker = utils.filter_anya_markers(
+                                    raw_delta, in_anya_marker
+                                )
+                                if not delta or tool_was_called:
+                                    continue
                                 await self._send_stream_chunk(
                                     session_id,
                                     request_id,
-                                    StreamEventType.TOOL_CALL_START,
+                                    StreamEventType.TEXT_DELTA,
+                                    {"text": delta},
+                                )
+
+                    try:
+                        if hasattr(result, "context_wrapper") and result.context_wrapper:
+                            raw_usage = result.context_wrapper.usage
+                            self.logger.debug(
+                                f"Raw usage from context_wrapper: {raw_usage}"
+                            )
+                            if raw_usage:
+                                model = agent_settings.model or os.environ.get(
+                                    "ANYA_MODEL", DEFAULT_MODEL
+                                )
+                                usage, aggregate_usage, request_count = choose_context_usage(
+                                    raw_usage, provider=model
+                                )
+                                percentage, context_window, usable_context, is_overflow = (
+                                    calculate_context_usage(usage, model)
+                                )
+                                context_tokens = usage.context_tokens
+                                await self._send_stream_chunk(
+                                    session_id,
+                                    request_id,
+                                    StreamEventType.TOKEN_USAGE,
                                     {
-                                        "tool_name": tool_name,
-                                        "tool_args": tool_args,
-                                        "status": status,
-                                        "parallel_tools": parallel_tools,
-                                        "is_first": len(parallel_tools) == 1,
+                                        "total_tokens": context_tokens,
+                                        "prompt_tokens": usage.input,
+                                        "completion_tokens": usage.output,
+                                        "reasoning_tokens": usage.reasoning,
+                                        "cache_read": usage.cache_read,
+                                        "cache_write": usage.cache_write,
+                                        "percentage": percentage,
+                                        "context_window": context_window,
+                                        "usable_context": usable_context,
+                                        "is_overflow": is_overflow,
+                                        "aggregate_context_tokens": aggregate_usage.context_tokens,
+                                        "request_usage_entries": request_count,
                                     },
                                 )
-                                self._active_tools[session_id] = {
-                                    "tools": parallel_tools + parallel_skip_tools,
-                                    "is_edit": False,
-                                    "was_called": tool_was_called,
-                                }
-
-                    # Handle tool outputs
-                    elif item_type == "tool_call_output_item":
-                        tool_output = getattr(item, "output", "")
-                        pending_tool_outputs.append(tool_output)
-
-                        if (
-                            len(pending_tool_outputs) >= expected_outputs
-                            and expected_outputs > 0
-                        ):
-                            has_failure = any(
-                                o.strip().startswith("Error:")
-                                for o in pending_tool_outputs
-                                if isinstance(o, str)
-                            )
-
-                            await self._send_stream_chunk(
-                                session_id,
-                                request_id,
-                                StreamEventType.TOOL_CALL_END,
-                                {
-                                    "tools": parallel_tools + parallel_skip_tools,
-                                    "has_failure": has_failure,
-                                    "skip_output": bool(parallel_skip_tools)
-                                    and not parallel_tools,
-                                },
-                            )
-
-                            self._active_tools.pop(session_id, None)
-
-                            pending_tool_outputs = []
-                            expected_outputs = 0
-                            tool_was_called = False
-                            parallel_tools = []
-                            parallel_skip_tools = []
-
-                # Handle text deltas
-                if hasattr(event, "data") and isinstance(
-                    event.data, ResponseTextDeltaEvent
-                ):
-                    raw_delta = event.data.delta
-                    if raw_delta:
-                        assistant_text_started = True
-                        # Filter anya markers for display
-                        delta, in_anya_marker = utils.filter_anya_markers(
-                            raw_delta, in_anya_marker
+                                self.logger.info(
+                                    f"Token usage: {context_tokens}/{format_context_window(usable_context)} ({percentage:.1f}%) "
+                                    f"[in:{usage.input} out:{usage.output} cache:{usage.cache_read}] "
+                                    f"aggregate_ctx={aggregate_usage.context_tokens} entries={request_count}"
+                                )
+                    except Exception as e:
+                        self.logger.warning(
+                            f"Error sending token usage: {e}", exc_info=True
                         )
-                        if not delta:
-                            continue
 
-                        # Suppress text deltas while a tool is executing
-                        # This prevents tool output from being interleaved with LLM text
-                        if tool_was_called:
-                            continue
+                    break
 
-                        # Send text delta
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    if _should_retry(e) and attempt <= max_retries:
+                        delay = _retry_delay_seconds(attempt)
+                        self.logger.warning(
+                            "Transient agent/API error on attempt %s/%s for session %s: %s. Retrying in %.1fs",
+                            attempt,
+                            max_retries + 1,
+                            session_id,
+                            e,
+                            delay,
+                        )
                         await self._send_stream_chunk(
                             session_id,
                             request_id,
-                            StreamEventType.TEXT_DELTA,
+                            StreamEventType.STATUS,
                             {
-                                "text": delta,
+                                "message": f"Transient network/API error, retrying ({attempt}/{max_retries})...",
                             },
                         )
-
-            # Send token usage after streaming completes
-            try:
-                if hasattr(result, "context_wrapper") and result.context_wrapper:
-                    raw_usage = result.context_wrapper.usage
-                    self.logger.debug(f"Raw usage from context_wrapper: {raw_usage}")
-                    if raw_usage:
-                        # Get model from client settings (not env var, which may differ)
-                        model = agent_settings.model or os.environ.get(
-                            "ANYA_MODEL", DEFAULT_MODEL
-                        )
-
-                        # Parse usage with detailed breakdown.
-                        # Use per-request entries when available to avoid inflated
-                        # run-aggregate context usage after tool/retry loops.
-                        usage, aggregate_usage, request_count = choose_context_usage(
-                            raw_usage, provider=model
-                        )
-
-                        # Calculate context usage with usable context consideration
-                        percentage, context_window, usable_context, is_overflow = (
-                            calculate_context_usage(usage, model)
-                        )
-
-                        # Use effective single-request context_tokens for display
-                        context_tokens = usage.context_tokens
-
-                        await self._send_stream_chunk(
-                            session_id,
-                            request_id,
-                            StreamEventType.TOKEN_USAGE,
-                            {
-                                "total_tokens": context_tokens,
-                                "prompt_tokens": usage.input,
-                                "completion_tokens": usage.output,
-                                "reasoning_tokens": usage.reasoning,
-                                "cache_read": usage.cache_read,
-                                "cache_write": usage.cache_write,
-                                "percentage": percentage,
-                                "context_window": context_window,
-                                "usable_context": usable_context,
-                                "is_overflow": is_overflow,
-                                "aggregate_context_tokens": aggregate_usage.context_tokens,
-                                "request_usage_entries": request_count,
-                            },
-                        )
-                        self.logger.info(
-                            f"Token usage: {context_tokens}/{format_context_window(usable_context)} ({percentage:.1f}%) "
-                            f"[in:{usage.input} out:{usage.output} cache:{usage.cache_read}] "
-                            f"aggregate_ctx={aggregate_usage.context_tokens} entries={request_count}"
-                        )
-            except Exception as e:
-                self.logger.warning(f"Error sending token usage: {e}", exc_info=True)
-
+                        await asyncio.sleep(delay)
+                        continue
+                    raise
         finally:
-            # Ensure thinking is closed if it was actually opened and left open.
-            # Do not emit a trailing THINKING_END for already self-contained
-            # reasoning-item folds, otherwise the UI creates an empty extra
-            # thinking block at the end.
             if thinking_started and not thinking_finalized:
                 thinking_finalized = True
                 await self._send_stream_chunk(
@@ -1116,7 +1210,6 @@ class RequestHandler:
                     {},
                 )
 
-            # Close any open tool folds even on exception/cancellation
             if tool_was_called:
                 await self._send_stream_chunk(
                     session_id,
@@ -1138,7 +1231,6 @@ class RequestHandler:
         Returns the full system prompt for the Code agent, including all
         dynamic instructions, context, AGENTS.md, and skills metadata.
         """
-        from ..agents import CodeAgent
         from ..protocol import AgentSettings
 
         # Get settings from payload or use defaults

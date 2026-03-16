@@ -20,6 +20,10 @@ class AnthropicModel:
         self.model = model
         self.client = client
 
+    def get_retry_advice(self, request: Any) -> None:
+        """Return provider-specific retry guidance (none for Anthropic)."""
+        return None
+
     async def get_response(
         self,
         system_instructions: str | None,

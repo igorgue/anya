@@ -79,7 +79,6 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
             CREATE INDEX IF NOT EXISTS idx_memories_timestamp ON memories(timestamp DESC);
-            CREATE INDEX IF NOT EXISTS idx_memories_dedup ON memories(deduplication_key);
 
             CREATE TABLE IF NOT EXISTS tool_outputs (
                 id TEXT PRIMARY KEY,
@@ -97,6 +96,24 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_tool_outputs_message ON tool_outputs(message_id);
         """)
         conn.commit()
+
+        # Migration: Ensure unique index on memories.deduplication_key
+        # Remove duplicates first, then create the unique index
+        try:
+            conn.execute("""
+                DELETE FROM memories WHERE id NOT IN (
+                    SELECT MIN(id) FROM memories
+                    GROUP BY deduplication_key
+                )
+            """)
+            conn.execute("DROP INDEX IF EXISTS idx_memories_dedup")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_dedup_unique "
+                "ON memories(deduplication_key)"
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
         # Migration: Add markers column if it doesn't exist
         cursor = conn.execute("PRAGMA table_info(messages)")
@@ -476,6 +493,21 @@ def save_memory(memory: dict) -> bool:
         return True
     except sqlite3.IntegrityError:
         return False
+    finally:
+        conn.close()
+
+
+def memory_exists(deduplication_key: str) -> bool:
+    """Return True if a memory with this deduplication key already exists."""
+    if not deduplication_key:
+        return False
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "SELECT 1 FROM memories WHERE deduplication_key = ? LIMIT 1",
+            (deduplication_key,),
+        )
+        return cursor.fetchone() is not None
     finally:
         conn.close()
 

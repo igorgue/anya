@@ -28,23 +28,17 @@ def _build_do_instructions(cwd: str | None = None) -> str:
         Your job is to modify the current Neovim buffer as quickly as possible.
 
         Rules:
-        - Prefer a single `execute` tool call.
-        - Inside `execute`, usually transform the provided buffer content directly with Python string operations.
-        - Use `from anya.libs import buffer` and call `buffer.modify(content)` with the COMPLETE new buffer text.
+        - Use `execute` with `from anya.libs import buffer; buffer.modify(content)` to replace the buffer.
+        - Use `buffer.modify(content, mode="append")` or `buffer.modify(content, mode="prepend")` for partial updates.
         - Do not explain your work.
         - Do not ask the user questions.
         - Do not read unrelated project files unless the instruction explicitly requires extra context.
-        - Do not inspect docs, skills, AGENTS.md, or web resources unless absolutely necessary.
         - Finish as soon as the buffer has been updated.
         """
     ).strip()
-    return apply_system_prompt(
-        instructions,
-        nvim=None,
-        cwd=cwd,
-        include_project_docs=False,
-        include_skills=False,
-    )
+    if cwd:
+        instructions += f"\n\nWorking directory: {cwd}"
+    return instructions
 
 
 async def CodeAgent(
@@ -52,6 +46,7 @@ async def CodeAgent(
     nvim=None,
     settings: "AgentSettings | None" = None,
     cwd: str | None = None,
+    memory_context: str | None = None,
 ) -> Agent:
     """Create a code agent with the execute tool.
 
@@ -76,6 +71,14 @@ async def CodeAgent(
 
     # Expand placeholders and append environment context at the end.
     instructions = apply_system_prompt(instructions, nvim=nvim, cwd=cwd)
+
+    if memory_context:
+        instructions = (
+            f"{instructions}\n\n---\nMemory context (auto-appended):\n"
+            f"Use this only when relevant, and prefer calling `from anya.libs import memory` "
+            f"inside `execute()` when you need to retrieve memories dynamically.\n"
+            f"{memory_context.strip()}"
+        )
 
     # ------
     # Configuration from settings or environment

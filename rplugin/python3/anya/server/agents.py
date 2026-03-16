@@ -84,6 +84,7 @@ class AgentManager:
         settings: AgentSettings | None = None,
         cwd: str | None = None,
         request_kind: str = "chat",
+        memory_context: str | None = None,
     ) -> Agent:
         """Get or create the Code agent for a session with specific settings.
 
@@ -126,7 +127,8 @@ class AgentManager:
         else:
             skills = discover_skills(cwd=cwd)
             skill_fp = skills_fingerprint(skills)
-        cache_key = f"{request_kind}:{settings_hash}:{cwd or ''}:{skill_fp}"
+        memory_fp = (memory_context or "").strip()
+        cache_key = f"{request_kind}:{settings_hash}:{cwd or ''}:{skill_fp}:{hash(memory_fp)}"
 
         # Check if we have a cached agent for these settings
         if cache_key in session.agents:
@@ -144,12 +146,15 @@ class AgentManager:
         )
 
         agent_factory = DoAgent if request_kind == "do" else CodeAgent
-        agent = await agent_factory(
-            thinking_budget=settings.thinking_budget or self._thinking_budget,
-            nvim=None,  # No nvim in daemon context
-            settings=settings,
-            cwd=cwd,
-        )
+        factory_kwargs = {
+            "thinking_budget": settings.thinking_budget or self._thinking_budget,
+            "nvim": None,  # No nvim in daemon context
+            "settings": settings,
+            "cwd": cwd,
+        }
+        if request_kind != "do":
+            factory_kwargs["memory_context"] = memory_context
+        agent = await agent_factory(**factory_kwargs)
 
         # Cache the agent
         session.agents[cache_key] = agent

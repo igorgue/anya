@@ -54,6 +54,7 @@ class AnyaPlugin:
         self.allowed_commands = set()  # Persist allowed commands across agent runs
         self._tool_fold_open = False  # Track if a tool fold is currently open
         self._last_layout = "replace"  # Remember the last layout used
+        self._title_timeout_tasks = {}  # conversation_id -> asyncio.Task fallback closer
 
         # State for :Anya do command (headless buffer modification)
         self._do_task = None
@@ -242,6 +243,10 @@ class AnyaPlugin:
         conversation_id = data.get("conversation_id", "")
         title = data.get("title", "")
         success = data.get("success", False)
+
+        timeout_task = self._title_timeout_tasks.pop(conversation_id, None)
+        if timeout_task and not timeout_task.done():
+            timeout_task.cancel()
 
         if success and title and conversation_id:
             try:
@@ -801,6 +806,10 @@ class AnyaPlugin:
                 self.nvim.out_write,
                 "Anya: Daemon started.\n",
             )
+
+        # Ensure system event listener is running (for title generation, etc.)
+        if not self._system_listener_running:
+            asyncio.ensure_future(self._start_system_event_listener())
 
         # Get agent settings from client-side environment (used for fidget and DB)
         request_agent_settings = self._get_agent_settings()
@@ -2011,6 +2020,26 @@ end
             {"conversation_id": conversation_id},
         )
 
+        fallback_timeout = 45.0
+
+        async def _fallback_finish():
+            try:
+                await asyncio.sleep(fallback_timeout)
+                fidget.emit_user_event(
+                    self.nvim,
+                    "AnyaTitleGenerationFinished",
+                    {
+                        "conversation_id": conversation_id,
+                        "title": "",
+                        "success": False,
+                    },
+                )
+            except asyncio.CancelledError:
+                pass
+
+        fallback_task = asyncio.create_task(_fallback_finish())
+        self._title_timeout_tasks[conversation_id] = fallback_task
+
         # Send to daemon — returns immediately; result arrives via TITLE_GENERATED system event
         try:
             loop = asyncio.get_event_loop()
@@ -2033,7 +2062,10 @@ end
                 ),
             )
         except Exception:
-            # Daemon unreachable — close the fidget immediately
+            # Daemon unreachable — cancel fallback and close the fidget immediately
+            current = self._title_timeout_tasks.pop(conversation_id, None)
+            if current and not current.done():
+                current.cancel()
             fidget.emit_user_event(
                 self.nvim,
                 "AnyaTitleGenerationFinished",
@@ -2476,9 +2508,8 @@ end)
             f"{instruction}\n\n"
             f"Current file: `{rel_path}` (filetype: {ft})\n\n"
             f"File content:\n```{ft}\n{buf_content}\n```\n\n"
-            f"Use `from anya.libs import buffer; buffer.modify(content)` to write the result.\n"
-            f"The `content` argument must be the COMPLETE new file content.\n"
-            f"Do not add any explanation — just use buffer.modify() with the full result."
+            f"Use `from anya.libs import buffer; buffer.modify(content)` to replace the buffer.\n"
+            f"Do not add any explanation."
         )
 
         nvim_context = NvimContext(
@@ -3275,7 +3306,6 @@ For more help, see :h anya"""
 
     @pynvim.function("AnyaDo", sync=False)
     def anya_do(self, args):
-        self._ensure_daemon_running_sync()
         """Run :Anya do programmatically from Lua."""
         if not args:
             self.nvim.err_write("AnyaDo requires an instruction argument.\n")
@@ -3779,7 +3809,6 @@ Usage:
 
     @pynvim.function("AnyaSearchMentions", sync=True)
     def anya_search_mentions(self, args):
-        self._ensure_daemon_running_sync()
         """Search conversations for @mention completion.
 
         Args:
@@ -3800,7 +3829,6 @@ Usage:
 
     @pynvim.function("AnyaGetMentionContent", sync=True)
     def anya_get_mention_content(self, args):
-        self._ensure_daemon_running_sync()
         """Get content of a conversation for mention context injection.
 
         Args:

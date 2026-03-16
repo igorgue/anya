@@ -9,7 +9,7 @@ sys.path.append(
 )
 
 from anya.protocol import AgentSettings
-from anya.title_agent import _build_openai_request_kwargs, _get_reasoning_effort
+from anya.reasoning import _build_openai_request_kwargs, _get_reasoning_effort
 
 
 class TestTitleAgent(unittest.TestCase):
