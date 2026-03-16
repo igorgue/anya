@@ -21,7 +21,9 @@ def search_memories(
             f"Invalid category: {category!r}. Valid categories: {sorted(_VALID_CATEGORIES)}"
         )
     safe_limit = max(1, min(int(limit), 50))
-    return db.search_memories(query=query, category=normalized_category, limit=safe_limit)
+    return db.search_memories(
+        query=query, category=normalized_category, limit=safe_limit
+    )
 
 
 def format_memories(memories: list[dict[str, Any]]) -> str:

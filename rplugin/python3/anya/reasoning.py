@@ -95,8 +95,6 @@ def build_openai_reasoning_params(
     return {}
 
 
-
-
 def _build_openai_request_kwargs(
     *,
     api_type: str,
@@ -134,6 +132,7 @@ def _build_openai_request_kwargs(
     elif temperature is not None:
         kwargs["temperature"] = temperature
     return kwargs
+
 
 def build_anthropic_thinking_param(
     reasoning_effort: str | None,

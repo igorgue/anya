@@ -128,7 +128,9 @@ class AgentManager:
             skills = discover_skills(cwd=cwd)
             skill_fp = skills_fingerprint(skills)
         memory_fp = (memory_context or "").strip()
-        cache_key = f"{request_kind}:{settings_hash}:{cwd or ''}:{skill_fp}:{hash(memory_fp)}"
+        cache_key = (
+            f"{request_kind}:{settings_hash}:{cwd or ''}:{skill_fp}:{hash(memory_fp)}"
+        )
 
         # Check if we have a cached agent for these settings
         if cache_key in session.agents:

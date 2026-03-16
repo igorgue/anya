@@ -379,7 +379,8 @@ vim.keymap.set({ "n", "i" }, "<localleader>n", function()
   Snacks.notifier.show_history()
 end, { buffer = true, desc = "Show latest task list" })
 
--- Focus toggle between chat and prompt with Tab (also set in buffers.py, but ftplugin ensures it's always available and can handle insert mode)
+-- Focus toggle between chat and prompt with Tab (also set in buffers.py, but ftplugin ensures
+-- it's always available and can handle insert mode)
 vim.keymap.set("n", "<Tab>", function()
   require("anya.float_focus").focus_chat()
 end, { buffer = true, nowait = true, desc = "Switch to chat window" })

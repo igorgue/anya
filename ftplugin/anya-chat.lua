@@ -340,7 +340,6 @@ vim.keymap.set("i", "<Tab>", function()
   return ""
 end, { buffer = true, nowait = true, expr = true, replace_keycodes = false, desc = "Switch to prompt window" })
 
-
 -- Resize prompt height from chat window too
 local function resize_prompt_height(delta)
   vim.fn.AnyaResizePromptHeight(delta)

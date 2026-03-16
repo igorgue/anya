@@ -318,7 +318,7 @@ async def generate_title(
             response = await client.chat.completions.create(**kwargs)
             raw = response.choices[0].message.content or ""
 
-        title = raw.strip().strip("\"\"'").rstrip(".!?").strip()
+        title = raw.strip().strip('""\'').rstrip(".!?").strip()
         return title if title else None
 
     except Exception as e:

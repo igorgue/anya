@@ -107,9 +107,13 @@ def _is_retryable_error(exception: Exception) -> bool:
     error_lower = error_str.lower()
 
     def _dict_is_retryable(error_payload: dict) -> bool:
-        error = error_payload.get("error", {}) if isinstance(error_payload, dict) else {}
+        error = (
+            error_payload.get("error", {}) if isinstance(error_payload, dict) else {}
+        )
         code = str(error.get("code", "") or error_payload.get("code", ""))
-        message = str(error.get("message", "") or error_payload.get("message", "")).lower()
+        message = str(
+            error.get("message", "") or error_payload.get("message", "")
+        ).lower()
         err_type = str(error.get("type", "") or error_payload.get("type", "")).lower()
 
         if code.startswith("5"):
@@ -705,7 +709,8 @@ class RequestHandler:
         )
 
         memory_context = (
-            None if nvim_context.request_kind == "do"
+            None
+            if nvim_context.request_kind == "do"
             else self._build_memory_context(payload)
         )
 
@@ -876,7 +881,9 @@ class RequestHandler:
                         is_reasoning_event = False
                         reasoning_text = None
 
-                        if event.type == "raw_response_event" and hasattr(event, "data"):
+                        if event.type == "raw_response_event" and hasattr(
+                            event, "data"
+                        ):
                             data = event.data
                             data_type = getattr(data, "type", "")
 
@@ -885,7 +892,10 @@ class RequestHandler:
                             ):
                                 is_reasoning_event = True
                                 if data_type == "response.reasoning_summary_text.delta":
-                                    if thinking_source is None or thinking_source == "summary":
+                                    if (
+                                        thinking_source is None
+                                        or thinking_source == "summary"
+                                    ):
                                         thinking_source = "summary"
                                         reasoning_text = getattr(data, "delta", "")
                                 elif data_type in (
@@ -1034,7 +1044,9 @@ class RequestHandler:
                                     getattr(raw_item, "name", "") if raw_item else ""
                                 )
                                 tool_args = getattr(item, "arguments", "") or (
-                                    getattr(raw_item, "arguments", "") if raw_item else ""
+                                    getattr(raw_item, "arguments", "")
+                                    if raw_item
+                                    else ""
                                 )
 
                                 if tool_name:
@@ -1074,7 +1086,8 @@ class RequestHandler:
                                             },
                                         )
                                         self._active_tools[session_id] = {
-                                            "tools": parallel_tools + parallel_skip_tools,
+                                            "tools": parallel_tools
+                                            + parallel_skip_tools,
                                             "is_edit": False,
                                             "was_called": tool_was_called,
                                         }
@@ -1097,7 +1110,8 @@ class RequestHandler:
                                         request_id,
                                         StreamEventType.TOOL_CALL_END,
                                         {
-                                            "tools": parallel_tools + parallel_skip_tools,
+                                            "tools": parallel_tools
+                                            + parallel_skip_tools,
                                             "has_failure": has_failure,
                                             "skip_output": bool(parallel_skip_tools)
                                             and not parallel_tools,
@@ -1129,7 +1143,10 @@ class RequestHandler:
                                 )
 
                     try:
-                        if hasattr(result, "context_wrapper") and result.context_wrapper:
+                        if (
+                            hasattr(result, "context_wrapper")
+                            and result.context_wrapper
+                        ):
                             raw_usage = result.context_wrapper.usage
                             self.logger.debug(
                                 f"Raw usage from context_wrapper: {raw_usage}"
@@ -1138,12 +1155,15 @@ class RequestHandler:
                                 model = agent_settings.model or os.environ.get(
                                     "ANYA_MODEL", DEFAULT_MODEL
                                 )
-                                usage, aggregate_usage, request_count = choose_context_usage(
-                                    raw_usage, provider=model
+                                usage, aggregate_usage, request_count = (
+                                    choose_context_usage(raw_usage, provider=model)
                                 )
-                                percentage, context_window, usable_context, is_overflow = (
-                                    calculate_context_usage(usage, model)
-                                )
+                                (
+                                    percentage,
+                                    context_window,
+                                    usable_context,
+                                    is_overflow,
+                                ) = calculate_context_usage(usage, model)
                                 context_tokens = usage.context_tokens
                                 await self._send_stream_chunk(
                                     session_id,
