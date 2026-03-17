@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+#
+# Anya — Install script
+# Usage: curl -fsSL https://anya.bot/install | bash
+
+set -euo pipefail
+
+REPO="igorgue/anya"
+INSTALL_DIR="${HOME}/.local/share/anya/src"
+BIN_DIR="${HOME}/.local/bin"
+BIN_LINK="${BIN_DIR}/anya"
+
+mkdir -p ${INSTALL_DIR}
+mkdir -p ${BIN_DIR}
+
+info()  { printf "\033[1;34m[info]\033[0m  %s\n" "$*"; }
+ok()    { printf "\033[1;32m[ok]\033[0m    %s\n" "$*"; }
+error() { printf "\033[1;31m[error]\033[0m %s\n" "$*" >&2; exit 1; }
+
+# ── prerequisites ──────────────────────────────────────────────
+
+command -v git >/dev/null 2>&1 || error "git is required but not installed."
+command -v nvim >/dev/null 2>&1 || error "neovim is required but not installed."
+
+# ── clone / update ─────────────────────────────────────────────
+
+if [ -d "${INSTALL_DIR}/.git" ]; then
+  info "Updating existing installation…"
+  git -C "${INSTALL_DIR}" pull --ff-only --quiet
+  ok "Updated."
+else
+  info "Cloning anya into ${INSTALL_DIR}…"
+  git clone --depth 1 "https://github.com/${REPO}.git" "${INSTALL_DIR}"
+  ok "Cloned."
+fi
+
+# ── symlink ────────────────────────────────────────────────────
+
+mkdir -p "${BIN_DIR}"
+
+if [ -L "${BIN_LINK}" ]; then
+  target="$(readlink "${BIN_LINK}")"
+  if [ "${target}" = "${INSTALL_DIR}/standalone/anya" ]; then
+    ok "Symlink already in place: ${BIN_LINK}"
+  else
+    info "Updating existing symlink (${BIN_LINK} → ${INSTALL_DIR}/standalone/anya)"
+    ln -sf "${INSTALL_DIR}/standalone/anya" "${BIN_LINK}"
+    ok "Symlink updated."
+  fi
+elif [ -f "${BIN_LINK}" ]; then
+  error "${BIN_LINK} already exists and is not a symlink. Remove it and re-run."
+else
+  ln -s "${INSTALL_DIR}/standalone/anya" "${BIN_LINK}"
+  ok "Symlinked ${BIN_LINK} → ${INSTALL_DIR}/standalone/anya"
+fi
+
+# ── done ───────────────────────────────────────────────────────
+
+echo ""
+ok "Anya is installed! Run \033[1manya\033[0m to start."
