@@ -2,4 +2,5 @@
 
 set -e
 
-nvim -u $(dirname "$0")/init.lua +Anya
+DIR="$(dirname "$(readlink -f "$0")")"
+nvim -u "$DIR/init.lua" +Anya
