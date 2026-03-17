@@ -3,4 +3,20 @@
 set -e
 
 DIR="$(dirname "$(readlink -f "$0")")"
-nvim -u "$DIR/init.lua" +Anya
+
+case "${1:-}" in
+  update)
+    INSTALL_DIR="$HOME/.local/share/anya/src"
+    if [ ! -d "$INSTALL_DIR" ]; then
+      echo "$INSTALL_DIR not found"
+      exit 1
+    fi
+    echo "Updating anya..."
+    git -C "$INSTALL_DIR" fetch origin
+    git -C "$INSTALL_DIR" reset --hard origin/main
+    echo "anya updated to latest origin/main"
+    ;;
+  *)
+    nvim -u "$DIR/init.lua" +Anya
+    ;;
+esac
