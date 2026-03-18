@@ -1,10 +1,3 @@
-local markers = require("anya.markers")
-local text = require("anya.text")
-local conversation = require("anya.conversation")
-local picker = require("anya.picker")
-local history = require("anya.history")
-local task_list = require("anya.task_list")
-
 local config = {
   start_in_insert = false,
   image_clip = {},
@@ -12,13 +5,19 @@ local config = {
 
 local M = {
   config = config,
-  markers = markers,
-  text = text,
-  conversation = conversation,
-  picker = picker,
-  history = history,
-  task_list = task_list,
 }
+
+-- Lazy-load submodules on first access
+setmetatable(M, {
+  __index = function(t, key)
+    local ok, mod = pcall(require, "anya." .. key)
+    if ok then
+      rawset(t, key, mod)
+      return mod
+    end
+    return nil
+  end,
+})
 
 function M.setup(opts)
   opts = opts or {}

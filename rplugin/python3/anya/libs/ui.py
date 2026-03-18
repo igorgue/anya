@@ -106,7 +106,9 @@ def ask(prompt: str, options: list[str], timeout: float | None = None) -> str:
     """
     if not options:
         raise ValueError("options must not be empty")
-    return _send_request("select", {"prompt": prompt, "options": options}, timeout)
+    result = _send_request("select", {"prompt": prompt, "options": options}, timeout)
+    print(f"User selected: {result}")
+    return result
 
 
 def input(prompt: str, default: str = "", timeout: float | None = None) -> str:
@@ -130,7 +132,12 @@ def input(prompt: str, default: str = "", timeout: float | None = None) -> str:
         else:
             print(f"User entered: {name}")
     """
-    return _send_request("input", {"prompt": prompt, "default": default}, timeout)
+    result = _send_request("input", {"prompt": prompt, "default": default}, timeout)
+    if result:
+        print(f"User entered: {result}")
+    else:
+        print("User cancelled input.")
+    return result
 
 
 def confirm(prompt: str, timeout: float | None = None) -> bool:
