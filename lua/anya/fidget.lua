@@ -92,6 +92,9 @@ function M:init()
     end,
   })
 
+  -- Track tool execution start times so we can enforce a minimum display duration
+  M.tool_start_times = {}
+
   vim.api.nvim_create_autocmd({ "User" }, {
     pattern = "AnyaToolExecution",
     group = group,
@@ -102,6 +105,8 @@ function M:init()
         handle:report({
           message = event.data.tool_name,
         })
+        -- Record when this tool started so we can enforce minimum display duration
+        M.tool_start_times[event.data.request_id] = vim.uv.now()
       end
     end,
   })
@@ -110,19 +115,43 @@ function M:init()
     pattern = "AnyaToolExecutionComplete",
     group = group,
     callback = function(event)
-      local handle = M:get_progress_handle(event.data.request_id)
-      if handle then
-        -- Restore the previous message or generate a new random one
-        local last_msg = M.last_messages[event.data.request_id]
+      local request_id = event.data.request_id
+      local handle = M:get_progress_handle(request_id)
+      if not handle then
+        return
+      end
+
+      local start_time = M.tool_start_times[request_id]
+      M.tool_start_times[request_id] = nil
+
+      local function restore_message()
+        -- Only restore if the handle is still alive and still showing the tool name
+        local current_handle = M:get_progress_handle(request_id)
+        if not current_handle then
+          return
+        end
+        local last_msg = M.last_messages[request_id]
         if last_msg and last_msg ~= "" then
-          handle:report({
+          current_handle:report({
             message = last_msg,
           })
         else
-          handle:report({
+          current_handle:report({
             message = M:get_random_phrase(),
           })
         end
+      end
+
+      if start_time then
+        local elapsed = vim.uv.now() - start_time
+        local remaining = 1000 - elapsed
+        if remaining > 0 then
+          vim.defer_fn(restore_message, remaining)
+        else
+          restore_message()
+        end
+      else
+        restore_message()
       end
     end,
   })

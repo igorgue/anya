@@ -3468,6 +3468,39 @@ Usage:
                 "AnyaResizePromptHeight requires a valid integer delta.\n"
             )
 
+    @pynvim.function("AnyaComplete", sync=True)
+    def anya_complete(self, args):
+        """Provide command-line completions for :Anya."""
+        arglead, cmdline, _cursorpos = args[0], args[1], args[2]
+        subcommands = [
+            "daemon", "help", "open", "close", "toggle",
+            "send", "do", "tab", "pane", "history", "cancel",
+            "system-prompt", "copilot",
+        ]
+        import re
+        stripped = re.sub(r"^:Anya\s*", "", cmdline)
+        parts = stripped.split() if stripped else []
+
+        if not parts and not arglead:
+            return subcommands
+        if len(parts) <= 1 or (len(parts) == 1 and arglead):
+            prefix = arglead if arglead else ""
+            return [s for s in subcommands if s.startswith(prefix)]
+
+        first = parts[0]
+        if first in ("daemon", "pane", "copilot"):
+            opts = {
+                "daemon": ["status", "start", "stop", "restart"],
+                "pane": ["right", "left"],
+                "copilot": ["login", "logout", "status", "models"],
+            }[first]
+            if len(parts) == 2 and arglead:
+                return [o for o in opts if o.startswith(arglead)]
+            if len(parts) == 2:
+                return opts
+
+        return []
+
     @pynvim.function("AnyaCompleteAsync", sync=False)
     def anya_complete_async(self, args):
         """Provide async file path completions for @mentions."""
