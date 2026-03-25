@@ -125,6 +125,104 @@ local function get_project_root()
   return cwd
 end
 
+local function normalize_path(path)
+  return vim.fs.normalize(path)
+end
+
+local function make_relative_path(path, root)
+  local normalized_path = normalize_path(path)
+  local normalized_root = normalize_path(root)
+  local escaped_root = vim.pesc(normalized_root)
+
+  if normalized_path == normalized_root then
+    return ""
+  end
+
+  local relative = normalized_path:gsub("^" .. escaped_root .. "/?", "")
+  return relative == normalized_path and nil or relative
+end
+
+local function resolve_query_context(query, project_root)
+  local cwd = normalize_path(vim.fn.getcwd())
+  local home = normalize_path(vim.loop.os_homedir())
+  local safe_query = query or ""
+  local dir_part = ""
+  local prefix = safe_query
+
+  if safe_query:find("/", 1, true) then
+    dir_part, prefix = safe_query:match("^(.*)/([^/]*)$")
+    dir_part = dir_part or ""
+    prefix = prefix or ""
+  end
+
+  local base_dir
+  if safe_query:sub(1, 2) == "~/" or safe_query == "~" then
+    base_dir = home
+  elseif safe_query:sub(1, 1) == "/" then
+    base_dir = "/"
+  elseif safe_query:match("^%.%./") or safe_query == ".." or safe_query:match("^%./") or safe_query == "." then
+    base_dir = cwd
+  else
+    base_dir = project_root
+  end
+
+  local search_dir
+  if dir_part == "" then
+    search_dir = base_dir
+  else
+    if safe_query:sub(1, 1) == "/" then
+      search_dir = normalize_path(dir_part)
+    else
+      search_dir = normalize_path(base_dir .. "/" .. dir_part)
+    end
+  end
+
+  return {
+    prefix = prefix,
+    dir_part = dir_part,
+    search_dir = search_dir,
+    base_dir = base_dir,
+    home = home,
+    cwd = cwd,
+    project_root = normalize_path(project_root),
+    query = safe_query,
+  }
+end
+
+local function format_completion_path(full_path, context)
+  local normalized_full_path = normalize_path(full_path)
+  local relative_to_search = make_relative_path(normalized_full_path, context.search_dir)
+  if relative_to_search == nil then
+    return nil
+  end
+
+  local completion = context.dir_part ~= "" and (context.dir_part .. "/" .. relative_to_search) or relative_to_search
+
+  if context.query:sub(1, 2) == "~/" or context.query == "~" then
+    local relative_to_home = make_relative_path(normalized_full_path, context.home)
+    if relative_to_home == nil then
+      return nil
+    end
+    completion = "~/" .. relative_to_home
+  elseif context.query:sub(1, 1) == "/" then
+    completion = normalized_full_path
+  elseif context.query:match("^%.%./") or context.query == ".." or context.query:match("^%./") or context.query == "." then
+    local relative_to_cwd = make_relative_path(normalized_full_path, context.cwd)
+    if relative_to_cwd then
+      completion = relative_to_cwd
+    else
+      completion = normalized_full_path
+    end
+  else
+    local relative_to_project = make_relative_path(normalized_full_path, context.project_root)
+    if relative_to_project then
+      completion = relative_to_project
+    end
+  end
+
+  return completion
+end
+
 -- Collect files using fd if available, fallback to Lua implementation
 local function collect_files(root, collected, limit)
   -- Try to use fd first (much faster and respects gitignore)
@@ -206,7 +304,7 @@ function files.new(_opts)
     end,
 
     get_trigger_characters = function()
-      return { "@", ".", "/", "#", " " }
+      return { "@", ".", "/", "#", " ", "~" }
     end,
 
     get_completions = function(_self, ctx, callback)
@@ -266,8 +364,8 @@ function files.new(_opts)
         return
       end
 
-      -- For dot trigger, we need to ensure we're still in a @ completion context
-      if ctx.trigger_character == "." then
+      -- For path-related trigger characters, ensure we're still in an @ completion context
+      if ctx.trigger_character and vim.tbl_contains({ ".", "/", "~" }, ctx.trigger_character) then
         local has_at_before = false
         for i = cursor_col - 1, 1, -1 do
           local char = line:sub(i, i)
@@ -288,18 +386,35 @@ function files.new(_opts)
       local scored_items = {}
 
       local project_root = get_project_root()
+      local query_context = resolve_query_context(query, project_root)
+      local search_dir = query_context.search_dir
+      local search_dir_exists = vim.fn.isdirectory(search_dir) == 1
+      local candidate_files = {}
 
-      -- Refresh cache if project root changed
-      if file_cache == nil or cache_root ~= project_root then
-        file_cache = {}
-        cache_root = project_root
-        collect_files(project_root, file_cache, 5000)
+      if search_dir_exists and search_dir == project_root then
+        -- Refresh cache if project root changed
+        if file_cache == nil or cache_root ~= project_root then
+          file_cache = {}
+          cache_root = project_root
+          collect_files(project_root, file_cache, 5000)
+        end
+        candidate_files = file_cache
+      elseif search_dir_exists then
+        collect_files(search_dir, candidate_files, 5000)
       end
 
-      for _, file_path in ipairs(file_cache) do
-        local matches, score = fuzzy_match(file_path, query or "")
-        if matches then
-          table.insert(scored_items, { path = file_path, score = score })
+      for _, file_path in ipairs(candidate_files) do
+        local completion_path = file_path
+        if search_dir ~= project_root or query_context.query:match("^~/") or query_context.query:match("^%.?%.?/") or query_context.query:sub(1, 1) == "/" then
+          local full_path = normalize_path(search_dir .. "/" .. file_path)
+          completion_path = format_completion_path(full_path, query_context)
+        end
+
+        if completion_path then
+          local matches, score = fuzzy_match(completion_path, query or "")
+          if matches then
+            table.insert(scored_items, { path = completion_path, score = score })
+          end
         end
       end
 

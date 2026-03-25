@@ -1910,26 +1910,26 @@ end
 
             message_text = "".join(collected_content)
 
-            def save_after_cancel():
+            # Save synchronously before finishing so a follow-up prompt that
+            # reuses the conversation always includes the cancelled assistant
+            # message in the reconstructed LLM history.
+            try:
+                self._save_agent_message_to_db(
+                    chat_bufnr,
+                    msg_id,
+                    "Code",
+                    conversation_id,
+                    timestamp,
+                    end_timestamp,
+                    message_text,
+                )
+            except Exception as e:
                 try:
-                    self._save_agent_message_to_db(
-                        chat_bufnr,
-                        msg_id,
-                        "Code",
-                        conversation_id,
-                        timestamp,
-                        end_timestamp,
-                        message_text,
+                    self.nvim.err_write(
+                        f"Error saving cancelled message to DB: {e}\n"
                     )
-                except Exception as e:
-                    try:
-                        self.nvim.err_write(
-                            f"Error saving cancelled message to DB: {e}\n"
-                        )
-                    except Exception:
-                        pass
-
-            self.nvim.async_call(save_after_cancel)
+                except Exception:
+                    pass
 
             # Emit finish event immediately
             fidget.emit_user_event(

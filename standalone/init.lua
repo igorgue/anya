@@ -365,6 +365,8 @@ vim.keymap.set({ "n", "i" }, "<C-q>", "<Esc><cmd>qa!<CR>", { desc = "Quit" })
 -- movement
 vim.keymap.set("n", "j", "gj", { desc = "Move down" })
 vim.keymap.set("n", "k", "gk", { desc = "Move up" })
+vim.keymap.set("n", "<up>", "gk", { desc = "Move up" })
+vim.keymap.set("n", "<down>", "gj", { desc = "Move down" })
 
 vim.keymap.set("n", "<C-j>", "<C-w>j", { desc = "Move to window below" })
 vim.keymap.set("n", "<C-k>", "<C-w>k", { desc = "Move to window above" })
