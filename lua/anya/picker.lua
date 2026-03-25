@@ -99,6 +99,18 @@ local function get_chat_buffer()
   return nil
 end
 
+--- Get a visible chat window for the given buffer.
+--- @param chat_buf number
+--- @return number|nil
+local function get_chat_window(chat_buf)
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == chat_buf then
+      return win
+    end
+  end
+  return nil
+end
+
 --- Load a conversation into the chat buffer
 --- @param conversation_id string The conversation ID to load
 --- @param new_cwd string|nil Optional new cwd to switch to
@@ -150,8 +162,15 @@ local function load_conversation(conversation_id, new_cwd, title)
     _G.anya_highlight_chat_file_refs()
   end
 
-  -- Scroll to bottom
-  text._autoscroll_to_bottom(chat_buf)
+  local chat_win = get_chat_window(chat_buf)
+  if chat_win and vim.api.nvim_win_is_valid(chat_win) then
+    vim.api.nvim_set_current_win(chat_win)
+    local last_line = math.max(vim.api.nvim_buf_line_count(chat_buf), 1)
+    vim.api.nvim_win_set_cursor(chat_win, { last_line, 0 })
+    text._force_autoscroll_to_bottom(chat_buf)
+  else
+    text._force_autoscroll_to_bottom(chat_buf)
+  end
 
   return true
 end
