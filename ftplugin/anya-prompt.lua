@@ -232,29 +232,40 @@ vim.api.nvim_create_autocmd("WinLeave", {
   buffer = bufnr,
   callback = function()
     vim.g.anya_left_anya_win = true
+    -- Save cursor position so we can restore it when coming back
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    vim.g.anya_prompt_last_cursor = { cursor[1], cursor[2] }
+    vim.g.anya_prompt_last_mode = (vim.api.nvim_get_mode().mode == "i") and "insert" or "normal"
   end,
-  desc = "Track leaving Anya prompt window",
+  desc = "Track leaving Anya prompt window and save cursor",
 })
 
 vim.api.nvim_create_autocmd("WinEnter", {
   buffer = bufnr,
   callback = function()
     vim.g.anya_left_anya_win = false
-    -- Re-apply highlights after render-markdown finishes re-rendering
+    -- Restore cursor position and insert mode
     vim.schedule(function()
-      if vim.api.nvim_buf_is_valid(bufnr) then
-        highlight_refs()
+      if not vim.api.nvim_buf_is_valid(bufnr) then
+        return
       end
+      local saved_cursor = vim.g.anya_prompt_last_cursor
+      if type(saved_cursor) == "table" and #saved_cursor >= 2 then
+        local line_count = vim.api.nvim_buf_line_count(bufnr)
+        local line = math.max(1, math.min(saved_cursor[1], line_count))
+        local line_text = vim.api.nvim_buf_get_lines(bufnr, line - 1, line, false)[1] or ""
+        local col = math.max(0, math.min(saved_cursor[2], #line_text))
+        pcall(vim.api.nvim_win_set_cursor, 0, { line, col })
+      end
+      if vim.g.anya_prompt_last_mode == "insert" and vim.api.nvim_get_mode().mode ~= "i" then
+        pcall(vim.cmd, "startinsert")
+      elseif anya_config.start_in_insert and vim.g.anya_prompt_last_mode == nil and vim.api.nvim_get_mode().mode ~= "i" then
+        pcall(vim.cmd, "startinsert")
+      end
+      highlight_refs()
     end)
-    if anya_config.start_in_insert and vim.g.anya_prompt_last_mode == nil and vim.api.nvim_get_mode().mode ~= "i" then
-      vim.schedule(function()
-        if vim.api.nvim_get_current_buf() == bufnr then
-          vim.cmd("startinsert")
-        end
-      end)
-    end
   end,
-  desc = "Track entering Anya prompt window",
+  desc = "Track entering Anya prompt window and restore cursor",
 })
 
 -- Focus management: trap focus within Anya windows
