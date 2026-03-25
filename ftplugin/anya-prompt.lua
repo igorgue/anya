@@ -246,7 +246,7 @@ vim.api.nvim_create_autocmd("WinEnter", {
         highlight_refs()
       end
     end)
-    if anya_config.start_in_insert and vim.api.nvim_get_mode().mode ~= "i" then
+    if anya_config.start_in_insert and vim.g.anya_prompt_last_mode == nil and vim.api.nvim_get_mode().mode ~= "i" then
       vim.schedule(function()
         if vim.api.nvim_get_current_buf() == bufnr then
           vim.cmd("startinsert")
@@ -379,6 +379,47 @@ vim.keymap.set({ "n", "i" }, "<localleader>n", function()
   Snacks.notifier.show_history()
 end, { buffer = true, desc = "Show latest task list" })
 
+local function should_yield_tab_to_insert_plugins()
+  if vim.fn.pumvisible() ~= 0 or vim.fn.wildmenumode() == 1 then
+    return true
+  end
+
+  local copilot_vim_suggestion = vim.fn["copilot#GetDisplayedSuggestion"]
+  if type(copilot_vim_suggestion) == "function" then
+    local ok, suggestion = pcall(copilot_vim_suggestion)
+    if ok and type(suggestion) == "table" and suggestion.text and suggestion.text ~= "" then
+      return true
+    end
+  end
+
+  local ok_copilot_lua, copilot_suggestion = pcall(require, "copilot.suggestion")
+  if ok_copilot_lua and copilot_suggestion and type(copilot_suggestion.is_visible) == "function" then
+    local ok_visible, visible = pcall(copilot_suggestion.is_visible)
+    if ok_visible and visible then
+      return true
+    end
+  end
+
+  local ok_blink, blink = pcall(require, "blink.cmp")
+  if ok_blink and blink then
+    if type(blink.is_visible) == "function" then
+      local ok_visible, visible = pcall(blink.is_visible)
+      if ok_visible and visible then
+        return true
+      end
+    end
+
+    if type(blink.ghost_text_is_visible) == "function" then
+      local ok_visible, visible = pcall(blink.ghost_text_is_visible)
+      if ok_visible and visible then
+        return true
+      end
+    end
+  end
+
+  return false
+end
+
 -- Focus toggle between chat and prompt with Tab (also set in buffers.py, but ftplugin ensures
 -- it's always available and can handle insert mode)
 vim.keymap.set("n", "<Tab>", function()
@@ -386,7 +427,7 @@ vim.keymap.set("n", "<Tab>", function()
 end, { buffer = true, nowait = true, desc = "Switch to chat window" })
 
 vim.keymap.set("i", "<Tab>", function()
-  if vim.fn.pumvisible() ~= 0 or vim.fn.wildmenumode() == 1 then
+  if should_yield_tab_to_insert_plugins() then
     return "<Tab>"
   end
 

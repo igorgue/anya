@@ -1,5 +1,49 @@
 local M = {}
 
+local function normalize_mode(mode)
+  if mode == "i" or mode == "ic" or mode == "ix" then
+    return "insert"
+  end
+
+  return "normal"
+end
+
+local function save_prompt_mode()
+  local current_win = vim.api.nvim_get_current_win()
+  local current_buf = vim.api.nvim_win_get_buf(current_win)
+  local current_ft = vim.api.nvim_buf_get_option(current_buf, "filetype")
+
+  if current_ft == "anya-prompt" then
+    vim.g.anya_prompt_last_mode = normalize_mode(vim.api.nvim_get_mode().mode)
+    local cursor = vim.api.nvim_win_get_cursor(current_win)
+    vim.g.anya_prompt_last_cursor = { cursor[1], cursor[2] }
+  end
+end
+
+local function maybe_restore_prompt_mode()
+  vim.schedule(function()
+    local current_win = vim.api.nvim_get_current_win()
+    local current_buf = vim.api.nvim_win_get_buf(current_win)
+    local current_ft = vim.api.nvim_buf_get_option(current_buf, "filetype")
+    if current_ft ~= "anya-prompt" then
+      return
+    end
+
+    local target_cursor = vim.g.anya_prompt_last_cursor
+    if type(target_cursor) == "table" and #target_cursor >= 2 then
+      local line_count = vim.api.nvim_buf_line_count(current_buf)
+      local line = math.max(1, math.min(target_cursor[1], line_count))
+      local line_text = vim.api.nvim_buf_get_lines(current_buf, line - 1, line, false)[1] or ""
+      local col = math.max(0, math.min(target_cursor[2], #line_text))
+      pcall(vim.api.nvim_win_set_cursor, current_win, { line, col })
+    end
+
+    if vim.g.anya_prompt_last_mode == "insert" then
+      pcall(vim.cmd, "startinsert")
+    end
+  end)
+end
+
 ---Redirect focus back to a float window if entering a non-float window
 ---If already trying to leave a float, cycle to the next float
 function M.redirect_to_float()
@@ -57,6 +101,10 @@ function M.toggle_focus()
 
   local target_ft = (current_ft == "anya-chat") and "anya-prompt" or "anya-chat"
 
+  if current_ft == "anya-prompt" then
+    save_prompt_mode()
+  end
+
   local windows = vim.api.nvim_list_wins()
   for _, win_id in ipairs(windows) do
     if vim.api.nvim_win_is_valid(win_id) then
@@ -65,6 +113,11 @@ function M.toggle_focus()
       if ft == target_ft then
         vim.api.nvim_set_current_win(win_id)
         vim.g.anya_last_float_ft = target_ft
+        if target_ft == "anya-prompt" then
+          maybe_restore_prompt_mode()
+        else
+          pcall(vim.cmd, "stopinsert")
+        end
         return
       end
     end
@@ -74,6 +127,8 @@ end
 ---Focus the chat window
 function M.focus_chat()
   local current_win = vim.api.nvim_get_current_win()
+
+  save_prompt_mode()
 
   local windows = vim.api.nvim_list_wins()
   for _, win_id in ipairs(windows) do
@@ -85,6 +140,7 @@ function M.focus_chat()
         local ok = pcall(vim.api.nvim_set_current_win, win_id)
         if ok then
           vim.g.anya_last_float_ft = "anya-chat"
+          pcall(vim.cmd, "stopinsert")
           return true
         end
       end
@@ -108,6 +164,7 @@ function M.focus_prompt()
         local ok = pcall(vim.api.nvim_set_current_win, win_id)
         if ok then
           vim.g.anya_last_float_ft = "anya-prompt"
+          maybe_restore_prompt_mode()
           return true
         end
       end
