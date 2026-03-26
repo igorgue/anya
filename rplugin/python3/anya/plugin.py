@@ -1714,6 +1714,28 @@ end
                                                 _tl_title,
                                                 _tl_items,
                                             )
+                                        elif evt_kind == "notify":
+                                            _msg = evt.get("message", "")
+                                            _level = str(evt.get("level", "info") or "info").lower()
+                                            _title = evt.get("title", "Anya")
+
+                                            def _run_notify(__msg=_msg, __level=_level, __title=_title):
+                                                level_map = {
+                                                    "trace": "TRACE",
+                                                    "debug": "DEBUG",
+                                                    "info": "INFO",
+                                                    "warn": "WARN",
+                                                    "warning": "WARN",
+                                                    "error": "ERROR",
+                                                    "off": "OFF",
+                                                }
+                                                _lua_level = level_map.get(__level, "INFO")
+                                                self.nvim.exec_lua(
+                                                    "vim.notify(_A[1], vim.log.levels[_A[2]] or vim.log.levels.INFO, { title = _A[3] })",
+                                                    [__msg, _lua_level, __title],
+                                                )
+
+                                            self.nvim.async_call(_run_notify)
 
                                 await asyncio.sleep(0.05)
 
@@ -2875,7 +2897,28 @@ end)
                                 _tl_title,
                                 _tl_items,
                             )
+                        elif evt_kind == "notify":
+                            _msg = evt.get("message", "")
+                            _level = str(evt.get("level", "info") or "info").lower()
+                            _title = evt.get("title", "Anya")
 
+                            def _run_notify(__msg=_msg, __level=_level, __title=_title):
+                                level_map = {
+                                    "trace": "TRACE",
+                                    "debug": "DEBUG",
+                                    "info": "INFO",
+                                    "warn": "WARN",
+                                    "warning": "WARN",
+                                    "error": "ERROR",
+                                    "off": "OFF",
+                                }
+                                _lua_level = level_map.get(__level, "INFO")
+                                self.nvim.exec_lua(
+                                    "vim.notify(_A[1], vim.log.levels[_A[2]] or vim.log.levels.INFO, { title = _A[3] })",
+                                    [__msg, _lua_level, __title],
+                                )
+
+                            self.nvim.async_call(_run_notify)
                 await asyncio.sleep(0.05)
         except Exception as e:
             result = {"stdout": "", "stderr": "", "returncode": -1, "error": str(e)}

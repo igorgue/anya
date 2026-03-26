@@ -117,5 +117,5 @@ def load(
         message_type="skill",
         meta=meta,
     )
-    _notify("Skill " + skill.name + " loaded")
+    _notify("Loaded skill: " + skill.name)
     return "Loaded skill '" + skill.name + "' into hidden conversation context."
