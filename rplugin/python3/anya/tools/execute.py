@@ -486,6 +486,21 @@ async def _serve_ui_events(ui_dir: str, plugin_context: "NvimPluginContext"):
                     await _nvim_task_list_update(
                         plugin_context.nvim, payload["title"], payload["items"]
                     )
+            elif kind == "notify":
+                msg = event.get("message", "")
+                level = event.get("level", "info")
+                title = event.get("title", "Anya")
+                if plugin_context.has_nvim and plugin_context.nvim:
+                    level_map = {
+                        "info": "vim.log.levels.INFO",
+                        "warn": "vim.log.levels.WARN",
+                        "error": "vim.log.levels.ERROR",
+                    }
+                    lvl = level_map.get(level, "vim.log.levels.INFO")
+                    plugin_context.nvim.exec_lua(
+                        "vim.notify(..., %s, {title = ...})" % lvl,
+                        msg, title,
+                    )
         finally:
             try:
                 os.unlink(event_file)
@@ -666,7 +681,7 @@ async def execute(
     extra_env = {
         "ANYA_UI_DIR": ui_dir,
         "ANYA_CURRENT_BUFFER": plugin_context.current_buffer or "",
-        "ANYA_OPEN_BUFFERS": json.dumps(plugin_context.open_buffers),
+        "ANYA_OPEN_BUFFERS": json.dumps(plugin_context.open_buffers)
     }
 
     command, script_path = _build_python_command(

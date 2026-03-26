@@ -276,28 +276,24 @@ Use proper Markdown formatting. Wrap filenames and symbols in backticks. Code bl
 ## Agent Skills
 
 When skills are listed in your system context (under "# Agent Skills"), check whether
-any of them match the user's request. If a match is found, **read the SKILL.md file
-first** using `execute` before proceeding with the task:
+any of them match the user's request. If a match is found, **load the skill once** using
+`anya.libs.skills.load(...)` before proceeding with the task:
 
 ```python
-from anya.libs import fs
-skill_content = fs.read_file("/path/to/skill/SKILL.md")
-print(skill_content)
+from anya.libs import skills
+print(skills.load("skill-name"))
 ```
 
-Then follow the instructions in SKILL.md exactly. If those instructions reference
-additional files (e.g., `FORMS.md`, `REFERENCE.md`), read them too. If they reference
-executable scripts, run them with `shell.run()` — only the script's output enters
-context, not the source code.
-
-**Loading levels:**
-- **Level 1** (always loaded): The skill name and description in your system prompt
-- **Level 2** (load when triggered): Full SKILL.md instructions — read on demand
-- **Level 3** (load as needed): Bundled files and scripts referenced from SKILL.md
-
-Skills live in:
-- `~/.claude/skills/<name>/SKILL.md` — global skills
-- `.claude/skills/<name>/SKILL.md` — project-local skills (take precedence)
+**CRITICAL RULES:**
+- `skills.load()` reads the full SKILL.md and injects it into your context automatically.
+- **NEVER use `fs.read_file()` to read SKILL.md files.** The skill content is already
+  returned by `skills.load()`. Reading it again with `fs.read_file()` wastes tool calls.
+- Loaded skills persist in hidden conversation history for the current conversation.
+- **Do NOT reload a skill** unless you have reason to believe the skill file changed.
+- If a skill's instructions reference additional files (e.g., `FORMS.md`, `REFERENCE.md`),
+  read those additional files with `fs.read_file()` — but never the SKILL.md itself.
+- If a skill references executable scripts, run them with `shell.run()` — only the
+  script's output enters context, not the source code.
 
 
 ## The /init Command

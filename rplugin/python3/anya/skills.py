@@ -270,8 +270,8 @@ def format_skills_for_prompt(skills: list[Skill]) -> str:
         "# Agent Skills",
         "",
         "The following Skills are available. When a user request matches a Skill's",
-        "description, read the SKILL.md file using `execute` to load the full",
-        "instructions before proceeding. Then follow those instructions.",
+        "description, **call `from anya.libs import skills; print(skills.load(...))`** to load the full",
+        "instructions once for the current conversation before proceeding. Loaded skills persist in hidden conversation history, so do not reload unless the skill changed.",
         "",
     ]
 

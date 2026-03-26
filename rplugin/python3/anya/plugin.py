@@ -824,11 +824,35 @@ class AnyaPlugin:
             },
         )
 
-        # Get buffer content and build history
+        # Get visible buffer state and build LLM history from DB so hidden context is included
         buffer_content = await ui.get_buffer_content_async(self.nvim, chat_bufnr)
         is_chat_buf_empty = not buffer_content or not buffer_content.strip()
-        records = history.parse_buffer_content(buffer_content or "")
-        llm_history = history.build_llm_history(records)
+        llm_history = []
+        if conversation_id:
+            conv_data = db.load_conversation(conversation_id, include_hidden=True)
+            if conv_data and conv_data.get("messages"):
+                records = [
+                    history.MessageRecord(
+                        type="am",
+                        id=msg["id"],
+                        role=msg.get("role"),
+                        content=msg.get("content") or "",
+                        author=msg.get("author"),
+                        model=msg.get("model"),
+                        timestamp=msg.get("created_at"),
+                        end_timestamp=msg.get("ended_at"),
+                        conversation_id=msg.get("conversation_id"),
+                        hidden=bool(msg.get("hidden", 0)),
+                        message_type=msg.get("message_type"),
+                        meta=msg.get("meta"),
+                        markers=[],
+                    )
+                    for msg in conv_data["messages"]
+                ]
+                llm_history = history.build_llm_history(records)
+        if not llm_history:
+            records = history.parse_buffer_content(buffer_content or "")
+            llm_history = history.build_llm_history(records)
 
         # Prepend open buffer context to the last user message
         if llm_history and llm_history[-1]["role"] == "user":
@@ -1910,38 +1934,32 @@ end
 
             message_text = "".join(collected_content)
 
-            # Save synchronously before finishing so a follow-up prompt that
-            # reuses the conversation always includes the cancelled assistant
-            # message in the reconstructed LLM history.
-            try:
-                self._save_agent_message_to_db(
-                    chat_bufnr,
-                    msg_id,
-                    "Code",
-                    conversation_id,
-                    timestamp,
-                    end_timestamp,
-                    message_text,
-                )
-            except Exception as e:
+            # Save the cancelled message to DB so a follow-up prompt that
+            # reuses the conversation always includes it in the reconstructed
+            # LLM history.  Must run on the main thread because
+            # _save_agent_message_to_db calls nvim.exec_lua / buf_get_lines.
+            def _save_cancelled():
                 try:
-                    self.nvim.err_write(f"Error saving cancelled message to DB: {e}\n")
-                except Exception:
-                    pass
+                    self._save_agent_message_to_db(
+                        chat_bufnr,
+                        msg_id,
+                        "Code",
+                        conversation_id,
+                        timestamp,
+                        end_timestamp,
+                        message_text,
+                    )
+                except Exception as e:
+                    try:
+                        self.nvim.err_write(f"Error saving cancelled message to DB: {e}\n")
+                    except Exception:
+                        pass
 
-            # Emit finish event immediately
-            fidget.emit_user_event(
-                self.nvim,
-                "AnyaRequestFinished",
-                {
-                    "id": request_id,
-                    "status": (
-                        "superseded"
-                        if request_id in self._silent_cancel_request_ids
-                        else "cancelled"
-                    ),
-                },
-            )
+            self.nvim.async_call(_save_cancelled)
+
+            # Note: we do NOT re-emit AnyaRequestFinished here because
+            # cancel_agent() already emitted it (with the correct status)
+            # before the coroutine was cancelled.
 
         except Exception as err:
             # Capture error for use in closures
@@ -2229,7 +2247,7 @@ end
         # RPC re-entrancy deadlock (Python exec_lua -> Lua vim.fn -> Python blocked)
         messages = []
         if conversation_id:
-            conv_data = db.load_conversation(conversation_id)
+            conv_data = db.load_conversation(conversation_id, include_hidden=False)
             if conv_data and conv_data.get("messages"):
                 messages = conv_data["messages"]
 
@@ -3431,7 +3449,7 @@ Usage:
             )
             return None
         self._ensure_db()
-        data = db.load_conversation(args[0])
+        data = db.load_conversation(args[0], include_hidden=False)
         if not data:
             return None
         return db.rebuild_buffer_content(data["conversation"], data["messages"])

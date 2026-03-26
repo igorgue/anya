@@ -36,6 +36,19 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def get_current_conversation_id() -> str | None:
+    """Return the most recently updated conversation ID."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "SELECT id FROM conversations ORDER BY updated_at DESC LIMIT 1"
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     """Create tables if they don't exist and add new columns if missing."""
     conn = get_connection()
@@ -59,6 +72,9 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 ended_at TEXT,
                 markers JSON,
+                hidden INTEGER NOT NULL DEFAULT 0,
+                message_type TEXT,
+                meta TEXT,
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             );
 
@@ -122,6 +138,22 @@ def init_db() -> None:
             conn.execute("ALTER TABLE messages ADD COLUMN markers TEXT")
             # Set all existing messages to have empty marker list
             conn.execute("UPDATE messages SET markers = '[]' WHERE markers IS NULL")
+            conn.commit()
+
+
+        # Migration: Add hidden/message_type/meta columns to messages if they don't exist
+        cursor = conn.execute("PRAGMA table_info(messages)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "hidden" not in columns:
+            conn.execute(
+                "ALTER TABLE messages ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0"
+            )
+            conn.commit()
+        if "message_type" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN message_type TEXT")
+            conn.commit()
+        if "meta" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN meta TEXT")
             conn.commit()
 
         # Migration: Add cwd column to conversations if it doesn't exist
@@ -341,8 +373,8 @@ def save_message(record: MessageRecord) -> bool:
             )
 
         conn.execute(
-            """INSERT INTO messages (id, conversation_id, role, content, author, model, created_at, ended_at, markers)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO messages (id, conversation_id, role, content, author, model, created_at, ended_at, markers, hidden, message_type, meta)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record.id,
                 record.conversation_id,
@@ -353,6 +385,9 @@ def save_message(record: MessageRecord) -> bool:
                 record.timestamp,
                 record.end_timestamp,
                 markers_json,
+                int(record.hidden),
+                record.message_type,
+                record.meta,
             ),
         )
         conn.commit()
@@ -373,13 +408,16 @@ def save_message_dict(
     created_at: str | None = None,
     ended_at: str | None = None,
     markers: str | None = None,
+    hidden: bool = False,
+    message_type: str | None = None,
+    meta: str | None = None,
 ) -> bool:
     """Insert a message from individual fields."""
     conn = get_connection()
     try:
         conn.execute(
-            """INSERT INTO messages (id, conversation_id, role, content, author, model, created_at, ended_at, markers)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO messages (id, conversation_id, role, content, author, model, created_at, ended_at, markers, hidden, message_type, meta)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 msg_id,
                 conversation_id,
@@ -390,6 +428,9 @@ def save_message_dict(
                 created_at,
                 ended_at,
                 markers,
+                int(hidden),
+                message_type,
+                meta,
             ),
         )
         conn.commit()
@@ -400,15 +441,17 @@ def save_message_dict(
         conn.close()
 
 
-def get_messages(conversation_id: str) -> list[dict[str, Any]]:
+def get_messages(conversation_id: str, include_hidden: bool = True) -> list[dict[str, Any]]:
     """Get all messages for a conversation ordered by created_at."""
     conn = get_connection()
     try:
-        cursor = conn.execute(
-            """SELECT id, conversation_id, role, content, author, model, created_at, ended_at, markers
-               FROM messages WHERE conversation_id = ? ORDER BY created_at ASC""",
-            (conversation_id,),
-        )
+        query = """SELECT id, conversation_id, role, content, author, model, created_at, ended_at, markers, hidden, message_type, meta
+               FROM messages WHERE conversation_id = ?"""
+        params: list[Any] = [conversation_id]
+        if not include_hidden:
+            query += " AND hidden = 0"
+        query += " ORDER BY created_at ASC"
+        cursor = conn.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
     finally:
         conn.close()
@@ -419,7 +462,7 @@ def get_message(id: str) -> dict[str, Any] | None:
     conn = get_connection()
     try:
         cursor = conn.execute(
-            """SELECT id, conversation_id, role, content, author, model, created_at, ended_at, markers
+            """SELECT id, conversation_id, role, content, author, model, created_at, ended_at, markers, hidden, message_type, meta
                FROM messages WHERE id = ?""",
             (id,),
         )
@@ -576,13 +619,13 @@ def update_message_markers(id: str, markers_json: str) -> bool:
         conn.close()
 
 
-def load_conversation(id: str) -> dict[str, Any] | None:
+def load_conversation(id: str, include_hidden: bool = True) -> dict[str, Any] | None:
     """Load a full conversation with all its messages."""
     conversation = get_conversation(id)
     if not conversation:
         return None
 
-    messages = get_messages(id)
+    messages = get_messages(id, include_hidden=include_hidden)
     return {"conversation": conversation, "messages": messages}
 
 
@@ -713,6 +756,8 @@ def rebuild_buffer_content(
     lines: list[str] = []
 
     for idx, msg in enumerate(messages):
+        if msg.get("hidden"):
+            continue
         lines.append(markers.make_message_marker(msg["id"]))
 
         if msg["role"] == "user":
@@ -740,3 +785,30 @@ def rebuild_buffer_content(
                 lines.append(msg["content"])
 
     return "\n".join(lines)
+
+
+
+def find_hidden_message(
+    conversation_id: str,
+    message_type: str,
+    meta_substring: str | None = None,
+) -> dict[str, Any] | None:
+    """Find the newest hidden message of a given type for a conversation."""
+    conn = get_connection()
+    try:
+        query = (
+            "SELECT id, conversation_id, role, content, author, model, created_at, ended_at, "
+            "markers, hidden, message_type, meta FROM messages "
+            "WHERE conversation_id = ? AND hidden = 1 AND message_type = ?"
+        )
+        params: list[Any] = [conversation_id, message_type]
+        if meta_substring:
+            query += " AND meta LIKE ?"
+            params.append(f"%{meta_substring}%")
+        query += " ORDER BY created_at DESC LIMIT 1"
+        row = conn.execute(query, params).fetchone()
+        if row:
+            return dict(row)
+        return None
+    finally:
+        conn.close()

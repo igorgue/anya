@@ -37,6 +37,9 @@ class MessageRecord:
     timestamp: str | None = None
     end_timestamp: str | None = None
     conversation_id: str | None = None
+    hidden: bool = False
+    message_type: str | None = None
+    meta: str | None = None
     markers: list[Marker] = field(default_factory=list)
 
 
@@ -188,6 +191,9 @@ def parse_buffer_content(
                 timestamp=created_at,
                 end_timestamp=ended_at,
                 conversation_id=conversation_id,
+                hidden=bool(message_row.get("hidden", 0)) if message_row else False,
+                message_type=message_row.get("message_type") if message_row else None,
+                meta=message_row.get("meta") if message_row else None,
             )
             continue
 
@@ -330,6 +336,9 @@ def build_full_history(
                 "timestamp": record.timestamp,
                 "end_timestamp": record.end_timestamp,
                 "conversation_id": record.conversation_id,
+                "hidden": record.hidden,
+                "message_type": record.message_type,
+                "meta": record.meta,
                 "markers": [
                     {"type": m.type, "ids": m.ids, "pos": m.pos} for m in record.markers
                 ],
