@@ -17,6 +17,7 @@ dependencies = [
     "html2text",
     "anthropic",
     "tenacity",
+    "playwright>=1.58.0",
 ]
 
 [project.scripts]
