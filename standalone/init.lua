@@ -362,11 +362,11 @@ vim.keymap.set("v", "<leader>y", '"+y', { desc = "Copy to clipboard" })
 vim.keymap.set("n", "<leader>q", "<cmd>qa!<CR>", { desc = "Quit" })
 vim.keymap.set({ "n", "i" }, "<C-q>", "<Esc><cmd>qa!<CR>", { desc = "Quit" })
 
-vim.keymap.set({ "n", "i" }, "<Esc>", function()
-  vim.cmd([[
-    nohlsearch
-    diffupdate
-  ]])
+vim.keymap.set({ "n", "i", "s" }, "<Esc>", function()
+  pcall(function()
+    vim.cmd("nohlsearch")
+    vim.cmd("diffupdate")
+  end)
 
   if vim.g.loaded_dadbod then
     -- stylua: ignore
@@ -375,7 +375,12 @@ vim.keymap.set({ "n", "i" }, "<Esc>", function()
 
   -- stylua: ignore
   pcall(Snacks.notifier.hide)
-end, { desc = "Clear search & dismiss notifications" })
+
+  -- stylua: ignore
+  pcall(function() LazyVim.cmp.actions.snippet_stop() end)
+
+  return "<esc>"
+end, { expr = true, desc = "Clear search & dismiss notifications" })
 
 -- movement
 vim.keymap.set("n", "j", "gj", { desc = "Move down" })
