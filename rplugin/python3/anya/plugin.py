@@ -1925,9 +1925,7 @@ end
                 )
             except Exception as e:
                 try:
-                    self.nvim.err_write(
-                        f"Error saving cancelled message to DB: {e}\n"
-                    )
+                    self.nvim.err_write(f"Error saving cancelled message to DB: {e}\n")
                 except Exception:
                     pass
 
@@ -3473,11 +3471,22 @@ Usage:
         """Provide command-line completions for :Anya."""
         arglead, cmdline, _cursorpos = args[0], args[1], args[2]
         subcommands = [
-            "daemon", "help", "open", "close", "toggle",
-            "send", "do", "tab", "pane", "history", "cancel",
-            "system-prompt", "copilot",
+            "daemon",
+            "help",
+            "open",
+            "close",
+            "toggle",
+            "send",
+            "do",
+            "tab",
+            "pane",
+            "history",
+            "cancel",
+            "system-prompt",
+            "copilot",
         ]
         import re
+
         stripped = re.sub(r"^:Anya\s*", "", cmdline)
         parts = stripped.split() if stripped else []
 

@@ -259,7 +259,11 @@ vim.api.nvim_create_autocmd("WinEnter", {
       end
       if vim.g.anya_prompt_last_mode == "insert" and vim.api.nvim_get_mode().mode ~= "i" then
         pcall(vim.cmd, "startinsert")
-      elseif anya_config.start_in_insert and vim.g.anya_prompt_last_mode == nil and vim.api.nvim_get_mode().mode ~= "i" then
+      elseif
+        anya_config.start_in_insert
+        and vim.g.anya_prompt_last_mode == nil
+        and vim.api.nvim_get_mode().mode ~= "i"
+      then
         pcall(vim.cmd, "startinsert")
       end
       highlight_refs()

@@ -362,6 +362,21 @@ vim.keymap.set("v", "<leader>y", '"+y', { desc = "Copy to clipboard" })
 vim.keymap.set("n", "<leader>q", "<cmd>qa!<CR>", { desc = "Quit" })
 vim.keymap.set({ "n", "i" }, "<C-q>", "<Esc><cmd>qa!<CR>", { desc = "Quit" })
 
+vim.keymap.set({ "n", "i" }, "<Esc>", function()
+  vim.cmd([[
+    nohlsearch
+    diffupdate
+  ]])
+
+  if vim.g.loaded_dadbod then
+    -- stylua: ignore
+    pcall(function() vim.cmd("DBUIHideNotifications") end)
+  end
+
+  -- stylua: ignore
+  pcall(Snacks.notifier.hide)
+end, { desc = "Clear search & dismiss notifications" })
+
 -- movement
 vim.keymap.set("n", "j", "gj", { desc = "Move down" })
 vim.keymap.set("n", "k", "gk", { desc = "Move up" })

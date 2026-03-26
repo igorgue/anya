@@ -9,14 +9,24 @@ end
 vim.g.loaded_anya = 1
 
 local subcommands = {
-  "daemon", "help", "open", "close", "toggle",
-  "send", "do", "tab", "pane", "history", "cancel",
-  "system-prompt", "copilot",
+  "daemon",
+  "help",
+  "open",
+  "close",
+  "toggle",
+  "send",
+  "do",
+  "tab",
+  "pane",
+  "history",
+  "cancel",
+  "system-prompt",
+  "copilot",
 }
 
 local sub_opts = {
   daemon = { "status", "start", "stop", "restart" },
-  pane   = { "right", "left" },
+  pane = { "right", "left" },
   copilot = { "login", "logout", "status", "models" },
 }
 
@@ -28,12 +38,16 @@ local function anya_complete(lead, line, pos)
     return subcommands
   end
   if #parts <= 1 or (#parts == 1 and lead ~= "") then
-    return vim.tbl_filter(function(s) return s:startswith(lead) end, subcommands)
+    return vim.tbl_filter(function(s)
+      return s:startswith(lead)
+    end, subcommands)
   end
 
   local opts = sub_opts[parts[1]]
   if opts and #parts == 2 then
-    return vim.tbl_filter(function(o) return o:startswith(lead) end, opts)
+    return vim.tbl_filter(function(o)
+      return o:startswith(lead)
+    end, opts)
   end
 
   return {}
@@ -42,11 +56,14 @@ end
 -- Define AnyaComplete as a Vimscript function so the rplugin's
 -- complete="customlist,AnyaComplete" can resolve it even before
 -- the Python module loads.
-vim.api.nvim_exec2([[
+vim.api.nvim_exec2(
+  [[
 function! AnyaComplete(A, L, P)
   return v:lua.__anya_complete(a:A, a:L, a:P)
 endfunction
-]], {})
+]],
+  {}
+)
 
 -- Expose for v:lua bridge
 _G.__anya_complete = anya_complete

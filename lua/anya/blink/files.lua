@@ -206,7 +206,12 @@ local function format_completion_path(full_path, context)
     completion = "~/" .. relative_to_home
   elseif context.query:sub(1, 1) == "/" then
     completion = normalized_full_path
-  elseif context.query:match("^%.%./") or context.query == ".." or context.query:match("^%./") or context.query == "." then
+  elseif
+    context.query:match("^%.%./")
+    or context.query == ".."
+    or context.query:match("^%./")
+    or context.query == "."
+  then
     local relative_to_cwd = make_relative_path(normalized_full_path, context.cwd)
     if relative_to_cwd then
       completion = relative_to_cwd
@@ -405,7 +410,12 @@ function files.new(_opts)
 
       for _, file_path in ipairs(candidate_files) do
         local completion_path = file_path
-        if search_dir ~= project_root or query_context.query:match("^~/") or query_context.query:match("^%.?%.?/") or query_context.query:sub(1, 1) == "/" then
+        if
+          search_dir ~= project_root
+          or query_context.query:match("^~/")
+          or query_context.query:match("^%.?%.?/")
+          or query_context.query:sub(1, 1) == "/"
+        then
           local full_path = normalize_path(search_dir .. "/" .. file_path)
           completion_path = format_completion_path(full_path, query_context)
         end
