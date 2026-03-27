@@ -508,6 +508,38 @@ async def _serve_ui_events(ui_dir: str, plugin_context: "NvimPluginContext"):
                 pass
 
 
+def _replace_lines_with_diff(nvim_api, buf_number, current_lines, new_lines):
+    """Replace buffer content with minimal edit by finding common prefix/suffix.
+
+    Instead of replacing every line, this finds the longest matching prefix
+    and suffix between current and new content, then only replaces the
+    changed region in the middle.
+    """
+    # Find common prefix length
+    prefix_len = 0
+    for i in range(min(len(current_lines), len(new_lines))):
+        if current_lines[i] == new_lines[i]:
+            prefix_len = i + 1
+        else:
+            break
+
+    # Find common suffix length
+    suffix_len = 0
+    current_end = len(current_lines)
+    new_end = len(new_lines)
+    for i in range(min(current_end - prefix_len, new_end - prefix_len)):
+        if current_lines[current_end - 1 - i] == new_lines[new_end - 1 - i]:
+            suffix_len = i + 1
+        else:
+            break
+
+    # Replace only the changed region
+    start = prefix_len
+    end_current = current_end - suffix_len
+    replacement = new_lines[prefix_len : new_end - suffix_len]
+    nvim_api.buf_set_lines(buf_number, start, end_current, False, replacement)
+
+
 async def _nvim_modify_buffer(
     nvim,
     buf_path: str,
@@ -538,7 +570,10 @@ async def _nvim_modify_buffer(
             nvim.api.buf_set_option(target_buf.number, "modifiable", True)
 
             if mode == "replace":
-                nvim.api.buf_set_lines(target_buf.number, 0, -1, False, lines)
+                current = nvim.api.buf_get_lines(target_buf.number, 0, -1, False)
+                _replace_lines_with_diff(
+                    nvim.api, target_buf.number, current, lines
+                )
             elif mode == "append":
                 lc = nvim.api.buf_line_count(target_buf.number)
                 nvim.api.buf_set_lines(target_buf.number, lc, lc, False, lines)

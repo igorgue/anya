@@ -1220,21 +1220,18 @@ class AnyaPlugin:
 
                 elif chunk.event_type == StreamEventType.MESSAGE_END:
                     # Flush queue and clean up trailing blank lines in the buffer
-                    # Wrap callbacks with error handling to prevent silent crashes
-                    def _safe_flush_queue():
+                    # on Neovim's main thread to avoid cross-thread RPC errors.
+                    def _safe_finish_message():
                         try:
                             ui.flush_queue(self.nvim)
                         except Exception:
                             pass
-
-                    def _safe_cleanup_trailing():
                         try:
                             ui.cleanup_trailing_blanks(self.nvim, chat_bufnr)
                         except Exception:
                             pass
 
-                    self.nvim.async_call(_safe_flush_queue)
-                    self.nvim.async_call(_safe_cleanup_trailing)
+                    self.nvim.async_call(_safe_finish_message)
                     break
 
                 elif chunk.event_type == StreamEventType.TOOL_CONFIRMATION_REQUEST:
@@ -1914,6 +1911,7 @@ end
                         timestamp,
                         end_timestamp,
                         message_text,
+                        prefer_buffer_content=False,
                     )
                 except Exception as e:
                     try:
@@ -1970,6 +1968,7 @@ end
                         timestamp,
                         end_timestamp,
                         message_text,
+                        prefer_buffer_content=False,
                     )
                 except Exception as e:
                     try:
@@ -2178,6 +2177,7 @@ end
         timestamp,
         end_timestamp,
         message_text,
+        prefer_buffer_content=True,
     ):
         """Save agent message to database."""
         # Flush the streaming queue without processing markers (we do it at the end
@@ -2233,8 +2233,9 @@ end
             while lines and lines[-1].strip().startswith("> cancelled"):
                 lines.pop()
             message_text_from_buffer = "\n".join(lines).rstrip("\n")
-            message_text = message_text_from_buffer
-        elif not message_text:
+            if prefer_buffer_content:
+                message_text = message_text_from_buffer
+        if not message_text:
             self.nvim.err_write(f"Warning: Empty message content for {msg_id}\n")
             return
 
@@ -2460,6 +2461,38 @@ pcall(vim.keymap.del, "n", "<C-c>")
 
         return fallback_bufnr
 
+    @staticmethod
+    def _replace_lines_with_diff(nvim_api, buf_number, current_lines, new_lines):
+        """Replace buffer content with minimal edit by finding common prefix/suffix.
+
+        Instead of replacing every line, this finds the longest matching prefix
+        and suffix between current and new content, then only replaces the
+        changed region in the middle.
+        """
+        # Find common prefix length
+        prefix_len = 0
+        for i in range(min(len(current_lines), len(new_lines))):
+            if current_lines[i] == new_lines[i]:
+                prefix_len = i + 1
+            else:
+                break
+
+        # Find common suffix length
+        suffix_len = 0
+        current_end = len(current_lines)
+        new_end = len(new_lines)
+        for i in range(min(current_end - prefix_len, new_end - prefix_len)):
+            if current_lines[current_end - 1 - i] == new_lines[new_end - 1 - i]:
+                suffix_len = i + 1
+            else:
+                break
+
+        # Replace only the changed region
+        start = prefix_len
+        end_current = current_end - suffix_len
+        replacement = new_lines[prefix_len : new_end - suffix_len]
+        nvim_api.buf_set_lines(buf_number, start, end_current, False, replacement)
+
     def _apply_buffer_modification(
         self,
         buf_number: int,
@@ -2477,7 +2510,10 @@ pcall(vim.keymap.del, "n", "<C-c>")
 
         try:
             if mode == "replace":
-                self.nvim.api.buf_set_lines(buf_number, 0, -1, False, lines)
+                current = self.nvim.api.buf_get_lines(buf_number, 0, -1, False)
+                self._replace_lines_with_diff(
+                    self.nvim.api, buf_number, current, lines
+                )
             elif mode == "append":
                 lc = self.nvim.api.buf_line_count(buf_number)
                 self.nvim.api.buf_set_lines(buf_number, lc, lc, False, lines)

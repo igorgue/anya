@@ -531,10 +531,11 @@ end
 
 -- Navigate to previous (older) prompt with <C-p>
 vim.keymap.set("i", "<C-p>", function()
-  -- Close any completion popup first to prevent interference
+  -- Don't navigate if completion popup is visible to avoid disrupting completion
   if vim.fn.pumvisible() ~= 0 then
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-e>", true, false, true), "n", false)
+    return
   end
+
   cycle_history("previous")
 end, { buffer = true, nowait = true, desc = "Previous prompt in history" })
 
@@ -544,10 +545,11 @@ end, { buffer = true, nowait = true, desc = "Previous prompt in history" })
 
 -- Navigate to next (newer) prompt with <C-n>
 vim.keymap.set("i", "<C-n>", function()
-  -- Close any completion popup first to prevent interference
+  -- Don't navigate if completion popup is visible to avoid disrupting completion
   if vim.fn.pumvisible() ~= 0 then
-    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-e>", true, false, true), "n", false)
+    return
   end
+
   cycle_history("next")
 end, { buffer = true, nowait = true, desc = "Next prompt in history" })
 
