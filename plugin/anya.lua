@@ -30,24 +30,38 @@ local sub_opts = {
   copilot = { "login", "logout", "status", "models" },
 }
 
+local function filter_prefix(items, prefix)
+  prefix = prefix or ""
+  return vim.tbl_filter(function(item)
+    return prefix == "" or vim.startswith(item, prefix)
+  end, items)
+end
+
 local function anya_complete(lead, line, pos)
-  local stripped = line:gsub("^:Anya%s*", "")
-  local parts = stripped == "" and {} or vim.split(stripped, "%s+")
+  local stripped = line:gsub("^:?Anya%s*", "")
+  local ends_with_space = stripped:match("%s$") ~= nil
+  local parts = stripped == "" and {} or vim.split(vim.trim(stripped), "%s+", { plain = false, trimempty = true })
 
-  if #parts == 0 and lead == "" then
-    return subcommands
-  end
-  if #parts <= 1 or (#parts == 1 and lead ~= "") then
-    return vim.tbl_filter(function(s)
-      return s:startswith(lead)
-    end, subcommands)
+  if #parts == 0 then
+    return filter_prefix(subcommands, lead)
   end
 
-  local opts = sub_opts[parts[1]]
-  if opts and #parts == 2 then
-    return vim.tbl_filter(function(o)
-      return o:startswith(lead)
-    end, opts)
+  if #parts == 1 and not ends_with_space then
+    return filter_prefix(subcommands, lead)
+  end
+
+  local subcommand = parts[1]
+  local opts = sub_opts[subcommand]
+  if not opts then
+    return {}
+  end
+
+  if #parts == 1 and ends_with_space then
+    return opts
+  end
+
+  if #parts == 2 and not ends_with_space then
+    return filter_prefix(opts, lead)
   end
 
   return {}
