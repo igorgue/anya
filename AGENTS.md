@@ -532,6 +532,7 @@ The agent is recreated whenever skills change on disk (files added, removed, or 
 - Use marker and fold helpers (never fudge manual edits into the chat buffer)
 - For extensibility: keep tool signatures explicit, use marker helpers/IDs, and test round-tripping with restarts and history reload
 - Develop in split/test Neovim windows, especially for buffer/marker debugging
+- Keymaps for Anya chat/prompt buffers may also be enforced from `rplugin/python3/anya/buffers.py` during window/buffer setup, so when changing buffer-local mappings (especially navigation like `<C-w>`), update both the ftplugin files and `buffers.py` if needed to avoid one side being overridden or behaving inconsistently.
 
 ---
 

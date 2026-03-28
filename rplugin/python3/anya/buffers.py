@@ -696,6 +696,18 @@ def new(
         vim.keymap.set("i", "<C-k>", function()
             require("anya.float_focus").focus_chat()
         end, focus_opts)
+
+        -- Re-assert normal-mode Ctrl-w cycling here too. The ftplugin mapping can lose
+        -- precedence after window recreation/autocmd re-entry, so install it at window
+        -- setup time on BufEnter alongside the other prompt-local overrides.
+        local cycle_opts = {{ buffer = {prompt_buf_id}, silent = true, nowait = true, desc = "Cycle to chat window" }}
+        vim.keymap.set("n", "<C-w>w", function()
+            require("anya.float_focus").focus_chat()
+        end, cycle_opts)
+        vim.keymap.set("n", "<C-w><C-w>", function()
+            require("anya.float_focus").focus_chat()
+        end, cycle_opts)
+
         vim.keymap.set("n", "<Tab>", function()
             require("anya.float_focus").focus_chat()
         end, {{ buffer = true, nowait = true, desc = "Switch to chat window" }})

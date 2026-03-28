@@ -287,17 +287,24 @@ vim.keymap.set("n", "<C-w>j", function()
   require("anya.float_focus").check_and_redirect()
 end, { buffer = true, desc = "Navigate down (trapped)" })
 
+vim.keymap.set("n", "<C-w>w", function()
+  require("anya.float_focus").focus_chat()
+end, { buffer = true, desc = "Cycle to chat window" })
+
+vim.keymap.set("n", "<C-w><C-w>", function()
+  require("anya.float_focus").focus_chat()
+end, { buffer = true, desc = "Cycle to chat window" })
+
+vim.keymap.set("i", "<C-w>w", function()
+  require("anya.float_focus").focus_chat()
+end, { buffer = true, nowait = true, desc = "Cycle to chat window" })
+
+vim.keymap.set("i", "<C-w><C-w>", function()
+  require("anya.float_focus").focus_chat()
+end, { buffer = true, nowait = true, desc = "Cycle to chat window" })
+
 vim.keymap.set("n", "<C-w>k", function()
-  -- Allow navigating up to the chat window
-  local wins = vim.api.nvim_tabpage_list_wins(0)
-  for _, win in ipairs(wins) do
-    local buf = vim.api.nvim_win_get_buf(win)
-    local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
-    if ft == "anya-chat" then
-      vim.api.nvim_set_current_win(win)
-      return
-    end
-  end
+  require("anya.float_focus").focus_chat()
 end, { buffer = true, desc = "Navigate to chat window" })
 
 vim.keymap.set("n", "<C-w>l", function()
@@ -314,16 +321,7 @@ vim.keymap.set("n", "<C-w><Down>", function()
 end, { buffer = true, desc = "Navigate down (trapped)" })
 
 vim.keymap.set("n", "<C-w><Up>", function()
-  -- Allow navigating up to the chat window
-  local wins = vim.api.nvim_tabpage_list_wins(0)
-  for _, win in ipairs(wins) do
-    local buf = vim.api.nvim_win_get_buf(win)
-    local ft = vim.api.nvim_get_option_value("filetype", { buf = buf })
-    if ft == "anya-chat" then
-      vim.api.nvim_set_current_win(win)
-      return
-    end
-  end
+  require("anya.float_focus").focus_chat()
 end, { buffer = true, desc = "Navigate to chat window" })
 
 vim.keymap.set("n", "<C-w><Right>", function()

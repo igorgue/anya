@@ -266,7 +266,16 @@ vim.api.nvim_create_autocmd("WinEnter", {
   desc = "Track entering Anya chat window and refresh winbar highlight",
 })
 
--- Navigate from chat to prompt float
+-- Make window cycling toggle directly between chat and prompt.
+-- Native <C-w>w hits the hidden layout container first, so we intercept it here.
+vim.keymap.set("n", "<C-w>w", function()
+  require("anya.float_focus").focus_prompt()
+end, { buffer = true, desc = "Cycle to prompt window" })
+
+vim.keymap.set("n", "<C-w><C-w>", function()
+  require("anya.float_focus").focus_prompt()
+end, { buffer = true, desc = "Cycle to prompt window" })
+
 vim.keymap.set("n", "<C-w>j", function()
   require("anya.float_focus").focus_prompt()
 end, { buffer = true, desc = "Focus prompt window" })
