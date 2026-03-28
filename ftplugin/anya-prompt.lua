@@ -295,13 +295,7 @@ vim.keymap.set("n", "<C-w><C-w>", function()
   require("anya.float_focus").focus_chat()
 end, { buffer = true, desc = "Cycle to chat window" })
 
-vim.keymap.set("i", "<C-w>w", function()
-  require("anya.float_focus").focus_chat()
-end, { buffer = true, nowait = true, desc = "Cycle to chat window" })
 
-vim.keymap.set("i", "<C-w><C-w>", function()
-  require("anya.float_focus").focus_chat()
-end, { buffer = true, nowait = true, desc = "Cycle to chat window" })
 
 vim.keymap.set("n", "<C-w>k", function()
   require("anya.float_focus").focus_chat()
