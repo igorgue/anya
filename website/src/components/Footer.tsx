@@ -12,7 +12,7 @@ export function Footer() {
                   Anya
                 </p>
                 <p className="text-xs text-zinc-400 dark:text-zinc-500">
-                  The AI coding agent for Neovim
+                  The Python-native AI coding agent for Neovim
                 </p>
               </div>
               <div className="flex items-center gap-6 text-sm text-zinc-400 dark:text-zinc-500">

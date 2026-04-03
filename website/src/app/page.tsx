@@ -39,9 +39,9 @@ function TerminalWindow() {
   const lines = [
     '$ nvim',
     ':Anya',
-    'Ask Anya to inspect a codebase, refactor files, or run tools.',
-    'Streaming output appears instantly inside Neovim.',
-    'Edits, tool calls, and conversations persist across restarts.',
+    'Ask Anya to inspect a codebase, refactor files, or run tools — all in Python.',
+    'Anya writes Python code and streams the results instantly inside Neovim.',
+    'Every action is Python — file reads, shell commands, web fetches, all executed as code.',
   ]
 
   return (
@@ -64,7 +64,7 @@ function TerminalWindow() {
           <div className="mt-4 rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4 text-zinc-700 dark:text-zinc-300">
             <div className="text-violet-600 dark:text-violet-400">Anya</div>
             <div className="mt-2">
-              Reading project structure, tracing handlers, and preparing a safe edit.
+              Reading project structure, writing Python to trace handlers, and preparing a safe edit.
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
               {['fs.read_file()', 'shell.run()', 'mcp.call()', 'buffer.modify_file()'].map((label) => (
@@ -105,9 +105,9 @@ function TerminalWindow() {
           </div>
           <div className="mt-4 grid grid-cols-2 gap-4">
             {[
-              ['Persistence', 'SQLite history + restart-safe markers'],
+              ['Python only', 'Every action is written and run as Python code'],
               ['Streaming', 'Incremental output over ZeroMQ'],
-              ['Extensible', 'Python libs + MCP servers'],
+              ['Extensible', 'Rich Python libs + MCP servers'],
               ['Editor-native', 'Buffers, folds, and confirmations'],
             ].map(([title, body]) => (
               <div
@@ -137,8 +137,8 @@ function SectionHeading({ eyebrow, title, description }: { eyebrow: string; titl
 
 const features = [
   {
-    title: 'Persistent by design',
-    description: 'Conversations, messages, tool invocations, and markers are stored so your work survives restarts.',
+    title: 'Pure Python execution',
+    description: 'Every action — reading files, running commands, editing code — is written and executed as Python. No shell hacks, no mixed languages.',
     icon: Database,
   },
   {
@@ -148,7 +148,7 @@ const features = [
   },
   {
     title: 'One tool, many libs',
-    description: 'A single execute tool unlocks filesystem, shell, GitHub, web, MCP, and buffer operations.',
+    description: 'A single execute call runs Python with built-in libs for filesystem, shell, GitHub, web, MCP, and buffer operations.',
     icon: Code2,
   },
   {
@@ -176,7 +176,7 @@ const pillars = [
   },
   {
     title: 'Composable tooling',
-    body: 'Everything routes through Python execution with high-level libs like fs, shell, web, search, mcp, and background.',
+    body: 'Every action routes through a single Python execute call with high-level libs like fs, shell, web, search, mcp, and background.',
     icon: Terminal,
   },
   {
@@ -193,11 +193,11 @@ const steps = [
   },
   {
     title: 'Ask for real work',
-    body: 'Refactors, code reviews, debugging, docs lookup, or project exploration.',
+    body: 'Refactors, code reviews, debugging, docs lookup — Anya generates Python to do the work.',
   },
   {
     title: 'Watch it stream',
-    body: 'Anya reasons, calls libs, updates task lists, and edits files with confirmation-aware flows.',
+    body: 'Anya writes Python that calls its built-in libs, updates task lists, and edits files with confirmation-aware flows.',
   },
   {
     title: 'Resume anytime',
@@ -206,17 +206,17 @@ const steps = [
 ]
 
 const technologies = [
-  'Next.js 15 App Router',
-  'React 19',
-  'TypeScript',
-  'Tailwind CSS v4',
-  'next-themes',
-  'MDX-ready architecture',
+  'Python 3.12+',
+  'ZeroMQ + CBOR2',
+  'SQLite persistence',
+  'Neovim Lua bridge',
+  'MCP protocol',
+  'Built-in libs: fs, shell, web, search',
 ]
 
 export const metadata: Metadata = {
   title: 'Anya',
-  description: 'The persistent AI coding agent for Neovim.',
+  description: 'The AI coding agent that writes and executes only Python, inside Neovim.',
 }
 
 export default function Home() {
@@ -228,14 +228,14 @@ export default function Home() {
           <div className="mx-auto max-w-4xl text-center">
             <div className="inline-flex items-center gap-2 rounded-full border border-violet-500/20 bg-violet-500/10 px-4 py-1.5 text-sm font-medium text-violet-700 dark:text-violet-300">
               <Sparkles className="h-4 w-4" />
-              Persistent AI coding for Neovim
+              The Python-native AI agent for Neovim
             </div>
             <h1 className="mt-8 text-5xl font-semibold tracking-tight text-zinc-900 sm:text-7xl dark:text-white">
-              The AI coding agent that feels native to <span className="text-violet-500">Neovim</span>.
+              One language. One tool. Anya writes and executes <span className="text-violet-500">Python</span> — nothing else.
             </h1>
             <p className="mx-auto mt-6 max-w-3xl text-lg text-zinc-600 sm:text-xl dark:text-zinc-400">
-              Anya combines a resilient background daemon, streaming UI, persistent conversations,
-              code-aware tooling, and MCP extensibility into a fast editor-native workflow.
+              Anya doesn't guess at shell commands or mix languages. It generates and runs pure Python — backed
+              by a resilient daemon, persistent conversations, and powerful built-in libraries — streamed live into Neovim.
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <Button href="https://github.com/igor47/anya" className="px-5 py-3 text-sm">
@@ -252,7 +252,7 @@ export default function Home() {
               </Button>
             </div>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-zinc-500 dark:text-zinc-400">
-              <span>Streaming output</span>
+              <span>Pure Python execution</span>
               <span>Persistent history</span>
               <span>Safe file edits</span>
               <span>MCP tools</span>
@@ -292,8 +292,8 @@ export default function Home() {
           <div className="rounded-3xl border border-zinc-200/80 bg-zinc-50 p-8 dark:border-white/10 dark:bg-zinc-900/60">
             <SectionHeading
               eyebrow="Architecture"
-              title="A daemon-backed system, not a disposable chat box"
-              description="Anya separates editor UI from agent execution so work can stream, persist, and recover cleanly."
+              title="Python-first, daemon-backed"
+              description="Anya separates editor UI from agent execution. The daemon runs pure Python — no shell injection, no language mixing — so work streams, persists, and recovers cleanly."
             />
             <div className="mt-10 space-y-6">
               {pillars.map((pillar) => (
@@ -313,11 +313,11 @@ export default function Home() {
               Core stack
             </p>
             <h3 className="mt-4 text-3xl font-semibold tracking-tight text-zinc-900 dark:text-white">
-              Built with the same app structure as the reference project.
+              Every tool call is just Python.
             </h3>
             <p className="mt-4 text-base text-zinc-600 dark:text-zinc-400">
-              This site uses the architecture and component style from the neighboring reference project,
-              adapted into an OpenCode-style product landing page for Anya.
+              Instead of juggling shell commands, curl invocations, or ad-hoc scripts, Anya generates Python code
+              and executes it in a sandboxed environment. Read files with fs, run commands with shell, fetch the web — all Python.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               {technologies.map((tech) => (
@@ -333,10 +333,10 @@ export default function Home() {
               <div className="text-sm font-semibold text-zinc-900 dark:text-white">Included in the platform</div>
               <ul className="mt-4 space-y-3 text-sm text-zinc-600 dark:text-zinc-400">
                 {[
-                  'ZeroMQ + CBOR2 daemon transport',
+                  'Pure Python execution engine',
                   'SQLite-backed message persistence',
                   'Streaming chat and tool markers',
-                  'MCP, shell, web, and filesystem integrations',
+                  'MCP, shell, web, and filesystem Python libs',
                   'Skills and background job support',
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-3">
@@ -353,8 +353,8 @@ export default function Home() {
       <Container className="mt-24 sm:mt-32">
         <SectionHeading
           eyebrow="Workflow"
-          title="From prompt to verified code changes"
-          description="Anya is optimized for iterative development work rather than isolated answers."
+          title="From prompt to Python to verified changes"
+          description="Anya turns your request into Python code, executes it, and streams the results back — no shell one-liners, no language roulette."
         />
         <div className="mt-16 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
           {steps.map((step, index) => (
@@ -374,10 +374,10 @@ export default function Home() {
         <div className="rounded-[2rem] border border-zinc-200/80 bg-zinc-900 px-6 py-14 text-center sm:px-10 dark:border-white/10">
           <p className="text-sm font-semibold tracking-[0.2em] text-violet-400 uppercase">Open source</p>
           <h2 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-            Ship code faster without leaving Neovim.
+            Ship code faster — with Python, inside Neovim.
           </h2>
           <p className="mx-auto mt-4 max-w-2xl text-base text-zinc-300">
-            Explore the source, install Anya, and build your own workflow on top of its daemon, libs, and MCP integrations.
+            Explore the source, install Anya, and build your own workflow — every action is just Python.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Button href="https://github.com/igor47/anya" className="bg-violet-500 px-5 py-3 hover:bg-violet-400 active:bg-violet-500">
