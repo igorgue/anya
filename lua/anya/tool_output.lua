@@ -289,7 +289,7 @@ function M.open_output_for_code(code_path, title)
 
     if win and win.buf then
       vim.bo[win.buf].modifiable = true
-      vim.api.nvim_buf_set_lines(win.buf, 0, -1, false, lines)
+      vim.api.nvim_buf_set_lines(win.buf, 0, -1, false, vim.split(table.concat(lines, "\n"), "\n", { plain = true }))
       vim.bo[win.buf].modifiable = false
       vim.bo[win.buf].readonly = true
     end
@@ -389,7 +389,7 @@ function M.open_output_at_cursor(override_line, override_col)
 
     if win and win.buf then
       vim.bo[win.buf].modifiable = true
-      vim.api.nvim_buf_set_lines(win.buf, 0, -1, false, lines)
+      vim.api.nvim_buf_set_lines(win.buf, 0, -1, false, vim.split(table.concat(lines, "\n"), "\n", { plain = true }))
       vim.bo[win.buf].modifiable = false
       vim.bo[win.buf].readonly = true
     end
