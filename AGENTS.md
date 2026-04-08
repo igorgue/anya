@@ -126,11 +126,20 @@ plugin/anya.vim     # Vimscript bootstrap, sets load flags
 
 | Command                   | Purpose                                       |
 |---------------------------|-----------------------------------------------|
-| `:Anya`                   | Opens chat UI (floating window)               |
+| `:Anya`                   | Toggle UI (reopens last layout)               |
+| `:Anya open`              | Open Anya UI                                  |
+| `:Anya close`             | Close Anya UI                                 |
+| `:Anya toggle`            | Toggle pane visibility                        |
+| `:Anya tab`               | Open in a new tab                             |
+| `:Anya pane [right\|left]`| Open as a side pane                           |
 | `:Anya send <text>`       | Send text without prompt buffer               |
+| `:Anya do "<instruction>"`| Run headless buffer-edit workflow             |
+| `:Anya cancel`            | Cancel in-progress chat or `:Anya do` request |
 | `:Anya history`           | Launch history browser (snacks.nvim optional) |
-| `:Anya daemon status`     | Check daemon/agent status                     |
-| `:Anya daemon start/stop` | Manage daemon lifecycle                       |
+| `:Anya system-prompt`     | Show effective expanded system prompt         |
+| `:Anya daemon status`     | Check daemon status                           |
+| `:Anya daemon start/stop/restart` | Manage daemon lifecycle               |
+| `:Anya copilot login/logout/status/models` | Manage Copilot auth/models    |
 | `:Anya help`              | In-buffer help/docs (from plugin)             |
 
 **Prompt Buffer Keymaps:**
@@ -144,7 +153,10 @@ plugin/anya.vim     # Vimscript bootstrap, sets load flags
 - **Two-stage streaming:**
   - Python-side receives agent/tool chunks, passes via ZeroMQ PUB/SUB
   - Lua-side queues & animates text, applies markers, handles folding/highlighting
+- **Request lifecycle tracking**: `conversation.lua` tracks send-lock + request-lock separately, clears stale queue state, and auto-drains queued prompts after response completion
+- **Send/cancel semantics**: if a request is in progress, the latest prompt replaces pending queue state and current execution is cancelled so the newest prompt runs next
 - **Marker-driven context**: Every message, tool result, or user action adds markers or extmarks in buffer for lossless replay. All state (conversations, messages, roles, tool results, edits, etc) can be reconstructed solely from markers and persisted text
+- **Autoscroll and sync barriers**: streaming uses explicit autoscroll tracking and sync-write barriers so marker writes (for example fold boundaries) are ordered safely against queued animated chunks
 - **Tool/edit confirmations**: If a tool (e.g., file edit) needs approval, a live tool fold is created in-buffer, user is prompted for confirmation, reply is routed to daemon (with lockout for multi-edit safety)
 - **UI integrates with folds**, markers, and conceal features for a clean, readable editing experience
 
@@ -161,12 +173,13 @@ plugin/anya.vim     # Vimscript bootstrap, sets load flags
 
 ## The Agent System & Extensibility
 
-- **Primary agent:** named "Code", async-initialized per session (`CodeAgent`)
-  - Assembles a dynamic prompt (system + instructions + available tools)
-  - Registers tools (all Python tools by default, plus MCP tool if available)
-  - Exposes reasoning budget (env-configurable), model selection, and more
-- **MCP agent (optional)**: Dynamic access to external/remote tools and data (e.g., context7 API, deepwiki, linkup, exa, sequentialthinking, time, dreamtap, etc.), exposed as a single super-tool for the main agent
-- **Prompt directory:** prompts/ contains markdown system prompt templates; "code.md" and "mcp.md" are dynamically merged at runtime
+- **Primary chat agent:** `CodeAgent`, cached per session with a composite cache key (request kind + settings hash + cwd + skills fingerprint + memory fingerprint)
+  - Assembles dynamic instructions from `prompts/code.md`, auto-discovered libs docs, system context, project `AGENTS.md`, and discovered skills metadata
+  - Uses per-client `AgentSettings` when provided, with environment fallback
+  - Exposes reasoning/model/provider controls through settings/env
+- **Headless edit agent:** `DoAgent`, a lightweight path for `:Anya do` focused on fast buffer modifications with the same provider/settings model
+- **MCP integration model**: MCP tools are loaded dynamically from user config and surfaced through the libs/tool prompt path; there is no separate static "MCP agent" class in the runtime architecture
+- **Prompt directory:** prompt templates currently live in `prompts/` (for example `code.md`, `plan.md`, `title.md`, `compact.md`)
 - **To add a tool**: Implement a function in `rplugin/python3/anya/tools/`, register it in `tools/__init__.py`, and (optionally) reference in the agent configuration
 - **To add an agent**: Update or create an agent class in `rplugin/python3/anya/agents/`, and register with the agent manager. New agents can specialize instruction sets, toolsets, or even expose streaming sub-task logic.
 
@@ -190,6 +203,10 @@ plugin/anya.vim     # Vimscript bootstrap, sets load flags
     - `search` — `web`, `news`
     - `mcp` — `call` (remote MCP server tools)
     - `background` — `list_jobs`, `get_job`, `tail_logs`, `read_logs`, `is_running`, `stop_job`, `wait_for_job`
+    - `memory` — memory search/format helpers
+    - `task_list` — structured task tracking utilities
+    - `playwright` — browser automation helpers
+    - `skills` — read/discover skill metadata and docs
 
 ### Adding New Capabilities
     - Write your new lib as a Python module under `rplugin/python3/anya/libs/`
@@ -240,15 +257,10 @@ from anya.libs import mcp
 result = mcp.call("server_name", "tool_name", {"arg": "value"})
 ```
 
-**Available MCP Servers:**
-- `context7` - Library documentation and examples
-- `sequentialthinking` - Complex problem solving and reasoning
-- `tidewave-phoenix` - Phoenix/Elixir development
-- `time` - Time and timezone operations
-- `zai-vision` - Image and video analysis
-- `zai-web-reader` - Web content fetching
-- `zai-web-search` - Web search
-- `zai-zread` - GitHub repository exploration
+**MCP server discovery is dynamic:**
+- Server configs are loaded from `~/.config/anya/mcp/servers.json`
+- Tool listings are cached in `~/.local/share/anya/mcp_tools_cache.json`
+- Use `mcp.list_servers()` / `mcp.list_tools(server)` to inspect active runtime availability
 
 ### Web Operations (`web`, `search`)
 
@@ -337,10 +349,10 @@ final_status = background.wait_for_job("process_id", timeout_seconds=30)
 
 ## Environment & Dependencies
 
-**Python:** 3.13+
+**Python:** 3.11+
 
 **Required packages**:
-  - `pynvim`, `openai`, `openai-agents`, `hashids`, `pyzmq`, `cbor2`
+  - `pynvim`, `openai`, `openai-agents`, `hashids`, `pyzmq`, `cbor2`, `html2text`, `anthropic`, `tenacity`, `playwright`
 **Optional for advanced features**:
   - `snacks.nvim`, `stylua`, `ruff`, `luacheck`
   - Extra MCP tools: see [agent documentation](#the-agent-system--extensibility)
@@ -351,10 +363,14 @@ final_status = background.wait_for_job("process_id", timeout_seconds=30)
 | `OPENAI_API_KEY`     | (required) | LLM access (not needed for Copilot) |
 | `ANYA_MODEL`         | gpt-4.1    | Default LLM                  |
 | `ANYA_API_KEY`       | (unset)    | Override API key (for OpenRouter, etc.) |
-| `ANYA_API_BASE`      | (unset)    | Custom API endpoint (auto-detected for OpenRouter models) |
+| `ANYA_API_BASE`      | (unset)    | Custom API endpoint (falls back to `OPENAI_API_BASE`) |
 | `ANYA_API_TYPE`      | responses  | API type: "responses" (default), "chat_completions", "anthropic", or "copilot" |
+| `ANYA_OPENAI_API_TYPE` | (unset)  | Legacy/fallback alias for API type |
 | `ANYA_THINKING_BUDGET`| (unset)   | Reasoning effort for model   |
 | `ANYA_DISABLE_MCP`   | "0"        | Disable MCP agent/tools      |
+| `ANYA_CONTEXT_WINDOW` | (unset)   | Override detected model context window for token usage calculations |
+| `OPENAI_API_BASE`    | (unset)    | OpenAI-compatible API base fallback |
+| `ANTHROPIC_API_KEY`  | (unset)    | Anthropic key fallback when `ANYA_API_TYPE=anthropic` |
 
 ### Client-Side Settings
 Anya supports **per-client settings** that override the daemon's environment. This means you can
