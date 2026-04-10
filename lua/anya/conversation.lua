@@ -485,7 +485,7 @@ function M._drain_pending_queue()
   M._sending_in_progress = true
 
   -- Single RPC call to send message
-  local ok, result = pcall(vim.fn.AnyaSend, next_text, existing_conv_id)
+  local ok, result = pcall(vim.api.nvim_call_function, "AnyaSend", { next_text, existing_conv_id })
   if not ok then
     M._sending_in_progress = false
     vim.notify("Anya: Failed to send queued message: " .. tostring(result), vim.log.levels.ERROR)
