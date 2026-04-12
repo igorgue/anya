@@ -6,6 +6,8 @@ Handles agent execution and streams responses via ZeroMQ PUB socket.
 import asyncio
 import logging
 import os
+import errno
+from datetime import datetime, timezone
 from typing import Any
 
 import zmq.asyncio
@@ -34,7 +36,7 @@ from ..token_tracker import (
 )
 from ..agents.context import NvimPluginContext
 from .. import db
-from .. import utils
+from .. import utils, history
 from .. import tools as tools_module
 from ..memory_agent import (
     extract_memories_from_message,
@@ -45,6 +47,44 @@ from .agents import AgentManager
 
 
 DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-4.1")
+
+
+def _is_disconnect_send_error(exc: Exception) -> bool:
+    err_no = getattr(exc, "errno", None)
+    if err_no in {errno.EAGAIN, errno.ENOENT, errno.ENOTSOCK, errno.EPIPE, 107, 88, 2}:
+        return True
+    text = str(exc).lower()
+    markers = (
+        "resource temporarily unavailable",
+        "socket operation on non-socket",
+        "no such file or directory",
+        "broken pipe",
+        "transport endpoint is not connected",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _utc_timestamp() -> str:
+    now = datetime.now(timezone.utc)
+    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
+
+
+def _extract_history_timestamp(message: dict, default: str) -> str:
+    return (
+        message.get("created_at")
+        or message.get("timestamp")
+        or message.get("ended_at")
+        or default
+    )
+
+
+def _background_mode_instruction() -> str:
+    return (
+        "SYSTEM: The user client disconnected and this run is continuing in background mode. "
+        "Do not ask the user for confirmation, input, or follow-up before finishing. "
+        "Interactive tools and buffer edits may be unavailable. If a tool cannot run without the client, "
+        "adapt and finish with the best final answer you can using the available context."
+    )
 
 
 def _detect_filetype(tool_name: str, content: str) -> str | None:
@@ -267,21 +307,87 @@ class RequestHandler:
         self.logger.info(f"Handling SEND_MESSAGE for session {request.session_id}")
         payload = SendMessagePayload.from_dict(request.payload)
 
-        # Set active request
-        self.agent_manager.set_active_request(request.session_id, request.request_id)
+        session_state = await self.agent_manager.get_or_create_session(request.session_id)
 
         # Start agent processing in background task
-        asyncio.create_task(
+        task = asyncio.create_task(
             self._process_agent_in_background(
                 request.session_id,
                 request.request_id,
                 payload,
             )
         )
+        self.agent_manager.set_active_request(request.session_id, request.request_id, task)
+        session_state.last_activity = asyncio.get_event_loop().time()
 
         # Return immediately so the REP socket can receive other requests
         # (like TOOL_CONFIRMATION_RESPONSE)
         return make_success_response(request.request_id, {"status": "started"})
+
+    def _persist_assistant_placeholder(
+        self,
+        conversation_id: str | None,
+        request_id: str,
+        created_at: str,
+        model: str | None,
+    ) -> None:
+        if not conversation_id:
+            return
+        try:
+            inserted = db.save_message_dict(
+                msg_id=request_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content="",
+                author="Code",
+                model=model,
+                created_at=created_at,
+                ended_at=None,
+                markers=None,
+            )
+            if not inserted:
+                db.update_message(request_id, content="", ended_at=None, markers=None)
+        except Exception as e:
+            self.logger.warning("Failed to persist assistant placeholder for %s: %s", request_id, e)
+
+    def _persist_assistant_message(
+        self,
+        conversation_id: str | None,
+        request_id: str,
+        created_at: str,
+        ended_at: str | None,
+        content: str,
+    ) -> None:
+        if not conversation_id:
+            return
+        try:
+            cleaned_content, markers_json = history.extract_markers_from_content(content)
+        except Exception:
+            cleaned_content, markers_json = history.extract_markers_from_content(content)
+
+        if not cleaned_content:
+            return
+
+        updated = db.update_message(
+            request_id,
+            content=cleaned_content,
+            ended_at=ended_at,
+            markers=markers_json,
+        )
+        if not updated:
+            db.save_message_dict(
+                msg_id=request_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=cleaned_content,
+                author="Code",
+                model=DEFAULT_MODEL,
+                created_at=created_at,
+                ended_at=ended_at,
+                markers=markers_json,
+            )
+        if ended_at:
+            db.update_conversation_timestamp(conversation_id, ended_at)
 
     async def _process_agent_in_background(
         self,
@@ -302,6 +408,13 @@ class RequestHandler:
         try:
             nvim_context = NvimContext.from_dict(payload.nvim_context)
             agent_settings = nvim_context.get_agent_settings()
+            created_at = _utc_timestamp()
+            self._persist_assistant_placeholder(
+                payload.conversation_id,
+                request_id,
+                created_at,
+                agent_settings.model,
+            )
 
             memory_task = asyncio.create_task(
                 self._store_memories_background(
@@ -313,7 +426,7 @@ class RequestHandler:
             )
 
             # Run agent streaming
-            await self._run_agent_streaming(
+            final_message = await self._run_agent_streaming(
                 session_id,
                 request_id,
                 payload,
@@ -323,6 +436,27 @@ class RequestHandler:
                 await memory_task
             except Exception as e:
                 self.logger.warning(f"Memory background task failed: {e}")
+
+            end_timestamp = _utc_timestamp()
+            self._persist_assistant_message(
+                payload.conversation_id,
+                request_id,
+                created_at,
+                end_timestamp,
+                final_message,
+            )
+
+            if payload.conversation_id and final_message.strip():
+                asyncio.create_task(
+                    self._generate_title_background(
+                        session_id=session_id,
+                        request_id=f"title_{payload.conversation_id}",
+                        conversation_id=payload.conversation_id,
+                        user_message=payload.text,
+                        assistant_message=final_message,
+                        settings_dict=agent_settings.to_dict(),
+                    )
+                )
 
             # Send stream end
             await self._send_stream_chunk(
@@ -349,6 +483,14 @@ class RequestHandler:
                         "unclosed": True,
                     },
                 )
+            end_timestamp = _utc_timestamp()
+            self._persist_assistant_message(
+                payload.conversation_id,
+                request_id,
+                created_at if "created_at" in locals() else end_timestamp,
+                end_timestamp,
+                locals().get("final_message", ""),
+            )
             await self._send_stream_chunk(
                 session_id,
                 request_id,
@@ -374,6 +516,14 @@ class RequestHandler:
                         "unclosed": True,
                     },
                 )
+            end_timestamp = _utc_timestamp()
+            self._persist_assistant_message(
+                payload.conversation_id,
+                request_id,
+                created_at if "created_at" in locals() else end_timestamp,
+                end_timestamp,
+                locals().get("final_message", ""),
+            )
             await self._send_stream_chunk(
                 session_id,
                 request_id,
@@ -475,6 +625,12 @@ class RequestHandler:
             )
         except Exception as e:
             self.logger.warning(f"Title generation failed: {e}")
+
+        if success and title and conversation_id:
+            try:
+                db.update_conversation_title(conversation_id, title)
+            except Exception as e:
+                self.logger.warning("Failed to persist title for conversation %s: %s", conversation_id, e)
 
         # Always emit result so the plugin can finish the fidget
         # Use system topic so all instances receive it, but include session_id
@@ -669,8 +825,13 @@ class RequestHandler:
         request_id: str,
         event_type: StreamEventType,
         data: dict,
-    ):
-        """Send a streaming chunk via PUB socket."""
+    ) -> bool:
+        """Send a streaming chunk via PUB socket.
+
+        Returns False when the session appears disconnected and UI delivery should
+        be treated as best-effort only. Detached/background runs must continue
+        even when no client is listening anymore.
+        """
         chunk = StreamChunk(
             request_id=request_id,
             session_id=session_id,
@@ -678,7 +839,20 @@ class RequestHandler:
             data=data,
         )
         self.logger.debug(f"Sending stream chunk: {event_type.value}")
-        await self.pub_socket.send(chunk.serialize())
+        try:
+            await self.pub_socket.send(chunk.serialize())
+            return True
+        except Exception as e:
+            if session_id != "system" and _is_disconnect_send_error(e):
+                self.logger.info(
+                    "Stream delivery failed for session %s request %s (%s); marking session detached and continuing in background",
+                    session_id,
+                    request_id,
+                    e,
+                )
+                await self.agent_manager.end_session(session_id)
+                return False
+            raise
 
     def _build_memory_context(self, payload: SendMessagePayload) -> str | None:
         """Build lightweight memory context from the latest user text before agent run."""
@@ -697,7 +871,7 @@ class RequestHandler:
         session_id: str,
         request_id: str,
         payload: SendMessagePayload,
-    ):
+    ) -> str:
         """Run the agent with streaming, sending events via PUB socket."""
         self.logger.info(f"Starting agent streaming for session {session_id}")
 
@@ -727,6 +901,8 @@ class RequestHandler:
 
         async def confirmation_callback(prompt: str, options: list[str]) -> str:
             confirmation_id = str(uuid.uuid4())
+            if self.agent_manager.is_session_detached(session_id):
+                return "Cancel"
             await self._send_stream_chunk(
                 session_id,
                 request_id,
@@ -747,6 +923,15 @@ class RequestHandler:
         async def exec_callback(
             command: str, cwd: str, timeout: int, ui_dir: str | None = None
         ) -> dict:
+            if self.agent_manager.is_session_detached(session_id):
+                return {
+                    "stdout": "",
+                    "stderr": "",
+                    "returncode": 1,
+                    "error": "Client disconnected; interactive exec is unavailable in background mode.",
+                }
+            if self.agent_manager.is_session_detached(session_id):
+                return "Error: Client disconnected; buffer modification is unavailable in background mode."
             confirmation_id = str(uuid.uuid4())
             await self._send_stream_chunk(
                 session_id,
@@ -800,6 +985,8 @@ class RequestHandler:
             mode: str,
             set_modified: bool,
         ) -> str:
+            if self.agent_manager.is_session_detached(session_id):
+                return "Error: Client disconnected; buffer modification is unavailable in background mode."
             confirmation_id = str(uuid.uuid4())
             await self._send_stream_chunk(
                 session_id,
@@ -839,9 +1026,13 @@ class RequestHandler:
             cwd=nvim_context.cwd,
             current_buffer=nvim_context.current_buffer,
             open_buffers=nvim_context.open_buffers,
+            detached=self.agent_manager.is_session_detached(session_id),
         )
 
-        llm_history = payload.history
+        llm_history = list(payload.history)
+        assistant_parts: list[str] = []
+        last_partial_save = 0
+        detached_instruction_added = False
         thinking_started = False
         thinking_finalized = False
         thinking_source = None
@@ -877,6 +1068,19 @@ class RequestHandler:
                     async for event in result.stream_events():
                         if self.agent_manager.is_request_cancelled(session_id):
                             raise asyncio.CancelledError()
+
+                        if (
+                            self.agent_manager.is_session_detached(session_id)
+                            and not detached_instruction_added
+                        ):
+                            llm_history.append({"role": "system", "content": _background_mode_instruction()})
+                            detached_instruction_added = True
+                            context.detached = True
+                            self.logger.info(
+                                "Session %s detached; continuing request %s in background mode",
+                                session_id,
+                                request_id,
+                            )
 
                         is_reasoning_event = False
                         reasoning_text = None
@@ -1135,6 +1339,17 @@ class RequestHandler:
                                 )
                                 if not delta or tool_was_called:
                                     continue
+                                assistant_parts.append(delta)
+                                current_message = "".join(assistant_parts)
+                                if payload.conversation_id and (len(current_message) - last_partial_save >= 200):
+                                    self._persist_assistant_message(
+                                        payload.conversation_id,
+                                        request_id,
+                                        _extract_history_timestamp(llm_history[-1], _utc_timestamp()) if llm_history else _utc_timestamp(),
+                                        None,
+                                        current_message,
+                                    )
+                                    last_partial_save = len(current_message)
                                 await self._send_stream_chunk(
                                     session_id,
                                     request_id,
@@ -1212,9 +1427,9 @@ class RequestHandler:
                         await self._send_stream_chunk(
                             session_id,
                             request_id,
-                            StreamEventType.STATUS,
+                            StreamEventType.ERROR,
                             {
-                                "message": f"Transient network/API error, retrying ({attempt}/{max_retries})...",
+                                "error": f"Transient network/API error, retrying ({attempt}/{max_retries})...",
                             },
                         )
                         await asyncio.sleep(delay)
@@ -1244,6 +1459,8 @@ class RequestHandler:
                         "unclosed": True,
                     },
                 )
+
+        return "".join(assistant_parts)
 
     async def _handle_get_system_prompt(self, request: Request) -> Response:
         """Handle a GET_SYSTEM_PROMPT request.

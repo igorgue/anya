@@ -182,7 +182,7 @@ class AnyaDaemon:
 
             if request.type == RequestType.END_SESSION:
                 await self.agent_manager.end_session(request.session_id)
-                return make_success_response(request.request_id)
+                return make_success_response(request.request_id, {"detached": True})
 
             # Delegate to handler for agent operations
             return await self.handler.handle(request)

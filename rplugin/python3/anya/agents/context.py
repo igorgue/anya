@@ -38,6 +38,7 @@ class NvimPluginContext:
     )
     # Task-list callback for live execute progress updates
     task_list_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None
+    detached: bool = False
 
     @property
     def has_nvim(self) -> bool:

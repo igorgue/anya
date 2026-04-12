@@ -860,8 +860,9 @@ class AnyaPlugin:
             if buffer_context:
                 llm_history[-1]["content"] = buffer_context + llm_history[-1]["content"]
 
-        # Generate message ID and timestamp
-        msg_id = ids.new(conversation=conversation_id)
+        # Use the request ID as the assistant message ID so the daemon and plugin
+        # refer to the same persisted message row.
+        msg_id = request_id
         now = datetime.now(timezone.utc)
         timestamp = (
             now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
@@ -4011,5 +4012,9 @@ Usage:
 
     @pynvim.function("AnyaEndSession", sync=False)
     def anya_end_session(self, args):
-        """End the current session with the daemon."""
-        self._client.end_session(self.session_id)
+        """Detach the current UI session from the daemon without stopping active work."""
+        for client in (self._client, self._confirmation_client, self._title_client):
+            try:
+                client.end_session(self.session_id)
+            except Exception:
+                pass

@@ -29,7 +29,9 @@ class SessionState:
     agents: dict[str, Agent] = field(default_factory=dict)  # settings_hash -> Agent
     current_settings_hash: str | None = None
     active_request_id: str | None = None
+    active_request_task: asyncio.Task | None = None
     cancelled: bool = False
+    detached: bool = False
     created_at: float = field(default_factory=lambda: asyncio.get_event_loop().time())
     last_activity: float = field(
         default_factory=lambda: asyncio.get_event_loop().time()
@@ -168,11 +170,21 @@ class AgentManager:
         return agent
 
     async def end_session(self, session_id: str):
-        """End a session and clean up its agents."""
+        """Detach a session from its UI and clean up only if idle."""
         if session_id in self._sessions:
-            self.logger.info(f"Ending session: {session_id}")
-            session = self._sessions.pop(session_id)
-            # Clear all cached agents
+            session = self._sessions[session_id]
+            if session.active_request_id and session.active_request_task:
+                session.detached = True
+                session.last_activity = asyncio.get_event_loop().time()
+                self.logger.info(
+                    "Detaching session %s while request %s continues in background",
+                    session_id,
+                    session.active_request_id,
+                )
+                return
+
+            self.logger.info(f"Ending idle session: {session_id}")
+            self._sessions.pop(session_id, None)
             session.agents.clear()
 
     async def cancel_request(self, session_id: str, request_id: str) -> bool:
@@ -188,24 +200,39 @@ class AgentManager:
 
         return False
 
-    def set_active_request(self, session_id: str, request_id: str):
+    def set_active_request(self, session_id: str, request_id: str, task: asyncio.Task | None = None):
         """Set the active request for a session."""
         if session_id in self._sessions:
             session = self._sessions[session_id]
             session.active_request_id = request_id
+            session.active_request_task = task
             session.cancelled = False
+            session.detached = False
 
     def clear_active_request(self, session_id: str):
         """Clear the active request for a session."""
         if session_id in self._sessions:
             session = self._sessions[session_id]
             session.active_request_id = None
+            session.active_request_task = None
             session.cancelled = False
+            was_detached = session.detached
+            session.detached = False
+            if was_detached:
+                self.logger.info("Request finished for detached session %s; cleaning up session", session_id)
+                session.agents.clear()
+                self._sessions.pop(session_id, None)
 
     def is_request_cancelled(self, session_id: str) -> bool:
         """Check if the current request for a session is cancelled."""
         if session_id in self._sessions:
             return self._sessions[session_id].cancelled
+        return False
+
+    def is_session_detached(self, session_id: str) -> bool:
+        """Check whether a session no longer has a live UI attached."""
+        if session_id in self._sessions:
+            return self._sessions[session_id].detached
         return False
 
     async def _emit_system_event(self, event_type, data: dict):

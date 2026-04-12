@@ -68,6 +68,7 @@ class StreamEventType(Enum):
     # Buffer modification request
     MODIFY_BUFFER_REQUEST = "modify_buffer_request"
     TASK_LIST_UPDATE = "task_list_update"
+    STATUS = "status"
 
 
 @dataclass

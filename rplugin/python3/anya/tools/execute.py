@@ -405,7 +405,9 @@ async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
         try:
             if kind == "select":
                 options = req.get("options", [])
-                if plugin_context.confirmation_callback:
+                if plugin_context.detached:
+                    result = "Cancel"
+                elif plugin_context.confirmation_callback:
                     result = await plugin_context.confirmation_callback(prompt, options)
                 elif plugin_context.has_nvim:
                     from ..utils import nvim_ui_select
@@ -413,7 +415,9 @@ async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
                     result = await nvim_ui_select(plugin_context.nvim, options, prompt)
             elif kind == "input":
                 default = req.get("default", "")
-                if plugin_context.has_nvim:
+                if plugin_context.detached:
+                    result = ""
+                elif plugin_context.has_nvim:
                     result = await _nvim_ui_input(plugin_context.nvim, prompt, default)
                 elif plugin_context.confirmation_callback:
                     # Daemon mode: present as a single-option select with a text field
@@ -434,6 +438,8 @@ async def _serve_ui_requests(ui_dir: str, plugin_context: "NvimPluginContext"):
                         result = f"Error: Open buffer not found for path: {target_path}"
                     else:
                         result = "Error: No current buffer available"
+                elif plugin_context.detached:
+                    result = "Error: Cannot modify buffers after client disconnect"
                 elif plugin_context.modify_buffer_callback:
                     # Daemon mode: use the callback to request modification
                     result = await plugin_context.modify_buffer_callback(
@@ -729,11 +735,9 @@ async def execute(
             process_id = str(uuid.uuid4())[:8]
             start_time = datetime.now().isoformat()
 
-            # Create output file
             bg_dir = _get_background_dir(cwd)
             output_file = os.path.join(bg_dir, f"{process_id}.log")
 
-            # Write initial info to output file
             with open(output_file, "w") as f:
                 f.write(f"Process ID: {process_id}\n")
                 f.write(f"Started: {start_time}\n")
@@ -743,12 +747,11 @@ async def execute(
                 f.write("\n--- OUTPUT ---\n")
 
             if plugin_context.exec_callback:
-                # Daemon mode - use background exec callback if available
                 if (
                     hasattr(plugin_context, "background_exec_callback")
                     and plugin_context.background_exec_callback
                 ):
-                    result = await plugin_context.background_exec_callback(
+                    await plugin_context.background_exec_callback(
                         command, cwd, process_id, output_file
                     )
                     _background_processes[process_id] = {
@@ -776,12 +779,10 @@ async def execute(
                     )
                     return f"Background process started. Process ID: {process_id}\nOutput file: {output_file}"
                 else:
-                    # Fallback: start via normal exec but tell it to run in background
-                    # This requires the plugin to support background execution
                     result = await plugin_context.exec_callback(
                         f"nohup {command} > {output_file} 2>&1 & echo $!",
                         cwd,
-                        5,  # Short timeout just to launch
+                        5,
                     )
 
                     if result.get("error"):
@@ -810,11 +811,9 @@ async def execute(
                             "pid": None,
                         },
                     )
-
                     return f"Background process started. Process ID: {process_id}\nOutput file: {output_file}"
 
             elif plugin_context.has_nvim:
-                # Direct Neovim mode - spawn async process
                 process = await asyncio.create_subprocess_exec(
                     *command.split(),
                     cwd=cwd,
@@ -822,7 +821,6 @@ async def execute(
                     stderr=asyncio.subprocess.PIPE,
                 )
 
-                # Store in registry
                 _background_processes[process_id] = {
                     "process": process,
                     "command": command,
@@ -848,7 +846,6 @@ async def execute(
                     },
                 )
 
-                # Start monitoring task
                 asyncio.create_task(
                     _monitor_background_process(
                         process_id,
@@ -867,6 +864,9 @@ async def execute(
                 return "Error: No execution mechanism available for background process."
 
         # Foreground execution (original behavior)
+        if plugin_context.detached and not background:
+            return "Error: Client disconnected. Foreground execute is unavailable; finish with a best-effort assistant reply without further interaction."
+
         if plugin_context.exec_callback:
             exec_task = asyncio.create_task(
                 plugin_context.exec_callback(command, cwd, 600, ui_dir=ui_dir)
