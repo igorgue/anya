@@ -1729,7 +1729,7 @@ end
                                                 }
                                                 _lua_level = level_map.get(__level, "INFO")
                                                 self.nvim.exec_lua(
-                                                    "vim.notify(_A[1], vim.log.levels[_A[2]] or vim.log.levels.INFO, { title = _A[3] })",
+                                                    "local args = ...; vim.notify(args[1], vim.log.levels[args[2]] or vim.log.levels.INFO, { title = args[3] })",
                                                     [__msg, _lua_level, __title],
                                                 )
 
@@ -2951,7 +2951,7 @@ end)
                                 }
                                 _lua_level = level_map.get(__level, "INFO")
                                 self.nvim.exec_lua(
-                                    "vim.notify(_A[1], vim.log.levels[_A[2]] or vim.log.levels.INFO, { title = _A[3] })",
+                                    "local args = ...; vim.notify(args[1], vim.log.levels[args[2]] or vim.log.levels.INFO, { title = args[3] })",
                                     [__msg, _lua_level, __title],
                                 )
 
