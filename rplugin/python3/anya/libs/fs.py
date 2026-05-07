@@ -139,7 +139,7 @@ def read_many_files(files: list[str], cwd: str | None = None) -> str:
         cwd: Base directory for relative paths (default: os.getcwd()).
 
     Returns:
-        Combined content from all files separated by dividers.
+        Combined content from all files separated by dividers, do not loop over the result, just print it as a whole.
     """
     if not files:
         return "(no files specified)"
