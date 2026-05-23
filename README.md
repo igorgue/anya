@@ -135,6 +135,20 @@ vim.g.python3_host_prog = vim.fn.stdpath("data") .. "/lazy/anya/.venv/bin/python
 If the daemon still fails to start, Anya will print the Python path it tried to use in
 the error message so you can diagnose the mismatch quickly.
 
+> ⚠️ **Upgrading your system Python (e.g. via mise/pyenv) will break the rplugin host**
+> unless you've pinned `python3_host_prog`. The new interpreter typically has only
+> `pynvim` installed, so importing `anya.plugin` fails on `hashids` (or another dep),
+> `:UpdateRemotePlugins` silently registers zero plugins, and `:Anya` stays stuck on the
+> "Anya is loading..." stub. Either pin `python3_host_prog` to Anya's `.venv` (preferred),
+> or install anya's deps into the new system Python straight from `pyproject.toml`:
+>
+> ```bash
+> # from the anya repo root
+> uv pip install --python "$(which python3)" -r pyproject.toml
+> ```
+>
+> After fixing the host, re-run `:UpdateRemotePlugins` and restart Neovim.
+
 ## Terminal alias
 
 For quick access from the terminal, add this alias to your `~/.zshrc` or `~/.bashrc`:
