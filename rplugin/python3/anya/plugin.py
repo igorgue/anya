@@ -3082,6 +3082,12 @@ pcall(vim.keymap.del, "n", "<C-c>")
         self._streaming_started = False
         self._cancel_in_progress = False
 
+
+    @pynvim.function("AnyaPing", sync=True)
+    def anya_ping(self, args):
+        """Lightweight health check for the Python remote plugin host."""
+        return True
+
     @pynvim.function("AnyaCancel", sync=True)
     def anya_cancel(self, args):
         """Cancel the current request. Pass a truthy arg for silent cancellation."""

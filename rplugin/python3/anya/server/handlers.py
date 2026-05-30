@@ -884,14 +884,18 @@ class RequestHandler:
                 seen.add(key)
                 memories.append(memory)
 
-        # Durable user facts/preferences should always be available, even when
-        # the query is phrased differently from the stored text.
-        # Add preferences first so they are not crowded out by many personal facts.
+        # Query-specific matches must come first. Otherwise older but exact
+        # personal facts (for example full name / birth date) can be crowded out
+        # by the recent category snapshots before the final 40-memory cap.
+        if query:
+            add(retrieve_memories(query=query, category="personal", limit=10))
+            add(retrieve_memories(query=query, category="preference", limit=10))
+            add(retrieve_memories(query=query, limit=10))
+
+        # Durable user facts/preferences should still be broadly available for
+        # non-memory-specific prompts.
         add(retrieve_memories(category="preference", limit=20))
         add(retrieve_memories(category="personal", limit=20))
-
-        if query:
-            add(retrieve_memories(query=query, limit=10))
 
         if not memories:
             return None

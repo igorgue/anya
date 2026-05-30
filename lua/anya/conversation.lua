@@ -3,6 +3,89 @@
 
 local M = {}
 
+local function is_invalid_channel_error(err)
+  err = tostring(err or "")
+  return err:match("Invalid channel") or err:match("E900") or err:match("channel .* closed")
+end
+
+local function recover_python3_host()
+  -- Neovim's generated pynvim wrappers are real Vimscript functions after the
+  -- first call. They close over the channel number returned by
+  -- remote#host#Require(). If the Python host process dies, remote#host#Require()
+  -- still returns that stale channel because the provider's script-local host
+  -- state is not automatically cleared. Re-sourcing rplugin.vim or calling
+  -- LoadRemotePlugins() cannot fix that and may even fail with "host is already
+  -- running".
+  --
+  -- The supported way to clear the cached provider host is remote#host#Register(),
+  -- which resets s:hosts["python3"] and its channel to 0. Then we delete the
+  -- already-bootstrapped Anya functions so the FuncUndefined autocommands from
+  -- rplugin.vim can recreate wrappers against the new channel.
+  pcall(vim.fn["remote#host#Register"], "python3")
+
+  local functions = {
+    "AnyaPing",
+    "AnyaSend",
+    "AnyaCancel",
+    "AnyaComplete",
+    "AnyaCompleteAsync",
+    "AnyaDaemonStart",
+    "AnyaDaemonStatus",
+    "AnyaDaemonStop",
+    "AnyaDo",
+    "AnyaDoCancel",
+    "AnyaEndSession",
+    "AnyaGetMentionContent",
+    "AnyaGetSystemPrompt",
+    "AnyaSearchMentions",
+    "AnyaUpdateEditMarker",
+    "AnyaApplyEdit",
+    "AnyaApplyEditContent",
+    "AnyaCountConversations",
+    "AnyaDeleteConversation",
+    "AnyaFindEditAtLine",
+    "AnyaGetToolOutput",
+    "AnyaListConversations",
+    "AnyaLoadConversation",
+    "AnyaNewConversationId",
+    "AnyaNewMessageId",
+    "AnyaRebuildBufferContent",
+    "AnyaRejectEdit",
+    "AnyaRenderEditBlocks",
+    "AnyaRepositionFloats",
+    "AnyaResizePromptHeight",
+    "AnyaSaveConversation",
+    "AnyaSaveMessage",
+    "AnyaTimestamp",
+    "AnyaUnapplyEdit",
+    "AnyaUpdateConversationTitle",
+    "AnyaVersion",
+  }
+
+  for _, name in ipairs(functions) do
+    pcall(vim.cmd, "silent! delfunction " .. name)
+  end
+
+  pcall(vim.cmd, "silent! runtime! plugin/rplugin.vim")
+end
+
+local function call_anya_send(prompt_text, existing_conv_id)
+  local ok, result = pcall(vim.fn.AnyaSend, prompt_text, existing_conv_id)
+  if ok then
+    return true, result
+  end
+
+  if is_invalid_channel_error(result) then
+    recover_python3_host()
+    ok, result = pcall(vim.fn.AnyaSend, prompt_text, existing_conv_id)
+    if ok then
+      return true, result
+    end
+  end
+
+  return false, result
+end
+
 local function should_force_focus_refresh()
   local bufnr = vim.api.nvim_get_current_buf()
   local ok, ft = pcall(vim.api.nvim_buf_get_option, bufnr, "filetype")
@@ -266,7 +349,7 @@ function M.send_message()
 
   -- Single RPC call: send text, get back IDs, schedules agent task
   -- Server handles: ID generation, timestamp, database save
-  local ok, result = pcall(vim.fn.AnyaSend, prompt_text, existing_conv_id)
+  local ok, result = call_anya_send(prompt_text, existing_conv_id)
   if not ok then
     M._sending_in_progress = false
     vim.notify("Anya: Failed to send message: " .. tostring(result), vim.log.levels.ERROR)
@@ -485,7 +568,7 @@ function M._drain_pending_queue()
   M._sending_in_progress = true
 
   -- Single RPC call to send message
-  local ok, result = pcall(vim.api.nvim_call_function, "AnyaSend", { next_text, existing_conv_id })
+  local ok, result = call_anya_send(next_text, existing_conv_id)
   if not ok then
     M._sending_in_progress = false
     vim.notify("Anya: Failed to send queued message: " .. tostring(result), vim.log.levels.ERROR)

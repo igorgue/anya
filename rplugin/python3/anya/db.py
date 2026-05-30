@@ -6,6 +6,7 @@ $XDG_DATA_HOME/anya/conversations.db or ~/.local/share/anya/conversations.db
 
 import os
 import pathlib
+import re
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
@@ -24,6 +25,20 @@ def get_db_path() -> pathlib.Path:
         return pathlib.Path.home() / ".local" / "share" / "anya" / "conversations.db"
 
 
+
+
+def _memory_regexp(pattern: str, value: str | None) -> int:
+    if value is None:
+        return 0
+    return 1 if re.search(pattern, value, re.IGNORECASE) else 0
+
+
+def _memory_term_pattern(term: str) -> str:
+    escaped = re.escape(term)
+    if re.fullmatch(r"[a-z0-9']+", term):
+        return rf"(?<![a-z0-9']){escaped}(?![a-z0-9'])"
+    return escaped
+
 def get_connection() -> sqlite3.Connection:
     """Get a sqlite3 connection with row_factory set."""
     db_path = get_db_path()
@@ -32,6 +47,7 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.create_function("REGEXP", 2, _memory_regexp)
     conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
@@ -577,42 +593,140 @@ def memory_exists(deduplication_key: str) -> bool:
         conn.close()
 
 
+_MEMORY_QUERY_STOP_WORDS = {
+    "a",
+    "about",
+    "am",
+    "an",
+    "and",
+    "are",
+    "can",
+    "could",
+    "do",
+    "does",
+    "for",
+    "have",
+    "how",
+    "i",
+    "is",
+    "it",
+    "know",
+    "me",
+    "my",
+    "of",
+    "please",
+    "remember",
+    "tell",
+    "that",
+    "the",
+    "to",
+    "was",
+    "what",
+    "whats",
+    "what's",
+    "when",
+    "with",
+    "where",
+    "who",
+    "why",
+    "you",
+}
+
+_MEMORY_QUERY_SYNONYMS = {
+    "age": ("age", "birth", "birthday", "born", "birthdate", "date of birth"),
+    "birthday": ("birthday", "birth", "born", "birthdate", "date of birth", "age"),
+    "birthdate": ("birthdate", "birth", "birthday", "born", "date of birth", "age"),
+    "born": ("born", "birth", "birthday", "birthdate", "date of birth", "age"),
+    "called": ("called", "name", "full name", "prefer", "preferred"),
+    "job": ("job", "work", "role", "career", "employment"),
+    "name": ("name", "full name", "called", "prefer", "preferred"),
+    "salary": ("salary", "pay", "compensation", "rate"),
+    "work": ("work", "job", "role", "career", "employment"),
+}
+
+
+def _memory_query_terms(query: str) -> list[str]:
+    """Return useful LIKE terms for natural-language memory questions."""
+    normalized = query.strip().lower()
+    if not normalized:
+        return []
+
+    terms: list[str] = []
+
+    def add(term: str) -> None:
+        term = term.strip().lower()
+        if term and term not in terms:
+            terms.append(term)
+
+    add(normalized)
+
+    # Keep a few meaningful quoted / multi-word phrases intact.
+    for phrase in re.findall(r"[a-z0-9]+(?:[\s-]+[a-z0-9]+){1,3}", normalized):
+        words = [w for w in re.findall(r"[a-z0-9']+", phrase) if w not in _MEMORY_QUERY_STOP_WORDS]
+        if len(words) >= 2:
+            add(" ".join(words))
+
+    for word in re.findall(r"[a-z0-9']+", normalized):
+        if len(word) < 3:
+            continue
+        if word == "old" and "how" in normalized:
+            add("age")
+            for synonym in _MEMORY_QUERY_SYNONYMS["age"]:
+                add(synonym)
+            continue
+        if word in _MEMORY_QUERY_STOP_WORDS:
+            continue
+        add(word)
+        for synonym in _MEMORY_QUERY_SYNONYMS.get(word, ()):  # targeted durable-fact aliases
+            add(synonym)
+
+    return terms[:20]
+
+
 def search_memories(
     query: str | None = None, category: str | None = None, limit: int = 20
 ) -> list[dict[str, Any]]:
     """
     Search memories by text query and/or category.
 
-    Args:
-        query: Optional text to search for (case-insensitive LIKE match)
-        category: Optional category filter (personal, skill, project, task)
-        limit: Maximum number of results
-
-    Returns:
-        List of memory dicts ordered by timestamp descending
+    Query matching is intentionally forgiving for natural-language prompts. A
+    prompt like "what's my full name?" should match stored facts such as
+    "User's full name is ..." even though the full prompt is not a literal
+    substring of the memory text.
     """
     conn = get_connection()
     try:
         conditions = []
-        params: list[Any] = []
+        where_params: list[Any] = []
 
-        if query:
-            conditions.append("text LIKE ?")
-            params.append(f"%{query}%")
+        terms = _memory_query_terms(query or "")
+        if terms:
+            conditions.append("(" + " OR ".join("text REGEXP ?" for _ in terms) + ")")
+            where_params.extend(_memory_term_pattern(term) for term in terms)
 
         if category:
             conditions.append("category = ?")
-            params.append(category.lower())
+            where_params.append(category.lower())
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
+        score_expr = "0"
+        score_params: list[Any] = []
+        if terms:
+            score_parts = []
+            for index, term in enumerate(terms):
+                weight = max(len(terms) - index, 1)
+                score_parts.append(f"CASE WHEN text REGEXP ? THEN {weight} ELSE 0 END")
+                score_params.append(_memory_term_pattern(term))
+            score_expr = " + ".join(score_parts)
+
         cursor = conn.execute(
-            f"""SELECT id, text, category, source, timestamp 
+            f"""SELECT id, text, category, source, timestamp, ({score_expr}) AS relevance
                FROM memories 
                WHERE {where_clause}
-               ORDER BY timestamp DESC
+               ORDER BY relevance DESC, timestamp DESC
                LIMIT ?""",
-            params + [limit],
+            score_params + where_params + [limit],
         )
         return [dict(row) for row in cursor.fetchall()]
     finally:
