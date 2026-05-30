@@ -25,7 +25,12 @@ def get_libs_prompt() -> str:
     libs_dir = os.path.dirname(os.path.abspath(__file__))
     modules = []
 
+    # Exclude 'memory' module from prompt - memories are now injected automatically
+    excluded_modules = {"memory"}
+    
     for _finder, name, _ispkg in pkgutil.iter_modules([libs_dir]):
+        if name in excluded_modules:
+            continue
         try:
             module = importlib.import_module(f".{name}", package="anya.libs")
             module_doc = inspect.getdoc(module) or ""

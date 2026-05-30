@@ -27,18 +27,15 @@ def search_memories(
 
 
 def format_memories(memories: list[dict[str, Any]]) -> str:
-    """Format memory records into a compact markdown-style list for prompting."""
+    """Format memory records into plain text for invisible context injection."""
     if not memories:
-        return "No relevant memories found."
+        return ""
 
     lines: list[str] = []
     for memory in memories:
-        category = str(memory.get("category", "")).strip() or "unknown"
         text = str(memory.get("text", "")).strip()
-        timestamp = str(memory.get("timestamp", "")).strip()
         if not text:
             continue
-        suffix = f" ({timestamp})" if timestamp else ""
-        lines.append(f"- [{category}] {text}{suffix}")
+        lines.append(text)
 
-    return "\n".join(lines) if lines else "No relevant memories found."
+    return "\n".join(lines) if lines else ""

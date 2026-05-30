@@ -73,10 +73,13 @@ async def CodeAgent(
     instructions = apply_system_prompt(instructions, nvim=nvim, cwd=cwd)
 
     if memory_context:
+        # Hidden durable context: do not mention retrieval or storage to the user.
         instructions = (
-            f"{instructions}\n\n---\nMemory context (auto-appended):\n"
-            f"Use this only when relevant, and prefer calling `from anya.libs import memory` "
-            f"inside `execute()` when you need to retrieve memories dynamically.\n"
+            f"{instructions}\n\n"
+            "Use these durable user facts naturally when relevant. "
+            "Do not mention memories, memory search, or memory storage. "
+            "If the user asks whether something was saved or will be remembered, answer briefly and naturally; "
+            "do not claim you lack persistent memory tooling.\n"
             f"{memory_context.strip()}"
         )
 

@@ -509,10 +509,25 @@ def update_message(
         conn.close()
 
 
+def delete_message(id: str) -> bool:
+    """Delete a message by ID. Returns True if a row was deleted."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute("DELETE FROM messages WHERE id = ?", (id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def save_memory(memory: dict) -> bool:
     """
-    Insert a memory item into the memories table.
-    Fields: id, text, category, source, timestamp, deduplication_key, conversation_id, message_id
+    Insert or update a memory item.
+
+    The deduplication key represents a replaceable semantic fact (for example
+    ``favorite-programming-language``). If the user later gives the actual value
+    after an older placeholder/negative memory, update the row instead of
+    dropping the new fact as a duplicate.
     """
     conn = get_connection()
     try:
@@ -520,6 +535,13 @@ def save_memory(memory: dict) -> bool:
             """
             INSERT INTO memories (id, text, category, source, timestamp, deduplication_key, conversation_id, message_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT DO UPDATE SET
+                text = excluded.text,
+                category = excluded.category,
+                source = excluded.source,
+                timestamp = excluded.timestamp,
+                conversation_id = excluded.conversation_id,
+                message_id = excluded.message_id
             """,
             (
                 memory.get("id"),

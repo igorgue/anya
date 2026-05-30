@@ -721,7 +721,9 @@ class RequestHandler:
 
         try:
             extracted = await extract_memories_from_message(
-                payload.text, agent_settings
+                payload.text,
+                agent_settings,
+                conversation_context=self._build_recent_memory_extraction_context(payload),
             )
         except asyncio.CancelledError:
             raise
@@ -737,26 +739,34 @@ class RequestHandler:
                     conversation_id=conversation_id,
                     message_id=message_id,
                 )
-                if db.memory_exists(record.get("deduplication_key", "")):
-                    continue
                 saved = db.save_memory(record)
                 if not saved:
                     continue
                 stored_count += 1
-                await self._send_stream_chunk(
-                    session_id,
-                    request_id,
-                    StreamEventType.MEMORY_STORED,
-                    {
-                        "text": record["text"],
-                        "category": record["category"],
-                        "count": stored_count,
-                    },
-                )
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 self.logger.warning(f"Failed to persist memory: {e}")
+
+
+    def _build_recent_memory_extraction_context(self, payload: SendMessagePayload) -> str:
+        """Build a compact recent context for resolving short memory statements."""
+        messages = payload.history or []
+        if not messages:
+            return ""
+
+        lines: list[str] = []
+        for message in messages[-8:]:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role", "")).strip()
+            content = str(message.get("content", "")).strip()
+            if not role or not content:
+                continue
+            # Keep context compact and avoid huge tool outputs.
+            content = " ".join(content.split())[:600]
+            lines.append(f"{role}: {content}")
+        return "\n".join(lines)
 
     async def _handle_cancel_request(self, request: Request) -> Response:
         """Handle a CANCEL_REQUEST request."""
@@ -855,16 +865,38 @@ class RequestHandler:
             raise
 
     def _build_memory_context(self, payload: SendMessagePayload) -> str | None:
-        """Build lightweight memory context from the latest user text before agent run."""
-        query = (payload.text or "").strip()
-        if not query:
-            return None
+        """Build hidden memory context before the agent run.
 
-        memories = retrieve_memories(query=query, limit=5)
+        Retrieval should be forgiving: user prompts like "What's my name?" may not
+        share literal tokens with a stored fact like "User's full name is ...".
+        Start with recent personal memories, then add query matches for the latest
+        prompt, preserving newest-first order and de-duplicating by id/text.
+        """
+        query = (payload.text or "").strip()
+        memories: list[dict] = []
+        seen: set[str] = set()
+
+        def add(results: list[dict]) -> None:
+            for memory in results:
+                key = str(memory.get("id") or memory.get("text") or "").strip()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                memories.append(memory)
+
+        # Durable user facts/preferences should always be available, even when
+        # the query is phrased differently from the stored text.
+        # Add preferences first so they are not crowded out by many personal facts.
+        add(retrieve_memories(category="preference", limit=20))
+        add(retrieve_memories(category="personal", limit=20))
+
+        if query:
+            add(retrieve_memories(query=query, limit=10))
+
         if not memories:
             return None
 
-        return format_memories(memories)
+        return format_memories(memories[:40])
 
     async def _run_agent_streaming(
         self,
@@ -888,12 +920,15 @@ class RequestHandler:
             else self._build_memory_context(payload)
         )
 
+        # Keep memory request-scoped. Agent instances are cached and some model
+        # providers cache system prompts, so relying only on instructions makes
+        # memory updates flaky across chats.
         agent = await self.agent_manager.get_agent_for_session(
             session_id,
             settings=agent_settings,
             cwd=nvim_context.cwd,
             request_kind=nvim_context.request_kind,
-            memory_context=memory_context,
+            memory_context=None,
         )
         self.logger.info(f"Got agent for session {session_id}")
 
@@ -1030,6 +1065,17 @@ class RequestHandler:
         )
 
         llm_history = list(payload.history)
+        if memory_context:
+            llm_history.append({
+                "role": "system",
+                "content": (
+                    "Use these durable user facts naturally when relevant. "
+                    "Do not mention memories, memory search, or memory storage. "
+                    "If asked whether a fact was saved or will be remembered, answer briefly and naturally; "
+                    "do not claim persistent memory is unavailable.\n"
+                    f"{memory_context.strip()}"
+                ),
+            })
         assistant_parts: list[str] = []
         last_partial_save = 0
         detached_instruction_added = False

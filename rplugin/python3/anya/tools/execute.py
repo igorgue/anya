@@ -705,6 +705,12 @@ async def execute(
     """
     plugin_context = ctx.context
 
+    if re.search(r"from\s+anya\.libs\s+import\s+[^\n]*\bmemory\b|import\s+anya\.libs\.memory\b", code):
+        return (
+            "The memory library is internal and not available from execute(). "
+            "Relevant memories are injected automatically before each run."
+        )
+
     if cwd is None:
         cwd = plugin_context.cwd if plugin_context.cwd else os.getcwd()
 

@@ -8,6 +8,7 @@ import threading
 import os
 import uuid
 import time
+import logging
 from datetime import datetime, timezone
 
 from . import buffers
@@ -742,12 +743,23 @@ class AnyaPlugin:
 
     def send(self, text, conversation_id=None, is_new_conversation=False):
         """Send a prompt to the code agent and stream the response to the chat buffer."""
-        # Prevent concurrent requests - check if a task is still running
+        # If a previous task is still running, cancel it so the new prompt can proceed.
+        # The user's intent to send always takes priority over a stale/pending response.
         if self._current_task is not None and not self._current_task.done():
-            self.nvim.err_write(
-                "Anya: Please wait for the current response to complete.\n"
-            )
-            return
+            self._request_cancelled = True
+            self._silent_cancel_requested = True
+            if self._current_request_id:
+                self._silent_cancel_request_ids.add(self._current_request_id)
+                try:
+                    self._client.cancel_request(self.session_id, self._current_request_id)
+                except Exception:
+                    pass
+            self._current_task.cancel()
+            ui.flush_queue(self.nvim)
+            self._current_task = None
+            self._current_request_id = None
+            self._streaming_started = False
+            self._cancel_in_progress = False
 
         chat_buf = ui.get_chat_buffer(self.nvim)
         if not chat_buf:
@@ -1188,23 +1200,6 @@ class AnyaPlugin:
                         self.nvim.async_call(
                             ui.notify_task_list, self.nvim, title, items
                         )
-
-                elif chunk.event_type == StreamEventType.MEMORY_STORED:
-                    # Emit memory stored event for fidget notification
-                    memory_text = chunk.data.get("text", "")
-                    memory_category = chunk.data.get("category", "")
-                    memory_count = chunk.data.get("count", 1)
-                    fidget.emit_user_event(
-                        self.nvim,
-                        "AnyaMemoryStored",
-                        {
-                            "request_id": request_id,
-                            "text": memory_text,
-                            "category": memory_category,
-                            "count": memory_count,
-                        },
-                    )
-
                 elif chunk.event_type == StreamEventType.TOKEN_USAGE:
                     # Update token usage display in winbar
                     # Use usable_context (context - max_output) for accurate percentage
@@ -2237,7 +2232,15 @@ end
             if prefer_buffer_content:
                 message_text = message_text_from_buffer
         if not message_text:
-            self.nvim.err_write(f"Warning: Empty message content for {msg_id}\n")
+            # Empty content is expected for cancelled requests with no output.
+            # Clean up the placeholder row from DB so it doesn't pollute history,
+            # and return silently (do NOT use err_write -- it throws a Vim error
+            # that can propagate through greenlet switching and break queued sends).
+            logging.debug("Empty message content for %s, cleaning up placeholder", msg_id)
+            try:
+                db.delete_message(msg_id)
+            except Exception:
+                pass
             return
 
         cleaned_content, markers_json = history.extract_markers_from_content(
