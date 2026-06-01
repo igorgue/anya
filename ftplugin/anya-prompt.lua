@@ -370,7 +370,7 @@ vim.keymap.set({ "n", "i" }, "<C-Right>", function()
   resize_pane(-2)
 end, { buffer = true, nowait = true, desc = "Grow side pane" })
 
-vim.keymap.set({ "n", "i" }, "<localleader>t", function()
+vim.keymap.set("n", "<localleader>t", function()
   require("anya.task_list").show_latest()
 end, { buffer = true, desc = "Show latest task list" })
 
@@ -382,7 +382,7 @@ vim.keymap.set("n", "<localleader>u", function()
   vim.cmd("UpdateRemotePlugins")
 end, { buffer = true, desc = "Update remote plugins" })
 
-vim.keymap.set({ "n", "i" }, "<localleader>n", function()
+vim.keymap.set("n", "<localleader>n", function()
   Snacks.notifier.show_history()
 end, { buffer = true, desc = "Show latest task list" })
 
@@ -557,7 +557,7 @@ vim.keymap.set({ "n", "i" }, "<C-v>", function()
   image_paste.paste_from_clipboard(vim.fn.mode())
 end, { buffer = true, desc = "Paste (image-aware)" })
 
-vim.keymap.set({ "n", "i" }, "<localleader>v", function()
+vim.keymap.set("n", "<localleader>v", function()
   image_paste.paste_image(true)
 end, { buffer = true, desc = "Paste image" })
 
