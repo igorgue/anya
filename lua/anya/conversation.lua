@@ -5,23 +5,33 @@ local M = {}
 
 local function is_invalid_channel_error(err)
   err = tostring(err or "")
-  return err:match("Invalid channel") or err:match("E900") or err:match("channel .* closed")
+  return err:match("Invalid channel") or err:match("E117") or err:match("E900") or err:match("channel .* closed")
 end
 
 local function recover_python3_host()
-  -- Neovim's generated pynvim wrappers are real Vimscript functions after the
-  -- first call. They close over the channel number returned by
-  -- remote#host#Require(). If the Python host process dies, remote#host#Require()
-  -- still returns that stale channel because the provider's script-local host
-  -- state is not automatically cleared. Re-sourcing rplugin.vim or calling
-  -- LoadRemotePlugins() cannot fix that and may even fail with "host is already
-  -- running".
+  -- Neovim's pynvim wrappers are real Vimscript functions created lazily via
+  -- FuncUndefined autocmds. On first call, FunctionBootstrap fires:
+  --   1. remote#host#Require('python3') starts the Python host, returns channel
+  --   2. FunctionOnChannel creates a Vimscript wrapper with that channel baked in
+  --   3. The FuncUndefined autocmd is deleted (one-shot)
   --
-  -- The supported way to clear the cached provider host is remote#host#Register(),
-  -- which resets s:hosts["python3"] and its channel to 0. Then we delete the
-  -- already-bootstrapped Anya functions so the FuncUndefined autocommands from
-  -- rplugin.vim can recreate wrappers against the new channel.
-  pcall(vim.fn["remote#host#Register"], "python3")
+  -- If the Python host process dies, the wrapper function still exists but calls
+  -- fail with "Invalid channel". If the wrapper is deleted without re-registering
+  -- the FuncUndefined autocmd, calls fail with E117.
+  --
+  -- The old recovery code had three bugs:
+  --   - remote#host#Register('python3') was called with 1 arg (needs 3), so it
+  --     failed silently and never reset the host state
+  --   - Without resetting the host, re-sourcing rplugin.vim failed because
+  --     RegisterPlugin throws "Host is already running"
+  --   - The FuncUndefined autocmds were never re-created, so E117 persisted
+  --
+  -- This fix properly:
+  --   1. Stops the dead channel job
+  --   2. Re-registers the host with correct factory (provider#python3#Require)
+  --   3. Clears plugin registrations so RegisterPlugin can run again
+  --   4. Deletes stale wrapper functions
+  --   5. Re-sources the rplugin manifest to create new FuncUndefined autocmds
 
   local functions = {
     "AnyaPing",
@@ -62,11 +72,40 @@ local function recover_python3_host()
     "AnyaVersion",
   }
 
+  -- 1. Check if the host is running and stop it.
+  --    Use IsRunning first to avoid triggering host start via Require.
+  local is_running_ok, is_running = pcall(vim.fn["remote#host#IsRunning"], "python3")
+  if is_running_ok and is_running then
+    -- Get the channel and stop the job
+    local req_ok, channel = pcall(vim.fn["remote#host#Require"], "python3")
+    if req_ok and type(channel) == "number" and channel > 0 then
+      pcall(vim.fn.jobstop, channel)
+    end
+  end
+
+  -- 2. Re-register the python3 host with the correct factory function.
+  --    remote#host#Register resets s:hosts["python3"] to {channel: 0, initialized: 0}
+  --    and sets the factory to provider#python3#Require so Require can spawn a new host.
+  pcall(vim.cmd, [[call remote#host#Register("python3", "*", function("provider#python3#Require"))]])
+
+  -- 3. Clear the plugin registration list so RegisterPlugin won't throw
+  --    "Plugin is already registered". Must use vim.cmd because vim.fn returns
+  --    a copy, not a reference to the Vimscript list.
+  pcall(vim.cmd, [[call remove(remote#host#PluginsForHost('python3'), 0, -1)]])
+
+  -- 4. Delete stale wrapper functions
   for _, name in ipairs(functions) do
     pcall(vim.cmd, "silent! delfunction " .. name)
   end
 
-  pcall(vim.cmd, "silent! runtime! plugin/rplugin.vim")
+  -- 5. Re-source the rplugin manifest to recreate FuncUndefined autocmds.
+  --    This calls RegisterPlugin which now succeeds because:
+  --    - Host channel is 0 (not running), so "host is already running" check passes
+  --    - Plugin list was cleared, so "plugin already registered" check passes
+  local manifest = vim.fn.stdpath("data") .. "/rplugin.vim"
+  if vim.fn.filereadable(manifest) == 1 then
+    pcall(vim.cmd, "silent! source " .. vim.fn.fnameescape(manifest))
+  end
 end
 
 local function call_anya_send(prompt_text, existing_conv_id)
