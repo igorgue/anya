@@ -14,9 +14,8 @@ import base64
 import hashlib
 import os
 
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from cryptography.hazmat.primitives import hashes, serialization
-
 
 CLIENT_ID_PREFIX = "ac"  # "anya client"
 

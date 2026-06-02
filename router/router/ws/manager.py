@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 import time as _time
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 
 from fastapi import WebSocket
 
@@ -20,6 +20,7 @@ logger = logging.getLogger("anya.router.ws")
 
 class WSError(Exception):
     """WebSocket protocol error."""
+
     pass
 
 
@@ -68,9 +69,10 @@ class WSManager:
         self._lock = asyncio.Lock()
         self._logger = logging.getLogger("anya.router.ws_manager")
 
-    async def handle_connection(self, websocket: WebSocket) -> WSAuthenticatedClient | None:
+    async def handle_connection(
+        self, websocket: WebSocket
+    ) -> WSAuthenticatedClient | None:
         """Handle a new WebSocket connection with timestamp-based auth."""
-        from ..crypto.identity import verify_signature
 
         # Receive the client's hello message
         raw = await websocket.receive_text()
@@ -145,12 +147,14 @@ class WSManager:
             return
 
         for msg in pending:
-            await client.send({
-                "type": "incoming_message",
-                "chat_id": msg.chat_id,
-                "text": msg.text,
-                "message_id": msg.id,
-            })
+            await client.send(
+                {
+                    "type": "incoming_message",
+                    "chat_id": msg.chat_id,
+                    "text": msg.text,
+                    "message_id": msg.id,
+                }
+            )
             # Small delay to avoid flooding
             await asyncio.sleep(0.05)
 

@@ -12,7 +12,6 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 
 @dataclass
@@ -246,9 +245,7 @@ class RouterDB:
 
     # --- Message queue operations ---
 
-    def queue_message(
-        self, client_id: str, chat_id: int, text: str
-    ) -> QueuedMessage:
+    def queue_message(self, client_id: str, chat_id: int, text: str) -> QueuedMessage:
         """Queue a message for an offline daemon."""
         conn = self.connect()
         now = time.time()
@@ -259,15 +256,21 @@ class RouterDB:
             (client_id, chat_id, text, now),
         )
         conn.commit()
-        return QueuedMessage(
-            id=cursor.lastrowid,
-            client_id=client_id,
-            chat_id=chat_id,
-            text=text,
-            queued_at=now,
-        )
 
-    def get_pending_messages(self, client_id: str, limit: int = 50) -> list[QueuedMessage]:
+        if cursor.lastrowid:
+            return QueuedMessage(
+                id=cursor.lastrowid,
+                client_id=client_id,
+                chat_id=chat_id,
+                text=text,
+                queued_at=now,
+            )
+        else:
+            raise Exception("Invalid lastrowid, we cannot queue this message")
+
+    def get_pending_messages(
+        self, client_id: str, limit: int = 50
+    ) -> list[QueuedMessage]:
         """Get undelivered messages for a client (oldest first)."""
         conn = self.connect()
         rows = conn.execute(
@@ -303,7 +306,5 @@ class RouterDB:
         """Delete messages older than max_age_hours."""
         conn = self.connect()
         cutoff = time.time() - (max_age_hours * 3600)
-        conn.execute(
-            "DELETE FROM queued_messages WHERE queued_at < ?", (cutoff,)
-        )
+        conn.execute("DELETE FROM queued_messages WHERE queued_at < ?", (cutoff,))
         conn.commit()

@@ -5,13 +5,11 @@ pairing flow, and message routing to daemon clients.
 """
 
 import asyncio
-import json
 import logging
-import os
 from typing import Any
 
-from ..db.database import RouterDB
 from ..crypto.identity import generate_pairing_code
+from ..db.database import RouterDB
 from ..ws.manager import WSManager
 
 logger = logging.getLogger("anya.router.bot")
@@ -60,7 +58,8 @@ class PairingCodeStore:
         """Remove expired codes."""
         now = asyncio.get_event_loop().time()
         expired = [
-            code for code, entry in self._codes.items()
+            code
+            for code, entry in self._codes.items()
             if now - entry["created_at"] > self._ttl
         ]
         for code in expired:
@@ -89,13 +88,7 @@ class TelegramBot:
 
     async def start(self):
         """Start the Telegram bot (long-polling)."""
-        from telegram import Update
-        from telegram.ext import (
-            Application,
-            CommandHandler,
-            MessageHandler,
-            filters,
-        )
+        from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
         self._app = Application.builder().token(self.token).build()
 
@@ -107,15 +100,16 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("help", self._cmd_help))
         # Route unknown commands to the daemon (e.g. /conversations, /continue)
         self._app.add_handler(
-            MessageHandler(filters.TEXT & filters.COMMAND, self._handle_unknown_or_daemon_command)
+            MessageHandler(
+                filters.TEXT & filters.COMMAND, self._handle_unknown_or_daemon_command
+            )
         )
-        self._app.add_handler(
-            MessageHandler(filters.TEXT, self._handle_message)
-        )
+        self._app.add_handler(MessageHandler(filters.TEXT, self._handle_message))
 
         self._logger.info("Starting Telegram bot (long-polling)...")
         await self._app.initialize()
         await self._app.start()
+        assert self._app.updater is not None
         await self._app.updater.start_polling()
         self._logger.info("Telegram bot started")
 
@@ -147,7 +141,7 @@ class TelegramBot:
         """Handle /start command, including Telegram deep-link pairing payloads."""
         args = getattr(context, "args", []) or []
         if args and args[0].startswith("pair_"):
-            code = args[0][len("pair_"):].upper()
+            code = args[0][len("pair_") :].upper()
             await self._connect_with_code(update, code)
             return
 
@@ -166,7 +160,6 @@ class TelegramBot:
 
     async def _cmd_connect(self, update: Any, context: Any):
         """Handle /connect <code> command."""
-        chat_id = update.effective_chat.id
         args = context.args
 
         if not args:
@@ -196,20 +189,24 @@ class TelegramBot:
         self.db.create_pairing(chat_id, client_id)
 
         await update.message.reply_text(
-            f"Connected to your Anya daemon! You can now send me messages "
-            f"and I'll forward them to your assistant.\n\n"
-            f"Use /new to start a fresh conversation or /disconnect to unlink."
+            "Connected to your Anya daemon! You can now send me messages "
+            "and I'll forward them to your assistant.\n\n"
+            "Use /new to start a fresh conversation or /disconnect to unlink."
         )
 
-        await self.ws_manager.send_to_client(client_id, {
-            "type": "pairing_added",
-            "chat_id": chat_id,
-        })
+        await self.ws_manager.send_to_client(
+            client_id,
+            {
+                "type": "pairing_added",
+                "chat_id": chat_id,
+            },
+        )
 
         self._logger.info(f"Chat {chat_id} paired to client {client_id[:12]}")
 
     async def _cmd_disconnect(self, update: Any, context: Any):
         """Handle /disconnect command."""
+        _ = context
         chat_id = update.effective_chat.id
         pairing = self.db.get_pairing(chat_id)
 
@@ -220,23 +217,25 @@ class TelegramBot:
         self.db.remove_pairing(chat_id, pairing.client_id)
 
         await update.message.reply_text(
-            "Disconnected from your Anya daemon. "
-            "Use /connect to link again anytime."
+            "Disconnected from your Anya daemon. Use /connect to link again anytime."
         )
 
         # Notify the daemon
-        await self.ws_manager.send_to_client(pairing.client_id, {
-            "type": "pairing_removed",
-            "chat_id": chat_id,
-        })
+        await self.ws_manager.send_to_client(
+            pairing.client_id,
+            {
+                "type": "pairing_removed",
+                "chat_id": chat_id,
+            },
+        )
 
         self._logger.info(
             f"Chat {chat_id} unpaired from client {pairing.client_id[:12]}"
         )
 
-
     async def _cmd_new(self, update: Any, context: Any):
         """Handle /new command by asking the daemon to start a fresh conversation."""
+        _ = context
         chat_id = update.effective_chat.id
         pairing = self.db.get_pairing(chat_id)
 
@@ -247,10 +246,13 @@ class TelegramBot:
             )
             return
 
-        sent = await self.ws_manager.send_to_client(pairing.client_id, {
-            "type": "new_conversation",
-            "chat_id": chat_id,
-        })
+        sent = await self.ws_manager.send_to_client(
+            pairing.client_id,
+            {
+                "type": "new_conversation",
+                "chat_id": chat_id,
+            },
+        )
 
         if sent:
             await update.message.reply_text(
@@ -266,6 +268,7 @@ class TelegramBot:
 
     async def _cmd_help(self, update: Any, context: Any):
         """Handle /help command."""
+        _ = context
         await update.message.reply_text(
             "Anya Telegram Bridge\n\n"
             "/connect <code> - Link to your Anya daemon\n"
@@ -276,6 +279,7 @@ class TelegramBot:
 
     async def _handle_unknown_or_daemon_command(self, update: Any, context: Any):
         """Handle unknown commands by forwarding to the daemon or replying with invalid command."""
+        _ = context
         chat_id = update.effective_chat.id
         text = update.message.text
 
@@ -288,11 +292,14 @@ class TelegramBot:
 
         # Forward to daemon — it might handle /conversations, /continue, etc.
         client_id = pairing.client_id
-        sent = await self.ws_manager.send_to_client(client_id, {
-            "type": "incoming_message",
-            "chat_id": chat_id,
-            "text": text,
-        })
+        sent = await self.ws_manager.send_to_client(
+            client_id,
+            {
+                "type": "incoming_message",
+                "chat_id": chat_id,
+                "text": text,
+            },
+        )
 
         if sent:
             self._logger.info(
@@ -308,6 +315,7 @@ class TelegramBot:
 
         Routes the message to the paired daemon client (or queues it).
         """
+        _ = context
         chat_id = update.effective_chat.id
         text = update.message.text
 
@@ -322,11 +330,14 @@ class TelegramBot:
         client_id = pairing.client_id
 
         # Try to send to the daemon via WebSocket
-        sent = await self.ws_manager.send_to_client(client_id, {
-            "type": "incoming_message",
-            "chat_id": chat_id,
-            "text": text,
-        })
+        sent = await self.ws_manager.send_to_client(
+            client_id,
+            {
+                "type": "incoming_message",
+                "chat_id": chat_id,
+                "text": text,
+            },
+        )
 
         if sent:
             self._logger.info(

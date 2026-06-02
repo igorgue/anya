@@ -10,18 +10,16 @@ The Telegram bot runs as a background task alongside the HTTP server.
 """
 
 import asyncio
-import json
 import logging
 import os
-import sys
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 
+from .bot.handler import PairingCodeStore, TelegramBot
 from .db.database import RouterDB
 from .ws.manager import WSManager
-from .bot.handler import TelegramBot, PairingCodeStore
 
 logger = logging.getLogger("anya.router")
 
@@ -40,7 +38,9 @@ async def lifespan(app: FastAPI):
     app.state.ws_manager = WSManager(app.state.db)
 
     bot_task = None
-    bot_username = os.environ.get("TELEGRAM_BOT_USERNAME", "anya_ai_answers_bot").lstrip("@")
+    bot_username = os.environ.get(
+        "TELEGRAM_BOT_USERNAME", "anya_ai_answers_bot"
+    ).lstrip("@")
     app.state.bot_username = bot_username
     if bot_token:
         app.state.bot = TelegramBot(
@@ -79,6 +79,7 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 # REST endpoints
 # ---------------------------------------------------------------------------
+
 
 @app.get("/health")
 async def health():
@@ -163,7 +164,11 @@ async def create_pairing(request: Request):
     else:
         # Generate a pairing code for the user to enter in Telegram, or open via QR/deep link.
         code = app.state.pairing_store.create(client_id, chat_id=0)
-        payload = {"code": code, "status": "waiting", "expires_in": app.state.pairing_store.ttl_seconds}
+        payload = {
+            "code": code,
+            "status": "waiting",
+            "expires_in": app.state.pairing_store.ttl_seconds,
+        }
         bot_username = getattr(app.state, "bot_username", "")
         if bot_username:
             payload["telegram_url"] = f"https://t.me/{bot_username}?start=pair_{code}"
@@ -201,6 +206,7 @@ async def handle_response(request: Request):
 # ---------------------------------------------------------------------------
 # WebSocket endpoint
 # ---------------------------------------------------------------------------
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -242,34 +248,42 @@ async def websocket_endpoint(websocket: WebSocket):
                 text = data.get("text")
 
                 if not chat_id or text is None:
-                    await client.send({"type": "error", "detail": "chat_id_and_text_required"})
+                    await client.send(
+                        {"type": "error", "detail": "chat_id_and_text_required"}
+                    )
                     continue
 
                 # Forward the response to Telegram
                 bot: TelegramBot | None = getattr(app.state, "bot", None)
                 if bot:
                     await bot.send_message(chat_id, text)
-                    await client.send({
-                        "type": "response_sent",
-                        "chat_id": chat_id,
-                    })
+                    await client.send(
+                        {
+                            "type": "response_sent",
+                            "chat_id": chat_id,
+                        }
+                    )
                 else:
-                    await client.send({
-                        "type": "error",
-                        "detail": "bot_not_available",
-                    })
+                    await client.send(
+                        {
+                            "type": "error",
+                            "detail": "bot_not_available",
+                        }
+                    )
 
             elif msg_type == "ping":
                 await client.send({"type": "pong"})
 
             else:
-                await client.send({
-                    "type": "error",
-                    "detail": f"unknown_message_type: {msg_type}",
-                })
+                await client.send(
+                    {
+                        "type": "error",
+                        "detail": f"unknown_message_type: {msg_type}",
+                    }
+                )
 
     except WebSocketDisconnect:
-        logger.info(f"Client WebSocket disconnected")
+        logger.info("Client WebSocket disconnected")
     except Exception as e:
         logger.exception(f"WebSocket error: {e}")
     finally:
@@ -280,6 +294,7 @@ async def websocket_endpoint(websocket: WebSocket):
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main():
     """Run the router server."""
