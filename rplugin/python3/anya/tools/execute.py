@@ -692,8 +692,12 @@ async def execute(
         cwd: Current working directory for code execution (default: current working directory)
         use_venv: Whether to detect and use virtualenv if available (default: True)
         background: Run the code in the background without blocking (default: False).
+            Use this for servers, watchers, and any command that may run indefinitely.
             When True, returns immediately with a process ID. The process continues
-            running and output is written to .anya/background/<process-id>.log
+            running and output is written to .anya/background/<process-id>.log.
+            Do not use shell backgrounding (`&`, `nohup`, `disown`, `setsid`,
+            `tmux`, or `screen`) inside the code; keep commands foreground-style
+            and set this argument to True so Anya can track logs, status, and stops.
 
     Returns:
         str: The output of the code execution, or process ID if background=True.

@@ -321,6 +321,11 @@ vim.keymap.set("n", "<localleader>l", function()
   require("anya.picker").restore_last_session()
 end, { buffer = true, desc = "Restore last session" })
 
+vim.keymap.set("n", "<localleader>T", function()
+  require("anya.telegram").reopen_pairing()
+end, { buffer = true, desc = "Reopen Telegram pairing info" })
+
+
 -- Daemon management keymaps
 vim.keymap.set("n", "<localleader>s", function()
   vim.cmd("Anya daemon start")

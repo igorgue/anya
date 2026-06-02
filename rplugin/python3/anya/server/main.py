@@ -28,6 +28,7 @@ from ..protocol import (
 )
 from .agents import AgentManager
 from .handlers import RequestHandler
+from .telegram_client import TelegramClient
 
 # Configure logging
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -71,6 +72,7 @@ class AnyaDaemon:
         self.pub_socket: zmq.asyncio.Socket | None = None
         self.agent_manager: AgentManager | None = None
         self.handler: RequestHandler | None = None
+        self.telegram_client: TelegramClient | None = None
         self.running = False
         self._shutdown_event = asyncio.Event()
 
@@ -111,6 +113,11 @@ class AnyaDaemon:
             agent_manager=self.agent_manager,
             pub_socket=self.pub_socket,
         )
+
+        # Start Telegram client if configured
+        self.telegram_client = await self._start_telegram_client()
+        if self.handler is not None:
+            self.handler.telegram_client = self.telegram_client
 
         self.running = True
         self.logger.info("Anya daemon started successfully")
@@ -191,10 +198,138 @@ class AnyaDaemon:
             self.logger.exception(f"Error handling request: {e}")
             return make_error_response("unknown", str(e))
 
+    async def _start_telegram_client(self) -> TelegramClient | None:
+        """Start the Telegram Router client if configured."""
+        router_url = os.environ.get("ANYA_ROUTER_URL")
+        if not router_url:
+            return None
+
+        self.logger.info(f"Starting Telegram client, connecting to {router_url}")
+
+        telegram_conversations: dict[int, str] = {}
+
+        def current_conversation_id(chat_id: int) -> str:
+            conversation_id = telegram_conversations.get(chat_id)
+            if conversation_id is None:
+                conversation_id = f"telegram:{chat_id}"
+                telegram_conversations[chat_id] = conversation_id
+            return conversation_id
+
+        async def on_new_conversation(chat_id: int):
+            """Start a fresh persisted Telegram conversation for this chat."""
+            import time
+            from .. import db
+
+            timestamp_ms = int(time.time() * 1000)
+            conversation_id = f"telegram:{chat_id}:{timestamp_ms}"
+            created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            db.save_conversation(conversation_id, created_at, cwd=os.getcwd())
+            try:
+                db.update_conversation_title(conversation_id, f"Telegram {chat_id} #{timestamp_ms}")
+            except Exception:
+                pass
+            telegram_conversations[chat_id] = conversation_id
+            self.logger.info(
+                "Started new Telegram conversation for chat %s: %s",
+                chat_id,
+                conversation_id,
+            )
+
+        async def on_message(chat_id: int, text: str):
+            """Handle an incoming Telegram message as its own persisted conversation."""
+            if not self.handler:
+                return
+
+            import time
+            from .. import db
+            from ..protocol import Request, RequestType
+
+            conversation_id = current_conversation_id(chat_id)
+            session_id = conversation_id
+            timestamp_ms = int(time.time() * 1000)
+            request_id = f"tg-assistant-{chat_id}-{timestamp_ms}"
+            user_message_id = f"tg-user-{chat_id}-{timestamp_ms}"
+
+            nvim_ctx = {
+                "session_id": session_id,
+                "cwd": os.getcwd(),
+                "current_buffer": "",
+                "current_buffer_content": "",
+                "open_buffers": [],
+                "allowed_commands": [],
+                "agent_settings": {},
+                "request_kind": "telegram",
+            }
+
+            created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            if not db.get_conversation(conversation_id):
+                db.save_conversation(conversation_id, created_at, cwd=os.getcwd())
+                try:
+                    db.update_conversation_title(conversation_id, f"Telegram {chat_id}")
+                except Exception:
+                    pass
+
+            db.save_message_dict(
+                msg_id=user_message_id,
+                conversation_id=conversation_id,
+                role="user",
+                content=text,
+                author="Telegram",
+                created_at=created_at,
+            )
+            db.update_conversation_timestamp(conversation_id, created_at)
+
+            history_rows = db.get_messages(conversation_id)[-40:]
+            history = [
+                {"role": row["role"], "content": row["content"]}
+                for row in history_rows
+                if row.get("role") in {"user", "assistant"} and row.get("content")
+            ]
+
+            telegram_client = self.telegram_client
+
+            async def telegram_callback(response_text: str):
+                if telegram_client:
+                    await telegram_client.send_response(chat_id, response_text)
+
+            self.handler._telegram_response_callbacks[request_id] = telegram_callback
+
+            request = Request(
+                type=RequestType.SEND_MESSAGE,
+                session_id=session_id,
+                request_id=request_id,
+                payload={
+                    "text": text,
+                    "conversation_id": conversation_id,
+                    "history": history,
+                    "nvim_context": nvim_ctx,
+                },
+            )
+
+            await self.handler.handle(request)
+            self.logger.info(
+                "Telegram message queued for chat %s in conversation %s (req %s)",
+                chat_id,
+                conversation_id,
+                request_id[:12],
+            )
+
+        client = TelegramClient(
+            router_url=router_url,
+            on_message=on_message,
+            on_new_conversation=on_new_conversation,
+        )
+        await client.start()
+        return client
+
     async def stop(self):
         """Stop the daemon server."""
         self.logger.info("Stopping Anya daemon...")
         self.running = False
+
+        # Stop Telegram client
+        if self.telegram_client:
+            await self.telegram_client.stop()
 
         # Clean up agent manager
         if self.agent_manager:

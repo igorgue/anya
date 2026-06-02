@@ -1,0 +1,2 @@
+[console_scripts]
+anya-router = router.main:main

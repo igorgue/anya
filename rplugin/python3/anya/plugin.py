@@ -26,6 +26,7 @@ from .protocol import (
     AgentSettings,
     NvimContext,
     RequestType,
+    ResponseType,
     StreamEventType,
 )
 
@@ -562,6 +563,89 @@ class AnyaPlugin:
         elif subcommand == "copilot":
             # GitHub Copilot management subcommands
             self._handle_copilot_command(args[1:] if len(args) > 1 else [])
+        elif subcommand == "telegram":
+            # Telegram routing subcommands
+            self._handle_telegram_command(args[1:] if len(args) > 1 else [])
+
+    def _handle_telegram_command(self, args):
+        """Handle :Anya telegram subcommands."""
+        if not args or args[0] != "pair":
+            self.nvim.out_write("Usage: :Anya telegram pair\n")
+            return
+
+        def show_info(message: str):
+            code_line = next(
+                (line for line in message.splitlines() if line.startswith("Send this")),
+                "",
+            )
+            code = code_line.rsplit(" ", 1)[-1] if code_line else ""
+            try:
+                self.nvim.vars["anya_telegram_pairing_message"] = message
+                self.nvim.vars["anya_telegram_pairing_code"] = code
+                self.nvim.exec_lua("require('anya.telegram').show_pairing(...)", message, code)
+            except Exception:
+                for line in message.splitlines():
+                    self.nvim.command(f"echom {json.dumps(line)}")
+                self.nvim.out_write(message + "\n")
+
+        def show_error(message: str):
+            self.nvim.err_write(message + "\n")
+            try:
+                self.nvim.command(f"echoerr {json.dumps(message)}")
+            except Exception:
+                pass
+
+        def worker():
+            try:
+                request_id = ids.new()
+                response = self._client.send_request(
+                    RequestType.TELEGRAM_PAIR,
+                    session_id=self.session_id,
+                    request_id=request_id,
+                    payload={},
+                    timeout=10.0,
+                )
+                if response is None:
+                    self.nvim.async_call(show_error, "Anya Telegram: daemon did not respond.")
+                    return
+                if response.type != ResponseType.SUCCESS:
+                    self.nvim.async_call(
+                        show_error,
+                        f"Anya Telegram: {response.error or 'pairing failed'}",
+                    )
+                    return
+
+                payload = response.payload
+                if isinstance(payload, str):
+                    code = payload
+                    expires_in = 300
+                elif isinstance(payload, dict):
+                    code = payload.get("code") or payload.get("pairing_code")
+                    expires_in = payload.get("expires_in", 300)
+                else:
+                    code = None
+                    expires_in = 300
+
+                if not code:
+                    self.nvim.async_call(
+                        show_error,
+                        f"Anya Telegram: router returned no code: {payload}",
+                    )
+                    return
+
+                message = (
+                    f"Anya Telegram pairing code: {code}\n"
+                    f"Send this to your Telegram bot: /connect {code}\n"
+                    f"Expires in {expires_in} seconds."
+                )
+                self.nvim.async_call(show_info, message)
+            except Exception as e:
+                self.nvim.async_call(
+                    show_error,
+                    f"Anya Telegram: failed to get pairing code: {e}",
+                )
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _open_interface(self, layout="split", direction=None, force_open=False):
         """Open the Anya interface with floating chat and prompt windows.

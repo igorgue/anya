@@ -302,6 +302,7 @@ class RequestHandler:
         # Track active tool state per session for proper cleanup on cancellation
         # Maps: session_id -> {"tools": list, "is_edit": bool, "was_called": bool}
         self._active_tools: dict[str, dict] = {}
+        self._telegram_response_callbacks: dict[str, Any] = {}
 
     async def handle(self, request: Request) -> Response:
         """Handle an incoming request."""
@@ -322,6 +323,8 @@ class RequestHandler:
                 return await self._handle_search_mentions(request)
             elif request.type == RequestType.GET_MENTION_CONTENT:
                 return await self._handle_get_mention_content(request)
+            elif request.type == RequestType.TELEGRAM_PAIR:
+                return await self._handle_telegram_pair(request)
             else:
                 return make_error_response(
                     request.request_id,
@@ -330,6 +333,24 @@ class RequestHandler:
         except Exception as e:
             self.logger.exception(f"Error handling request: {e}")
             return make_error_response(request.request_id, str(e))
+
+
+    async def _handle_telegram_pair(self, request: Request) -> Response:
+        """Create a Telegram pairing code for the connected router client."""
+        telegram_client = getattr(self, "telegram_client", None)
+        if telegram_client is None:
+            return make_error_response(
+                request.request_id,
+                "Telegram router is not configured. Start the daemon with ANYA_ROUTER_URL and ANYA_ROUTER_HTTP.",
+            )
+
+        try:
+            result = await telegram_client.get_pairing_code()
+        except Exception as e:
+            self.logger.exception("Failed to create Telegram pairing code")
+            return make_error_response(request.request_id, str(e))
+
+        return make_success_response(request.request_id, result)
 
     async def _handle_send_message(self, request: Request) -> Response:
         """Handle a SEND_MESSAGE request.
@@ -499,6 +520,14 @@ class RequestHandler:
                 StreamEventType.MESSAGE_END,
                 {"status": "success"},
             )
+
+            # Call Telegram response callback for this request if set.
+            telegram_callback = self._telegram_response_callbacks.pop(request_id, None)
+            if telegram_callback:
+                try:
+                    await telegram_callback(final_message)
+                except Exception as e:
+                    self.logger.warning(f"Telegram response callback failed: {e}")
 
         except asyncio.CancelledError:
             # Send TOOL_CALL_END if there's an active tool (e.g., pending edit)

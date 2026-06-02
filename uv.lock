@@ -37,6 +37,7 @@ source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
     { name = "cbor2" },
+    { name = "cryptography" },
     { name = "hashids" },
     { name = "html2text" },
     { name = "openai" },
@@ -57,6 +58,7 @@ dev = [
 requires-dist = [
     { name = "anthropic" },
     { name = "cbor2" },
+    { name = "cryptography", specifier = ">=41.0.0" },
     { name = "hashids" },
     { name = "html2text" },
     { name = "openai" },

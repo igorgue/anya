@@ -308,6 +308,8 @@ writing to arbitrary files.
 
 ### Background Jobs (`background`)
 
+Start long-running processes by setting the `execute` tool call's `background=True`, not by shell-detaching inside the command. Do not append `&` or use `nohup`, `disown`, `setsid`, `tmux`, or `screen`; those bypass Anya's job tracking and make logs/status/stop unreliable.
+
 ```python
 from anya.libs import background
 

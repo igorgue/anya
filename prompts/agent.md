@@ -219,7 +219,7 @@ task_list.update(
 ### Background Jobs: `from anya.libs import background`
 
 **ALWAYS use `background=True` on `execute` for long-running processes.
-NEVER use `shell.run()` or `subprocess.Popen` for processes that should run in the background.**
+NEVER use shell backgrounding (`&`, `nohup`, `disown`, `setsid`, `tmux`, `screen`), `shell.run()`, or `subprocess.Popen` for processes that should run in the background.**
 
 You MUST proactively decide to use `background=True` whenever the command is expected to run indefinitely
 or for a long time. This includes but is not limited to:
@@ -230,7 +230,7 @@ or for a long time. This includes but is not limited to:
 
 Do NOT wait for the user to say "in the background" -- if the command would block the agent, run it in the background automatically.
 
-To start a background job, pass `background=True` to `execute`. The tool returns a process ID immediately.
+To start a background job, pass `background=True` to `execute`. The tool returns a process ID immediately. Keep the command itself foreground-style inside the Python code, for example `shell.run("npm run dev")`, and set the tool call's `background` argument to `True`. Do **not** append `&` or use other shell detachment mechanisms; doing so bypasses Anya's job tracking and makes logs/status/stop unreliable.
 
 To inspect, monitor, or manage background jobs, use the `background` library:
 

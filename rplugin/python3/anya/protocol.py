@@ -23,6 +23,7 @@ class RequestType(Enum):
     GET_SYSTEM_PROMPT = "get_system_prompt"
     SEARCH_MENTIONS = "search_mentions"
     GET_MENTION_CONTENT = "get_mention_content"
+    TELEGRAM_PAIR = "telegram_pair"
 
 
 class ResponseType(Enum):

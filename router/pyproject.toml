@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anya-telegram-router"
+version = "0.1.0"
+description = "Anya Telegram Router - bridges Telegram bots to Anya daemon clients"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "python-telegram-bot[job-queue]>=21.10",
+    "cryptography>=44.0.0",
+    "aiosqlite>=0.20.0",
+    "httpx>=0.28.0",
+    "websockets>=14.0",
+]
+
+[project.scripts]
+anya-router = "router.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["router*"]
