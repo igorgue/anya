@@ -68,7 +68,7 @@ Anya’s main process runs as a **background daemon**. It:
     - Handles streaming, user input, gating for tool confirmation
 - **Daemon Process**: `rplugin/python3/anya/server/`
     - `main.py`: Launches the ZeroMQ event loop, initializes sockets
-    - `agents.py`: Spawns agent instances (`CodeAgent` per-user, persistent MCP Agent), manages MCP server async loading
+    - `agents.py`: Spawns agent instances (`Agent` per-user, persistent MCP Agent), manages MCP server async loading
     - `handlers.py`: Handles all request types, tool events, confirmation flows, and output streaming to UI
     - `db.py`, `history.py`, `markers.py`: Implement SQLite message storage, buffer parsing, marker management, and history recovery
 - **Lua UI System**: `lua/anya/`
@@ -173,7 +173,7 @@ plugin/anya.vim     # Vimscript bootstrap, sets load flags
 
 ## The Agent System & Extensibility
 
-- **Primary chat agent:** `CodeAgent`, cached per session with a composite cache key (request kind + settings hash + cwd + skills fingerprint + memory fingerprint)
+- **Primary chat agent:** `Agent`, cached per session with a composite cache key (request kind + settings hash + cwd + skills fingerprint + memory fingerprint)
   - Assembles dynamic instructions from `prompts/code.md`, auto-discovered libs docs, system context, project `AGENTS.md`, and discovered skills metadata
   - Uses per-client `AgentSettings` when provided, with environment fallback
   - Exposes reasoning/model/provider controls through settings/env

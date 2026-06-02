@@ -1,7 +1,7 @@
 """Agent management for the daemon server.
 
 Manages agent lifecycle:
-- Code agent: Cached by (session_id, settings_hash) to allow different clients
+- Anya agent: Cached by (session_id, settings_hash) to allow different clients
               to use different settings
 """
 
@@ -14,7 +14,7 @@ import anyio
 import zmq.asyncio
 from agents import Agent
 
-from ..agents import CodeAgent, DoAgent
+from ..agents import Agent as AnyaAgent, DoAgent
 from ..skills import discover_skills, skills_fingerprint
 from ..protocol import AgentSettings
 
@@ -88,7 +88,7 @@ class AgentManager:
         request_kind: str = "chat",
         memory_context: str | None = None,
     ) -> Agent:
-        """Get or create the Code agent for a session with specific settings.
+        """Get or create the Anya agent for a session with specific settings.
 
         Agents are cached by (session_id, settings_hash, cwd). If a session uses
         different settings (e.g., different model) or a different working directory,
@@ -101,7 +101,7 @@ class AgentManager:
             cwd: Optional working directory for this session's project.
 
         Returns:
-            The Code agent for this session and settings combination.
+            The Anya agent for this session and settings combination.
         """
         session = await self.get_or_create_session(session_id)
 
@@ -143,13 +143,13 @@ class AgentManager:
             return session.agents[cache_key]
 
         # Create new agent for these settings
-        agent_label = "Do" if request_kind == "do" else "Code"
+        agent_label = "Do" if request_kind == "do" else "Anya"
         self.logger.info(
             f"Creating {agent_label} agent for session {session_id}, "
             f"model={settings.model}, cwd={cwd}, cache_key={cache_key}"
         )
 
-        agent_factory = DoAgent if request_kind == "do" else CodeAgent
+        agent_factory = DoAgent if request_kind == "do" else AnyaAgent
         factory_kwargs = {
             "thinking_budget": settings.thinking_budget or self._thinking_budget,
             "nvim": None,  # No nvim in daemon context

@@ -373,7 +373,7 @@ class RequestHandler:
                 conversation_id=conversation_id,
                 role="assistant",
                 content="",
-                author="Code",
+                author="Anya",
                 model=model,
                 created_at=created_at,
                 ended_at=None,
@@ -414,7 +414,7 @@ class RequestHandler:
                 conversation_id=conversation_id,
                 role="assistant",
                 content=cleaned_content,
-                author="Code",
+                author="Anya",
                 model=DEFAULT_MODEL,
                 created_at=created_at,
                 ended_at=ended_at,
@@ -1593,7 +1593,7 @@ class RequestHandler:
             from ..system_prompt import apply_system_prompt
             from ..libs import get_libs_prompt
 
-            base_instructions = get_instructions("code.md")
+            base_instructions = get_instructions("agent.md")
             libs_instructions = get_libs_prompt()
             instructions = update_agent_instructions(
                 base_instructions, libs_instructions

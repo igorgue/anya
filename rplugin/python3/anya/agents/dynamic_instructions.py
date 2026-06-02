@@ -52,8 +52,8 @@ def _extract_tool_info(tool: Any) -> tuple[str, str, dict]:
     return tool_name, tool_desc, input_schema
 
 
-async def generate_dynamic_code_instructions(mcp_servers: List[Any]) -> str:
-    """Generate dynamic instructions for the code agent based on available MCP servers.
+async def generate_dynamic_agent_instructions(mcp_servers: List[Any]) -> str:
+    """Generate dynamic instructions for the main agent based on available MCP servers.
 
     Args:
         mcp_servers: List of connected MCP server instances
@@ -201,20 +201,20 @@ def update_agent_instructions(base_instructions: str, dynamic_instructions: str)
 
 
 # Synchronous wrappers for compatibility
-def generate_dynamic_code_instructions_sync(mcp_servers: List[Any]) -> str:
-    """Synchronous version of generate_dynamic_code_instructions."""
+def generate_dynamic_agent_instructions_sync(mcp_servers: List[Any]) -> str:
+    """Synchronous version of generate_dynamic_agent_instructions."""
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
             # If we're already in an event loop, we can't use run()
             # This shouldn't happen in normal operation, but let's handle it gracefully
             print(
-                "Warning: generate_dynamic_code_instructions_sync called in running event loop"
+                "Warning: generate_dynamic_agent_instructions_sync called in running event loop"
             )
             return ""
         else:
             return loop.run_until_complete(
-                generate_dynamic_code_instructions(mcp_servers)
+                generate_dynamic_agent_instructions(mcp_servers)
             )
     except Exception:
         # Fallback if async fails

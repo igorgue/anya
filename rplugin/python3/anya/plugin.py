@@ -905,7 +905,7 @@ class AnyaPlugin:
                     conversation_id=conversation_id,
                     role="assistant",
                     content="",
-                    author="Code",
+                    author="Anya",
                     model=request_agent_settings.model,
                     created_at=timestamp,
                     ended_at=None,

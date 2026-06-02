@@ -15,7 +15,7 @@ from ..reasoning import apply_reasoning_settings
 if TYPE_CHECKING:
     from ..protocol import AgentSettings
 
-MAIN_AGENT_NAME = "Code"
+MAIN_AGENT_NAME = "Anya"
 DO_AGENT_NAME = "Do"
 MAIN_ASSISTANT_NAME = "Anya"
 
@@ -41,14 +41,14 @@ def _build_do_instructions(cwd: str | None = None) -> str:
     return instructions
 
 
-async def CodeAgent(
+async def Agent(
     thinking_budget=None,
     nvim=None,
     settings: "AgentSettings | None" = None,
     cwd: str | None = None,
     memory_context: str | None = None,
 ) -> Agent:
-    """Create a code agent with the execute tool.
+    """Create the main Anya agent with the execute tool.
 
     Args:
         thinking_budget: Optional thinking budget for reasoning models.
@@ -60,7 +60,7 @@ async def CodeAgent(
         Configured Agent instance
     """
     # Get base instructions
-    base_instructions = get_instructions("code.md")
+    base_instructions = get_instructions("agent.md")
 
     # Append built-in libs section (auto-discovered from anya.libs), including
     # dynamically generated MCP server/tool documentation.
@@ -199,7 +199,7 @@ async def DoAgent(
 
 
 __all__ = [
-    "CodeAgent",
+    "Agent",
     "DoAgent",
     "MAIN_AGENT_NAME",
     "DO_AGENT_NAME",
