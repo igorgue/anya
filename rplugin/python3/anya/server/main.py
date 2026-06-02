@@ -201,7 +201,7 @@ class AnyaDaemon:
 
     async def _start_telegram_client(self) -> TelegramClient | None:
         """Start the Telegram Router client if configured."""
-        router_url = os.environ.get("ANYA_ROUTER_URL", "ws://0.0.0.0:8080/ws")
+        router_url = os.environ.get("ANYA_ROUTER_URL", "wss://anya-router.fly.dev/ws")
 
         self.logger.info(f"Starting Telegram client, connecting to {router_url}")
 
