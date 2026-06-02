@@ -341,7 +341,7 @@ class RequestHandler:
         if telegram_client is None:
             return make_error_response(
                 request.request_id,
-                "Telegram router is not configured. Start the daemon with ANYA_ROUTER_URL and ANYA_ROUTER_HTTP.",
+                "Telegram router is not configured (client not started). Set ANYA_ROUTER_URL to disable auto-connect.",
             )
 
         try:
