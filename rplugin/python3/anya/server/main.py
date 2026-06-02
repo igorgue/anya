@@ -219,7 +219,7 @@ class AnyaDaemon:
             timestamp_ms = int(time.time() * 1000)
             conversation_id = f"telegram:{chat_id}:{timestamp_ms}"
             created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            db.save_conversation(conversation_id, created_at, cwd=os.getcwd())
+            db.save_conversation(conversation_id, created_at, cwd=str(Path.home()))
             try:
                 db.update_conversation_title(conversation_id, f"Telegram {chat_id} #{timestamp_ms}")
             except Exception:
@@ -327,7 +327,7 @@ class AnyaDaemon:
             conv = cache[n - 1]
             conversation_id = conv["id"]
             title = conv.get("title") or "Untitled"
-            cwd = conv.get("cwd") or os.getcwd()
+            cwd = conv.get("cwd") or str(Path.home())
 
             telegram_conversations[chat_id] = conversation_id
             self.logger.info(
@@ -373,7 +373,7 @@ class AnyaDaemon:
 
             # Resolve cwd from the stored conversation (supports /continue switching)
             conv_record = db.get_conversation(conversation_id)
-            conv_cwd = (conv_record.get("cwd") if conv_record else None) or os.getcwd()
+            conv_cwd = (conv_record.get("cwd") if conv_record else None) or str(Path.home())
 
             timestamp_ms = int(time.time() * 1000)
             request_id = f"tg-assistant-{chat_id}-{timestamp_ms}"
