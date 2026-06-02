@@ -143,7 +143,28 @@ local function highlight_refs()
     -- Skip # patterns to avoid double-highlighting
     pos = 1
     while true do
-      local start_col, end_col = line:find("@[A-Za-z0-9_.~/-]+", pos)
+      -- Use a custom scanner to handle \-escaped spaces in file paths
+      local start_col = line:find("@", pos)
+      if not start_col then break end
+      local end_col = start_col
+      local in_escape = false
+      for j = start_col + 1, #line do
+        local c = line:sub(j, j)
+        if in_escape then
+          -- Any character after backslash is part of the path
+          end_col = j
+          in_escape = false
+        elseif c == "\\" then
+          -- Backslash starts an escape sequence
+          end_col = j
+          in_escape = true
+        elseif c:match("[A-Za-z0-9_./~ -]") then
+          -- Regular path characters (including space when not escaped, but we allow it)
+          end_col = j
+        else
+          break
+        end
+      end
       if not start_col then
         break
       end

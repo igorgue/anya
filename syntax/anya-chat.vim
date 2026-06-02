@@ -6,7 +6,7 @@ if exists("b:current_syntax")
 endif
 
 " Highlight file references like @filename or @path/to/file
-syntax match AnyaFileRef "@[a-zA-Z0-9_.~/-]\+"
+syntax match AnyaFileRef "@[a-zA-Z0-9_.~/\-\\ ]\+"
 highlight link AnyaFileRef Constant
 
 " Highlight conversation ID references like #abc123 (no space after #)

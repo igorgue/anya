@@ -11,7 +11,11 @@ local function get_at_symbol_query(line, cursor_col)
       at_pos = i
       break
     elseif char == " " then
-      break
+      -- Allow escaped spaces (preceded by backslash) to be part of the path
+      -- If space is NOT preceded by backslash, it breaks the @ context
+      if not (i > 1 and line:sub(i - 1, i - 1) == "\\") then
+        break
+      end
     end
   end
 
@@ -309,7 +313,7 @@ function files.new(_opts)
     end,
 
     get_trigger_characters = function()
-      return { "@", ".", "/", "#", " ", "~" }
+      return { "@", ".", "/", "#", "\\", "~" }
     end,
 
     get_completions = function(_self, ctx, callback)
@@ -421,10 +425,13 @@ function files.new(_opts)
         end
 
         if completion_path then
-          local matches, score = fuzzy_match(completion_path, query or "")
+          -- Strip escape characters from query for matching
+          local clean_query = (query or ""):gsub("\\ ", " "):gsub("\\", "")
+          local matches, score = fuzzy_match(completion_path, clean_query)
           if matches then
             table.insert(scored_items, { path = completion_path, score = score })
           end
+
         end
       end
 
