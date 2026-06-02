@@ -41,7 +41,7 @@ def _build_do_instructions(cwd: str | None = None) -> str:
     return instructions
 
 
-async def Agent(
+async def AnyaAgent(
     thinking_budget=None,
     nvim=None,
     settings: "AgentSettings | None" = None,
@@ -199,7 +199,7 @@ async def DoAgent(
 
 
 __all__ = [
-    "Agent",
+    "AnyaAgent",
     "DoAgent",
     "MAIN_AGENT_NAME",
     "DO_AGENT_NAME",

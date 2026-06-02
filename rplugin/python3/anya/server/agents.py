@@ -14,7 +14,7 @@ import anyio
 import zmq.asyncio
 from agents import Agent
 
-from ..agents import Agent as AnyaAgent, DoAgent
+from ..agents import AnyaAgent, DoAgent
 from ..skills import discover_skills, skills_fingerprint
 from ..protocol import AgentSettings
 

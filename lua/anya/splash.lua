@@ -228,7 +228,7 @@ local function render_grid()
   
   -- Add empty line and footer
   table.insert(lines, "")
-  local footer_text = "Type your request..."
+  local footer_text = "Ask anything... ask about anything"
   local content_width = M.state.active_grid_size * 2
   local footer_col = M.state.horizontal_padding + math.max(0, math.floor((content_width - #footer_text) / 2))
   local footer = string.rep(" ", footer_col) .. footer_text
@@ -348,7 +348,7 @@ local function calculate_layout(chat_win)
   end
 
   local content_width = grid_size * 2 + (M.horizontal_padding * 2)
-  local splash_width = math.min(M.float_width, win_width, math.max(content_width, #"Type your request..." + (M.horizontal_padding * 2)))
+  local splash_width = math.min(M.float_width, win_width, math.max(content_width, #"Ask anything... ask about anything" + (M.horizontal_padding * 2)))
   local splash_height = math.min(win_height, grid_size + reserved_height)
 
   return {
