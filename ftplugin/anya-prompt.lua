@@ -410,7 +410,7 @@ end, { buffer = true, desc = "Update remote plugins" })
 
 vim.keymap.set("n", "<localleader>n", function()
   Snacks.notifier.show_history()
-end, { buffer = true, desc = "Show latest task list" })
+end, { buffer = true, desc = "Show latest notifications" })
 
 local function should_yield_tab_to_insert_plugins()
   if vim.fn.pumvisible() ~= 0 or vim.fn.wildmenumode() == 1 then
