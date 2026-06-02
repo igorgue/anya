@@ -245,7 +245,7 @@ function M.get_winbar()
     token_click = "%@v:lua.anya_handle_token_click@" .. token_bar .. "%T"
   end
 
-  return string.format("%s%%=%s", version_text, token_click)
+  return string.format("%%#Type#Anya%%*%s%%=%s", version_text:gsub("^Anya", ""), token_click)
 end
 
 return M

@@ -10,6 +10,7 @@ M.min_grid_size = 4  -- smallest responsive grid before hiding the splash
 M.float_width = 60  -- preferred float width; shrinks in narrow panes
 M.horizontal_padding = 2  -- spaces on each side of the grid/footer
 M.footer_padding_bottom = 1  -- keep the footer visually clear in small panes
+M.use_shape_chars = true  -- render living cells with varied 2-column glyph pairs
 
 -- State
 M.state = {
@@ -17,6 +18,7 @@ M.state = {
   buf = nil,
   timer = nil,
   grid = {},
+  age_grid = {},
   active_grid_size = M.grid_size,
   horizontal_padding = M.horizontal_padding,
   orbit_angle = 0,
@@ -45,6 +47,16 @@ local HL_SOURCE_GROUPS = {
   "Statement",
   "PreProc",
   "Type",
+}
+
+-- Every glyph must occupy exactly 2 display columns. Single-width symbols get a trailing space;
+-- double-width symbols stand alone. This keeps each Life cell aligned in the grid.
+local CELL_CHARS = {
+  "■ ", "□ ", "▪ ", "▫ ", "◆ ", "◇ ", "● ", "○ ",
+  "◼ ", "◻ ", "◾", "◽", "▣ ", "▢ ", "▰ ", "▱ ",
+  "▴ ", "▾ ", "◂ ", "▸ ", "▲ ", "▼ ", "◀ ", "▶ ",
+  "✦ ", "✧ ", "✺ ", "✹ ", "✶ ", "✷ ", "✸ ", "✳ ",
+  "✴ ", "✵ ", "✚ ", "✖ ", "✕ ", "✱ ", "✲ ", "✻ ",
 }
 
 --- Initialize highlight groups
@@ -82,10 +94,13 @@ local function init_grid()
   -- Use current time with microseconds for better randomness
   math.randomseed(math.floor(vim.loop.hrtime() / 1000))
   M.state.grid = {}
+  M.state.age_grid = {}
   for i = 1, M.state.active_grid_size do
     M.state.grid[i] = {}
+    M.state.age_grid[i] = {}
     for j = 1, M.state.active_grid_size do
       M.state.grid[i][j] = math.random() > 0.7 and 1 or 0
+      M.state.age_grid[i][j] = M.state.grid[i][j] == 1 and math.random(1, #CELL_CHARS) or 0
     end
   end
 end
@@ -113,20 +128,25 @@ end
 --- Compute next generation using Conway's Game of Life rules
 local function next_generation()
   local new_grid = {}
+  local new_age_grid = {}
   for i = 1, M.state.active_grid_size do
     new_grid[i] = {}
+    new_age_grid[i] = {}
     for j = 1, M.state.active_grid_size do
       local neighbors = count_neighbors(i, j)
       if M.state.grid[i][j] == 1 then
         -- Cell is alive: survives with 2 or 3 neighbors
         new_grid[i][j] = (neighbors == 2 or neighbors == 3) and 1 or 0
+        new_age_grid[i][j] = new_grid[i][j] == 1 and ((M.state.age_grid[i] and M.state.age_grid[i][j] or 0) + 1) or 0
       else
         -- Cell is dead: born with exactly 3 neighbors
         new_grid[i][j] = neighbors == 3 and 1 or 0
+        new_age_grid[i][j] = new_grid[i][j] == 1 and 1 or 0
       end
     end
   end
   M.state.grid = new_grid
+  M.state.age_grid = new_age_grid
 end
 
 --- Calculate distance between two points
@@ -134,9 +154,18 @@ local function distance(r1, c1, r2, c2)
   return math.sqrt((r1 - r2)^2 + (c2 - c1)^2)
 end
 
---- Get the cell character (always ■ with trailing space for 2-char width)
-local function cell_char()
-  return "■ "
+local function cell_char(row, col)
+  if not M.use_shape_chars then
+    return "■ "
+  end
+
+  local age = 1
+  if M.state.age_grid[row] and M.state.age_grid[row][col] then
+    age = M.state.age_grid[row][col]
+  end
+
+  local index = ((row * 7 + col * 11 + age * 3 + math.floor(M.state.orbit_angle * 2)) % #CELL_CHARS) + 1
+  return CELL_CHARS[index]
 end
 
 --- Calculate orbit light position (counter-clockwise circle)
@@ -164,7 +193,7 @@ local function render_grid()
     local line = ""
     for j = 1, M.state.active_grid_size do
       if M.state.grid[i][j] == 1 then
-        line = line .. cell_char()
+        line = line .. cell_char(i, j)
         
         -- Calculate distances for color intensity
         local dist_orbit = distance(i, j, orbit_row, orbit_col)
