@@ -205,6 +205,7 @@ class AnthropicModel:
                         signature = getattr(block, "signature", None)
                         reasoning_item = ResponseReasoningItem(
                             id=response_id,
+                            summary=[],
                             content=[ReasoningContent(text=thinking_text, type="reasoning_text")],
                             type="reasoning",
                         )
@@ -748,6 +749,7 @@ class AnthropicModel:
                 signature = getattr(block, "signature", None)
                 reasoning_item = ResponseReasoningItem(
                     id=response.id,
+                    summary=[],
                     content=[ReasoningContent(text=thinking_text, type="reasoning_text")],
                     type="reasoning",
                 )
