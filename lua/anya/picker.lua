@@ -346,4 +346,60 @@ function M.open()
   })
 end
 
+
+--- Restore the last (most recently updated) conversation session
+--- @return boolean True if a conversation was loaded
+function M.restore_last_session()
+  -- Hide splash screen if showing
+  require("anya.splash").hide()
+
+  local chat_buf = get_chat_buffer()
+  if not chat_buf then
+    vim.notify("Anya: Chat buffer not found. Run :Anya to open the interface.", vim.log.levels.ERROR)
+    return false
+  end
+
+  -- Check if there's already a conversation loaded
+  local ok, current_conv_id = pcall(vim.api.nvim_buf_get_var, chat_buf, "anya_conversation_id")
+  if ok and current_conv_id and current_conv_id ~= "" then
+    vim.notify("Anya: A conversation is already loaded.", vim.log.levels.INFO)
+    return false
+  end
+
+  local conv_info = vim.fn.AnyaGetLatestConversationId()
+  if not conv_info or conv_info == vim.NIL then
+    vim.notify("Anya: No previous conversations found.", vim.log.levels.INFO)
+    return false
+  end
+
+  local conv_id = conv_info.id
+  if not conv_id then
+    vim.notify("Anya: No previous conversations found.", vim.log.levels.INFO)
+    return false
+  end
+
+  local title = as_string(conv_info.title)
+  local conv_cwd = as_string(conv_info.cwd, "")
+  local current_cwd = vim.loop.cwd() or ""
+
+  -- If cwd differs, show the confirmation dialog
+  if conv_cwd ~= "" and conv_cwd ~= current_cwd then
+    local item = {
+      id = conv_id,
+      title = title,
+      cwd = conv_cwd,
+    }
+    show_cwd_confirmation(item, function(action)
+      if action == "switch" then
+        load_conversation(conv_id, conv_cwd, title)
+      elseif action == "load" then
+        load_conversation(conv_id, nil, title)
+      end
+    end)
+    return true
+  end
+
+  return load_conversation(conv_id, nil, title)
+end
+
 return M

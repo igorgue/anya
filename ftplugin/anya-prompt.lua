@@ -399,6 +399,11 @@ vim.keymap.set("n", "<localleader>p", function()
   require("anya.system_prompt").show()
 end, { buffer = true, desc = "Open system prompt" })
 
+-- Restore last session
+vim.keymap.set("n", "<localleader>l", function()
+  require("anya.picker").restore_last_session()
+end, { buffer = true, desc = "Restore last session" })
+
 vim.keymap.set("n", "<localleader>u", function()
   vim.cmd("UpdateRemotePlugins")
 end, { buffer = true, desc = "Update remote plugins" })

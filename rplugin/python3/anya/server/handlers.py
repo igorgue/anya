@@ -236,6 +236,40 @@ def _is_retryable_error(exception: Exception) -> bool:
     return False
 
 
+
+def _is_tool_call_order_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return (
+        "tool_calls" in text
+        and ("tool_call_id" in text or "tool messages" in text)
+        and ("must be followed" in text or "insufficient tool messages" in text)
+    )
+
+
+def _drop_tool_tail(items: list[dict]) -> list[dict]:
+    """Drop an incomplete tool-call continuation from SDK input items.
+
+    Some OpenAI-compatible Chat Completions providers, including DeepSeek, reject
+    any assistant tool_calls message unless it is immediately followed by every
+    matching tool message. If a provider raises that error after a streamed SDK
+    run has already produced tool-call items, retrying with the same SDK result
+    input can replay an incomplete assistant tool-call tail. Keep the stable
+    caller history and remove only the trailing generated tool-call block.
+    """
+    last_tool_call_idx: int | None = None
+    for idx, item in enumerate(items):
+        if isinstance(item, dict) and item.get("type") in {
+            "function_call",
+            "function_tool_call",
+            "tool_call",
+        }:
+            last_tool_call_idx = idx
+
+    if last_tool_call_idx is None:
+        return items
+
+    return items[:last_tool_call_idx]
+
 def _should_retry(exception: Exception) -> bool:
     """Determine if we should retry based on the exception type."""
     return _is_retryable_error(exception)
@@ -1464,6 +1498,32 @@ class RequestHandler:
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
+                    if _is_tool_call_order_error(e) and attempt <= max_retries:
+                        try:
+                            retry_history = result.to_input_list(mode="normalized")
+                        except Exception:
+                            retry_history = llm_history
+                        pruned_history = _drop_tool_tail(list(retry_history))
+                        if len(pruned_history) < len(retry_history):
+                            llm_history = pruned_history
+                            self.logger.warning(
+                                "Provider rejected incomplete tool-call history on attempt %s/%s for session %s; pruning trailing tool-call block and retrying: %s",
+                                attempt,
+                                max_retries + 1,
+                                session_id,
+                                e,
+                            )
+                            await self._send_stream_chunk(
+                                session_id,
+                                request_id,
+                                StreamEventType.ERROR,
+                                {
+                                    "error": f"Provider rejected incomplete tool-call history, retrying ({attempt}/{max_retries})...",
+                                },
+                            )
+                            await asyncio.sleep(_retry_delay_seconds(attempt))
+                            continue
+
                     if _should_retry(e) and attempt <= max_retries:
                         delay = _retry_delay_seconds(attempt)
                         self.logger.warning(

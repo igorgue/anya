@@ -125,6 +125,13 @@ def _close_anya_windows(nvim: Nvim):
         nvim
     )
 
+    # Quick exit: if no Anya windows exist at all, nothing to do
+    if not any([found_chat_win, found_prompt_win, found_layout_win, stray_wins]):
+        _anya_state["chat_win"] = None
+        _anya_state["prompt_win"] = None
+        _anya_state["layout_win"] = None
+        return
+
     # Use found windows or fall back to state
     chat_win = found_chat_win or _anya_state.get("chat_win")
     prompt_win = found_prompt_win or _anya_state.get("prompt_win")
@@ -202,7 +209,7 @@ def _close_anya_windows(nvim: Nvim):
         except Exception:
             pass
 
-    # Clear the WinClosed autocmd group to prevent recursive close calls
+    # Clear the AnyaWindowClose autocmd group to prevent recursive close calls
     try:
         nvim.api.create_augroup("AnyaWindowClose", {"clear": True})
     except Exception:
@@ -640,29 +647,36 @@ def new(
         },
     )
 
-    # Set up autocmd to close all Anya windows when chat or prompt window is closed
-    # This ensures consistent behavior when user closes either window
-    chat_win_id = _win_id(chat_win)
-    prompt_win_id = _win_id(prompt_win)
+    # Set up autocmd to close all Anya windows when either the chat or prompt
+    # buffer is hidden or wiped. Uses buffer numbers (stable for the session)
+    # instead of window IDs (which can become stale). This covers:
+    #   - :q / :close on either float window (triggers bufhidden=hide -> BufHidden)
+    #   - :bd / :bdelete / :bwipeout on either buffer (triggers BufWipeout)
+    chat_buf_id = _buf_id(chat_buf)
+    prompt_buf_id = _buf_id(prompt_buf)
     nvim.exec_lua(
         f"""
     local group = vim.api.nvim_create_augroup("AnyaWindowClose", {{ clear = true }})
-    vim.api.nvim_create_autocmd("WinClosed", {{
+    local function close_all_anya_windows()
+        -- Schedule to run after the event completes, to avoid race conditions
+        vim.schedule(function()
+            -- Use :Anya close which dynamically finds and closes all windows
+            vim.cmd("silent! Anya close")
+        end)
+    end
+    -- BufHidden fires when bufhidden=hide kicks in (last window closed)
+    vim.api.nvim_create_autocmd("BufHidden", {{
         group = group,
-        pattern = "{chat_win_id},{prompt_win_id}",
-        callback = function(ev)
-            -- Schedule to run after the window is actually closed
-            vim.schedule(function()
-                -- Check if the other Anya windows are still valid
-                local chat_valid = vim.api.nvim_win_is_valid({chat_win_id})
-                local prompt_valid = vim.api.nvim_win_is_valid({prompt_win_id})
-                -- If one is closed but not through :Anya close, close the other
-                if not chat_valid or not prompt_valid then
-                    vim.cmd("silent! Anya close")
-                end
-            end)
-        end,
-        desc = "Close all Anya windows when chat or prompt is closed",
+        pattern = "{chat_buf_id},{prompt_buf_id}",
+        callback = close_all_anya_windows,
+        desc = "Close all Anya windows when chat or prompt is hidden",
+    }})
+    -- BufWipeout fires for explicit :bd / :bwipeout
+    vim.api.nvim_create_autocmd("BufWipeout", {{
+        group = group,
+        pattern = "{chat_buf_id},{prompt_buf_id}",
+        callback = close_all_anya_windows,
+        desc = "Close all Anya windows when chat or prompt is wiped",
     }})
     """,
         [],

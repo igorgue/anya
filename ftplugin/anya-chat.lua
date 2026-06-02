@@ -316,6 +316,11 @@ vim.keymap.set("n", "<localleader>h", function()
   vim.cmd("Anya history")
 end, { buffer = true, desc = "Open history" })
 
+-- Restore last session
+vim.keymap.set("n", "<localleader>l", function()
+  require("anya.picker").restore_last_session()
+end, { buffer = true, desc = "Restore last session" })
+
 -- Daemon management keymaps
 vim.keymap.set("n", "<localleader>s", function()
   vim.cmd("Anya daemon start")

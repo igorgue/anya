@@ -53,6 +53,7 @@ local function recover_python3_host()
     "AnyaApplyEditContent",
     "AnyaCountConversations",
     "AnyaDeleteConversation",
+    "AnyaGetLatestConversationId",
     "AnyaFindEditAtLine",
     "AnyaGetToolOutput",
     "AnyaListConversations",
@@ -209,6 +210,12 @@ _G.anya_force_chat_highlight_refresh = M._force_chat_highlight_refresh
 local markers = require("anya.markers")
 local text = require("anya.text")
 
+local splash = require("anya.splash")
+
+-- Setup splash screen autocmd
+splash.setup_autocmd()
+splash.show_if_empty()
+
 -- Buffer-local variable names for tracking conversation state
 local CONVERSATION_ID_VAR = "anya_conversation_id"
 
@@ -337,6 +344,9 @@ end
 --- @return boolean True if the message was sent successfully
 function M.send_message()
   local chat_buf = get_chat_buffer()
+  -- Hide splash screen if showing
+  splash.hide()
+
   local prompt_buf = get_prompt_buffer()
 
   if not chat_buf then

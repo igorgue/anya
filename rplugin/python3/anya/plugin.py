@@ -413,6 +413,9 @@ class AnyaPlugin:
             self.nvim.async_call(self._do_command, instruction)
         elif subcommand == "tab":
             self.nvim.async_call(self._open_interface, "tab")
+        elif subcommand == "splash":
+            # Toggle splash screen
+            self.nvim.command("lua vim.schedule(function() require('anya.splash').toggle() end)")
         elif subcommand == "pane":
             # Check for selected code
             selection = None
@@ -574,6 +577,7 @@ class AnyaPlugin:
         self.chat_buf, self.prompt_buf = buffers.new(
             self.nvim, layout, direction, force_open
         )
+        self.nvim.command("lua vim.schedule(function() require('anya.splash').show_if_empty() end)")
 
     def _handle_copilot_command(self, args):
         """Handle :Anya copilot subcommands."""
@@ -3436,6 +3440,7 @@ Usage:
     :Anya do <instruction>   Apply an instruction to the current buffer (headless)
     :Anya history            Open the conversation history picker
     :Anya cancel             Cancel the current agent response (Ctrl+C)
+    :Anya splash              Toggle the splash screen (Game of Life animation)
     :Anya daemon [status|start|stop|restart]  Manage the daemon process
 """
 
@@ -3490,6 +3495,19 @@ Usage:
         else:
             offset = int(offset)
         return db.list_conversations(limit, offset)
+
+    @pynvim.function("AnyaGetLatestConversationId", sync=True)
+    def get_latest_conversation_id(self, _args):
+        """Return the most recently updated conversation ID, or None."""
+        self._ensure_db()
+        conv_id = db.get_current_conversation_id()
+        if not conv_id:
+            return None
+        # Return basic info so Lua can decide whether to switch cwd
+        convs = db.list_conversations(1, 0)
+        if convs:
+            return convs[0]
+        return None
 
     @pynvim.function("AnyaLoadConversation", sync=True)
     def load_conversation(self, args):
