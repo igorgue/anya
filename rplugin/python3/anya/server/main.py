@@ -29,6 +29,7 @@ from ..protocol import (
 from .agents import AgentManager
 from .handlers import RequestHandler
 from .telegram_client import TelegramClient
+from .telegram_pair_server import TelegramPairServer
 
 # Configure logging
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -207,16 +208,11 @@ class AnyaDaemon:
         self.logger.info(f"Starting Telegram client, connecting to {router_url}")
 
         telegram_conversations: dict[int, str] = {}
+        # Stores the last /conversations search results per chat_id for /continue
+        telegram_search_cache: dict[int, list[dict]] = {}
 
-        def current_conversation_id(chat_id: int) -> str:
-            conversation_id = telegram_conversations.get(chat_id)
-            if conversation_id is None:
-                conversation_id = f"telegram:{chat_id}"
-                telegram_conversations[chat_id] = conversation_id
-            return conversation_id
-
-        async def on_new_conversation(chat_id: int):
-            """Start a fresh persisted Telegram conversation for this chat."""
+        async def create_telegram_conversation(chat_id: int) -> str:
+            """Create and select a fresh persisted Telegram conversation for this chat."""
             import time
             from .. import db
 
@@ -234,6 +230,120 @@ class AnyaDaemon:
                 chat_id,
                 conversation_id,
             )
+            return conversation_id
+
+        async def current_conversation_id(chat_id: int) -> str:
+            conversation_id = telegram_conversations.get(chat_id)
+            if conversation_id is None:
+                conversation_id = await create_telegram_conversation(chat_id)
+            return conversation_id
+
+        def _format_conversations_list(results: list[dict]) -> str:
+            """Format a list of conversations for display in Telegram."""
+            import time as _time
+
+            def _rel_time(updated_at: str) -> str:
+                try:
+                    from datetime import datetime, timezone
+                    # Handle ISO 8601 formats with or without fractional seconds
+                    # e.g. 2026-06-02T07:07:18.097Z or 2026-06-02T07:07:18Z
+                    ts = updated_at.replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(ts)
+                    diff = int(_time.time()) - int(dt.timestamp())
+                    if diff < 60:
+                        return "just now"
+                    if diff < 3600:
+                        return f"{diff // 60}m ago"
+                    if diff < 86400:
+                        return f"{diff // 3600}h ago"
+                    return f"{diff // 86400}d ago"
+                except Exception:
+                    return updated_at or ""
+
+            lines = []
+            for i, conv in enumerate(results, 1):
+                title = conv.get("title") or "Untitled"
+                cwd = conv.get("cwd") or ""
+                updated = _rel_time(conv.get("updated_at") or "")
+                cwd_short = cwd.replace(os.path.expanduser("~"), "~") if cwd else ""
+                lines.append(f"{i}. {title}")
+                if cwd_short:
+                    lines.append(f"   📁 {cwd_short}  •  {updated}")
+                else:
+                    lines.append(f"   {updated}")
+            return "\n".join(lines)
+
+        async def handle_conversations_command(chat_id: int, query: str) -> bool:
+            """Handle /conversations [query]. Returns True if handled."""
+            from .. import db
+
+            query = query.strip()
+            if query:
+                results = db.search_conversation_mentions(query, limit=10)
+            else:
+                results = db.list_conversations(limit=10)
+
+            if not results:
+                msg = "No conversations found."
+                if query:
+                    msg = f"No conversations found matching \"{query}\"."
+                await self.telegram_client.send_response(chat_id, msg)
+                return True
+
+            telegram_search_cache[chat_id] = results
+            header = "Recent conversations:" if not query else f"Conversations matching \"{query}\"\:"
+            body = _format_conversations_list(results)
+            reply = f"{header}\n\n{body}\n\nUse /continue N to resume one."
+            await self.telegram_client.send_response(chat_id, reply)
+            return True
+
+        async def handle_continue_command(chat_id: int, arg: str) -> bool:
+            """Handle /continue N. Returns True if handled."""
+            from .. import db
+
+            arg = arg.strip()
+            if not arg.isdigit():
+                await self.telegram_client.send_response(
+                    chat_id, "Usage: /continue N  (use /conversations to list them)"
+                )
+                return True
+
+            n = int(arg)
+            cache = telegram_search_cache.get(chat_id)
+            if not cache:
+                await self.telegram_client.send_response(
+                    chat_id,
+                    "No recent search results. Run /conversations first to list conversations.",
+                )
+                return True
+
+            if n < 1 or n > len(cache):
+                await self.telegram_client.send_response(
+                    chat_id,
+                    f"Please enter a number between 1 and {len(cache)}.",
+                )
+                return True
+
+            conv = cache[n - 1]
+            conversation_id = conv["id"]
+            title = conv.get("title") or "Untitled"
+            cwd = conv.get("cwd") or os.getcwd()
+
+            telegram_conversations[chat_id] = conversation_id
+            self.logger.info(
+                "Chat %s continuing conversation %s (%s) with cwd %s",
+                chat_id, conversation_id, title, cwd,
+            )
+
+            await self.telegram_client.send_response(
+                chat_id,
+                f"Continuing conversation: {title}\n📁 {cwd.replace(os.path.expanduser('~'), '~')}",
+            )
+            return True
+
+        async def on_new_conversation(chat_id: int):
+            """Start a fresh persisted Telegram conversation for this chat."""
+            await create_telegram_conversation(chat_id)
 
         async def on_message(chat_id: int, text: str):
             """Handle an incoming Telegram message as its own persisted conversation."""
@@ -242,28 +352,55 @@ class AnyaDaemon:
 
             import time
             from .. import db
-            from ..protocol import Request, RequestType
+            from ..protocol import AgentSettings, Request, RequestType
 
-            conversation_id = current_conversation_id(chat_id)
+            stripped = text.strip()
+
+            # Handle /conversations [query]
+            if stripped.startswith("/conversations"):
+                rest = stripped[len("/conversations"):].strip()
+                await handle_conversations_command(chat_id, rest)
+                return
+
+            # Handle /continue N
+            if stripped.startswith("/continue"):
+                rest = stripped[len("/continue"):].strip()
+                await handle_continue_command(chat_id, rest)
+                return
+
+            conversation_id = await current_conversation_id(chat_id)
             session_id = conversation_id
+
+            # Resolve cwd from the stored conversation (supports /continue switching)
+            conv_record = db.get_conversation(conversation_id)
+            conv_cwd = (conv_record.get("cwd") if conv_record else None) or os.getcwd()
+
             timestamp_ms = int(time.time() * 1000)
             request_id = f"tg-assistant-{chat_id}-{timestamp_ms}"
             user_message_id = f"tg-user-{chat_id}-{timestamp_ms}"
 
+            telegram_agent_settings = AgentSettings(
+                model=os.environ.get("ANYA_MODEL", "gpt-4.1"),
+                api_key=os.environ.get("ANYA_API_KEY") or os.environ.get("OPENAI_API_KEY"),
+                api_base=os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE"),
+                api_type=os.environ.get("ANYA_API_TYPE", "responses"),
+                thinking_budget=os.environ.get("ANYA_THINKING_BUDGET"),
+                disable_mcp=os.environ.get("ANYA_DISABLE_MCP", "0") == "1",
+            )
             nvim_ctx = {
                 "session_id": session_id,
-                "cwd": os.getcwd(),
+                "cwd": conv_cwd,
                 "current_buffer": "",
                 "current_buffer_content": "",
                 "open_buffers": [],
                 "allowed_commands": [],
-                "agent_settings": {},
+                "agent_settings": telegram_agent_settings.to_dict(),
                 "request_kind": "telegram",
             }
 
             created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             if not db.get_conversation(conversation_id):
-                db.save_conversation(conversation_id, created_at, cwd=os.getcwd())
+                db.save_conversation(conversation_id, created_at, cwd=conv_cwd)
                 try:
                     db.update_conversation_title(conversation_id, f"Telegram {chat_id}")
                 except Exception:
@@ -320,12 +457,21 @@ class AnyaDaemon:
             on_new_conversation=on_new_conversation,
         )
         await client.start()
+
+        self.telegram_pair_server = TelegramPairServer(client)
+        await self.telegram_pair_server.start()
+
         return client
 
     async def stop(self):
         """Stop the daemon server."""
         self.logger.info("Stopping Anya daemon...")
         self.running = False
+
+        # Stop local Telegram pairing page
+        if self.telegram_pair_server:
+            await self.telegram_pair_server.stop()
+            self.telegram_pair_server = None
 
         # Stop Telegram client
         if self.telegram_client:

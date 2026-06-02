@@ -40,6 +40,8 @@ async def lifespan(app: FastAPI):
     app.state.ws_manager = WSManager(app.state.db)
 
     bot_task = None
+    bot_username = os.environ.get("TELEGRAM_BOT_USERNAME", "anya_ai_answers_bot").lstrip("@")
+    app.state.bot_username = bot_username
     if bot_token:
         app.state.bot = TelegramBot(
             token=bot_token,
@@ -159,9 +161,13 @@ async def create_pairing(request: Request):
         app.state.db.create_pairing(chat_id, client_id)
         return {"code": None, "status": "paired", "chat_id": chat_id}
     else:
-        # Generate a pairing code for the user to enter in Telegram
+        # Generate a pairing code for the user to enter in Telegram, or open via QR/deep link.
         code = app.state.pairing_store.create(client_id, chat_id=0)
-        return {"code": code, "status": "waiting"}
+        payload = {"code": code, "status": "waiting", "expires_in": app.state.pairing_store.ttl_seconds}
+        bot_username = getattr(app.state, "bot_username", "")
+        if bot_username:
+            payload["telegram_url"] = f"https://t.me/{bot_username}?start=pair_{code}"
+        return payload
 
 
 @app.post("/respond")

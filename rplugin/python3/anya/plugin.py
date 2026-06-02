@@ -573,19 +573,23 @@ class AnyaPlugin:
             self.nvim.out_write("Usage: :Anya telegram pair\n")
             return
 
-        def show_info(message: str):
-            code_line = next(
-                (line for line in message.splitlines() if line.startswith("Send this")),
-                "",
-            )
-            code = code_line.rsplit(" ", 1)[-1] if code_line else ""
+        def show_info(message: str, code: str = "", url: str = ""):
+            if not code:
+                code_line = next(
+                    (line for line in message.splitlines() if line.startswith("Send this")),
+                    "",
+                )
+                code = code_line.rsplit(" ", 1)[-1] if code_line else ""
             try:
                 self.nvim.vars["anya_telegram_pairing_message"] = message
                 self.nvim.vars["anya_telegram_pairing_code"] = code
-                self.nvim.exec_lua("require('anya.telegram').show_pairing(...)", message, code)
+                self.nvim.vars["anya_telegram_pairing_url"] = url
+                self.nvim.exec_lua("require('anya.telegram').show_pairing(...)", message, code, url)
             except Exception:
                 for line in message.splitlines():
                     self.nvim.command(f"echom {json.dumps(line)}")
+                if url:
+                    self.nvim.command(f"echom {json.dumps('Telegram URL: ' + url)}")
                 self.nvim.out_write(message + "\n")
 
         def show_error(message: str):
@@ -616,12 +620,14 @@ class AnyaPlugin:
                     return
 
                 payload = response.payload
+                telegram_url = ""
                 if isinstance(payload, str):
                     code = payload
                     expires_in = 300
                 elif isinstance(payload, dict):
                     code = payload.get("code") or payload.get("pairing_code")
                     expires_in = payload.get("expires_in", 300)
+                    telegram_url = payload.get("telegram_url") or payload.get("url") or ""
                 else:
                     code = None
                     expires_in = 300
@@ -633,12 +639,22 @@ class AnyaPlugin:
                     )
                     return
 
-                message = (
-                    f"Anya Telegram pairing code: {code}\n"
-                    f"Send this to your Telegram bot: /connect {code}\n"
-                    f"Expires in {expires_in} seconds."
-                )
-                self.nvim.async_call(show_info, message)
+                lines = [
+                    "# Anya Telegram pairing",
+                    "",
+                    f"Pairing code: `{code}`",
+                    "",
+                    f"Send this to your Telegram bot: `/connect {code}`",
+                    "",
+                ]
+                if telegram_url:
+                    lines.extend([
+                        "Or scan the QR code below to open Telegram directly.",
+                        "",
+                    ])
+                lines.append(f"Expires in {expires_in} seconds.")
+                message = "\n".join(lines)
+                self.nvim.async_call(show_info, message, code, telegram_url)
             except Exception as e:
                 self.nvim.async_call(
                     show_error,
@@ -3693,6 +3709,7 @@ Usage:
             "cancel",
             "system-prompt",
             "copilot",
+            "telegram",
         ]
         import re
 
@@ -3706,11 +3723,12 @@ Usage:
             return [s for s in subcommands if s.startswith(prefix)]
 
         first = parts[0]
-        if first in ("daemon", "pane", "copilot"):
+        if first in ("daemon", "pane", "copilot", "telegram"):
             opts = {
                 "daemon": ["status", "start", "stop", "restart"],
                 "pane": ["right", "left"],
                 "copilot": ["login", "logout", "status", "models"],
+                "telegram": ["pair"],
             }[first]
             if len(parts) == 2 and arglead:
                 return [o for o in opts if o.startswith(arglead)]

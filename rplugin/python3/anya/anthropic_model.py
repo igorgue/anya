@@ -113,6 +113,7 @@ class AnthropicModel:
         # Track streaming state
         current_text = ""
         current_tool_calls: dict[int, dict] = {}
+        current_thinking_blocks: set[int] = set()  # Track thinking block indices
         # Map content block index -> output index (text=0, tools=1,2,...)
         text_output_index = 0
         tool_output_indices: dict[int, int] = {}
@@ -186,6 +187,44 @@ class AnthropicModel:
                             sequence_number=next_seq(),
                         )
 
+                    elif block.type == "thinking":
+                        # Thinking/reasoning blocks from DeepSeek/Anthropic.
+                        # Emit as a reasoning item so the SDK can replay it
+                        # on subsequent API calls.
+                        from openai.types.responses import (
+                            ResponseReasoningItem,
+                            ResponseOutputItemAddedEvent as ReasoningItemAdded,
+                            ResponseOutputItemDoneEvent as ReasoningItemDone,
+                        )
+                        from openai.types.responses.response_reasoning_item import (
+                            Content as ReasoningContent,
+                        )
+
+                        current_thinking_blocks.add(idx)
+                        thinking_text = getattr(block, "thinking", "")
+                        signature = getattr(block, "signature", None)
+                        reasoning_item = ResponseReasoningItem(
+                            id=response_id,
+                            content=[ReasoningContent(text=thinking_text, type="reasoning_text")],
+                            type="reasoning",
+                        )
+                        if signature:
+                            reasoning_item.encrypted_content = signature
+
+                        yield ReasoningItemAdded(
+                            item=reasoning_item,
+                            output_index=next_output_index[0],
+                            type="response.output_item.added",
+                            sequence_number=next_seq(),
+                        )
+                        yield ReasoningItemDone(
+                            item=reasoning_item,
+                            output_index=next_output_index[0],
+                            type="response.output_item.done",
+                            sequence_number=next_seq(),
+                        )
+                        next_output_index[0] += 1
+
                     elif block.type == "tool_use":
                         out_idx = next_output_index[0]
                         next_output_index[0] += 1
@@ -253,6 +292,9 @@ class AnthropicModel:
                             type="response.output_item.done",
                             sequence_number=next_seq(),
                         )
+                    elif idx in current_thinking_blocks:
+                        # Thinking block was already emitted as reasoning item
+                        pass
                     else:
                         # Text block done
                         yield ResponseContentPartDoneEvent(
@@ -487,7 +529,50 @@ class AnthropicModel:
                     }
                 )
 
-            # Ignore unknown item types (reasoning, mcp, etc.)
+            elif item_type == "reasoning":
+                # Reasoning/thinking content -> thinking block in assistant message.
+                # DeepSeek and Anthropic models return thinking content that must be
+                # passed back on subsequent API calls.
+                summary = _get("summary", [])
+                item_content = _get("content", [])
+                # Extract thinking text from either summary or content
+                thinking_text = ""
+                if summary:
+                    texts = []
+                    for s in (summary if isinstance(summary, list) else [summary]):
+                        if isinstance(s, dict):
+                            texts.append(s.get("text", ""))
+                        elif hasattr(s, "text"):
+                            texts.append(s.text)
+                    thinking_text = " ".join(texts)
+                elif item_content:
+                    texts = []
+                    for c in (item_content if isinstance(item_content, list) else [item_content]):
+                        if isinstance(c, dict) and c.get("type") == "reasoning_text":
+                            texts.append(c.get("text", ""))
+                        elif hasattr(c, "text"):
+                            texts.append(c.text)
+                    thinking_text = " ".join(texts)
+
+                if thinking_text:
+                    # Get the signature from encrypted_content if present (for Anthropic)
+                    encrypted = _get("encrypted_content", "")
+                    thinking_block = {
+                        "type": "thinking",
+                        "thinking": thinking_text,
+                    }
+                    if encrypted:
+                        thinking_block["signature"] = encrypted
+
+                    raw.append(
+                        {
+                            "role": "assistant",
+                            "content": [thinking_block],
+                        }
+                    )
+                # If no thinking text, skip silently
+
+            # Ignore unknown item types (mcp, etc.)
 
         # Merge consecutive messages with the same role (Anthropic requirement)
         messages: list[dict] = []
@@ -573,6 +658,22 @@ class AnthropicModel:
                 result.append(block if isinstance(block, dict) else block.__dict__)
             elif btype == "tool_result":
                 result.append(block if isinstance(block, dict) else block.__dict__)
+            elif btype == "thinking":
+                # Preserve thinking blocks for round-trip (DeepSeek/Anthropic)
+                signature = (
+                    block.get("signature")
+                    if isinstance(block, dict)
+                    else getattr(block, "signature", None)
+                )
+                thinking_text = (
+                    block.get("thinking")
+                    if isinstance(block, dict)
+                    else getattr(block, "thinking", "")
+                )
+                thinking_block = {"type": "thinking", "thinking": thinking_text or ""}
+                if signature:
+                    thinking_block["signature"] = signature
+                result.append(thinking_block)
             # Skip unknown/unsupported block types (refusal, image, etc.)
         return result
 
@@ -620,17 +721,19 @@ class AnthropicModel:
         return {"type": "auto"}
 
     def _convert_output(self, response: Any) -> list:
-        """Convert Anthropic response content to SDK output items."""
         from openai.types.responses import (
             ResponseOutputMessage,
             ResponseOutputText,
             ResponseFunctionToolCall,
+            ResponseReasoningItem,
+        )
+        from openai.types.responses.response_reasoning_item import (
+            Content as ReasoningContent,
         )
 
         output = []
         text_blocks = []
         tool_blocks = []
-
         for block in response.content:
             if block.type == "text":
                 text_blocks.append(
@@ -638,6 +741,19 @@ class AnthropicModel:
                         text=block.text, type="output_text", annotations=[]
                     )
                 )
+            elif block.type == "thinking":
+                # Emit thinking blocks as reasoning items so the SDK
+                # can replay them on subsequent API calls.
+                thinking_text = getattr(block, "thinking", "")
+                signature = getattr(block, "signature", None)
+                reasoning_item = ResponseReasoningItem(
+                    id=response.id,
+                    content=[ReasoningContent(text=thinking_text, type="reasoning_text")],
+                    type="reasoning",
+                )
+                if signature:
+                    reasoning_item.encrypted_content = signature
+                output.append(reasoning_item)
             elif block.type == "tool_use":
                 import json
 

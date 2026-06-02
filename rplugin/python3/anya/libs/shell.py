@@ -6,6 +6,16 @@ Usage:
     out = shell.run("ls -la")
     out = shell.run("make test", cwd="/path/to/project", timeout=60)
     out = shell.gh("pr list --author @me")
+
+Important — background processes:
+    Do NOT append "&" or use shell backgrounding (nohup, disown, setsid, tmux,
+    screen) in commands passed to run().  These bypass Anya's job-tracking
+    system, making logs, status checks, and stops unreliable.
+
+    For long-running or indefinite processes (servers, watchers, etc.) use the
+    execute tool's background=True argument instead, and keep the command
+    itself foreground-style.  Anya handles all background lifecycle,
+    log capture, and process management automatically.
 """
 
 import os

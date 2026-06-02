@@ -1002,6 +1002,9 @@ class RequestHandler:
         import uuid
 
         async def confirmation_callback(prompt: str, options: list[str]) -> str:
+            # Telegram sessions auto-confirm tool prompts (daemon-side execution)
+            if session_id.startswith("telegram:"):
+                return options[0] if options else "Confirm"
             confirmation_id = str(uuid.uuid4())
             if self.agent_manager.is_session_detached(session_id):
                 return "Cancel"
@@ -1025,6 +1028,35 @@ class RequestHandler:
         async def exec_callback(
             command: str, cwd: str, timeout: int, ui_dir: str | None = None
         ) -> dict:
+            # Telegram sessions execute commands directly on the daemon
+            if session_id.startswith("telegram:"):
+                import asyncio
+                self.logger.info(f"Telegram exec: {command[:120]}...")
+                proc = await asyncio.create_subprocess_shell(
+                    command,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                )
+                try:
+                    effective_timeout = (timeout + 30.0) if timeout is not None else None
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(), timeout=effective_timeout
+                    )
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    stdout, stderr = await proc.communicate()
+                    return {
+                        "stdout": "",
+                        "stderr": stderr.decode(),
+                        "returncode": -1,
+                        "error": "Command timed out",
+                    }
+                return {
+                    "stdout": stdout.decode(),
+                    "stderr": stderr.decode(),
+                    "returncode": proc.returncode,
+                }
             if self.agent_manager.is_session_detached(session_id):
                 return {
                     "stdout": "",
@@ -1032,8 +1064,6 @@ class RequestHandler:
                     "returncode": 1,
                     "error": "Client disconnected; interactive exec is unavailable in background mode.",
                 }
-            if self.agent_manager.is_session_detached(session_id):
-                return "Error: Client disconnected; buffer modification is unavailable in background mode."
             confirmation_id = str(uuid.uuid4())
             await self._send_stream_chunk(
                 session_id,
@@ -1087,6 +1117,9 @@ class RequestHandler:
             mode: str,
             set_modified: bool,
         ) -> str:
+            # Telegram sessions have no Neovim buffers to modify
+            if session_id.startswith("telegram:"):
+                return "Done"
             if self.agent_manager.is_session_detached(session_id):
                 return "Error: Client disconnected; buffer modification is unavailable in background mode."
             confirmation_id = str(uuid.uuid4())

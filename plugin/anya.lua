@@ -22,12 +22,14 @@ local subcommands = {
   "cancel",
   "system-prompt",
   "copilot",
+  "telegram",
 }
 
 local sub_opts = {
   daemon = { "status", "start", "stop", "restart" },
   pane = { "right", "left" },
   copilot = { "login", "logout", "status", "models" },
+  telegram = { "pair" },
 }
 
 local function filter_prefix(items, prefix)

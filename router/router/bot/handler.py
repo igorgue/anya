@@ -24,6 +24,10 @@ class PairingCodeStore:
         self._codes: dict[str, dict] = {}
         self._ttl = ttl_seconds
 
+    @property
+    def ttl_seconds(self) -> int:
+        return self._ttl
+
     def create(self, client_id: str, chat_id: int) -> str:
         """Create a pairing code linking a Telegram chat to a daemon client.
 
@@ -101,8 +105,12 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("disconnect", self._cmd_disconnect))
         self._app.add_handler(CommandHandler("new", self._cmd_new))
         self._app.add_handler(CommandHandler("help", self._cmd_help))
+        # Route unknown commands to the daemon (e.g. /conversations, /continue)
         self._app.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
+            MessageHandler(filters.TEXT & filters.COMMAND, self._handle_unknown_or_daemon_command)
+        )
+        self._app.add_handler(
+            MessageHandler(filters.TEXT, self._handle_message)
         )
 
         self._logger.info("Starting Telegram bot (long-polling)...")
@@ -136,15 +144,22 @@ class TelegramBot:
     # --- Command handlers ---
 
     async def _cmd_start(self, update: Any, context: Any):
-        """Handle /start command."""
+        """Handle /start command, including Telegram deep-link pairing payloads."""
+        args = getattr(context, "args", []) or []
+        if args and args[0].startswith("pair_"):
+            code = args[0][len("pair_"):].upper()
+            await self._connect_with_code(update, code)
+            return
+
         await update.message.reply_text(
             "Welcome to Anya! I bridge Telegram messages to your AI assistant.\n\n"
             "To get started:\n"
             "1. Open Anya in Neovim and run `:Anya telegram pair`\n"
-            "2. Send me the pairing code with `/connect <code>`\n"
+            "2. Scan the QR code or send me `/connect <code>`\n"
             "3. Start chatting!\n\n"
             "Commands:\n"
             "/connect <code> - Link to your Anya daemon\n"
+            "/new - Start a fresh Anya conversation\n"
             "/disconnect - Unlink from your daemon\n"
             "/help - Show this message"
         )
@@ -162,6 +177,11 @@ class TelegramBot:
             return
 
         code = args[0].upper()
+        await self._connect_with_code(update, code)
+
+    async def _connect_with_code(self, update: Any, code: str):
+        """Pair this Telegram chat with a daemon using a pairing code."""
+        chat_id = update.effective_chat.id
         entry = self.pairing_store.consume(code)
 
         if not entry:
@@ -173,24 +193,20 @@ class TelegramBot:
 
         client_id = entry["client_id"]
 
-        # Create the pairing in the database
         self.db.create_pairing(chat_id, client_id)
 
         await update.message.reply_text(
             f"Connected to your Anya daemon! You can now send me messages "
             f"and I'll forward them to your assistant.\n\n"
-            f"Use /disconnect to unlink at any time."
+            f"Use /new to start a fresh conversation or /disconnect to unlink."
         )
 
-        # Notify the daemon about the new pairing
         await self.ws_manager.send_to_client(client_id, {
             "type": "pairing_added",
             "chat_id": chat_id,
         })
 
-        self._logger.info(
-            f"Chat {chat_id} paired to client {client_id[:12]}"
-        )
+        self._logger.info(f"Chat {chat_id} paired to client {client_id[:12]}")
 
     async def _cmd_disconnect(self, update: Any, context: Any):
         """Handle /disconnect command."""
@@ -257,6 +273,35 @@ class TelegramBot:
             "/help - Show this message\n\n"
             "Just send me any message and I'll route it to your AI assistant!"
         )
+
+    async def _handle_unknown_or_daemon_command(self, update: Any, context: Any):
+        """Handle unknown commands by forwarding to the daemon or replying with invalid command."""
+        chat_id = update.effective_chat.id
+        text = update.message.text
+
+        pairing = self.db.get_pairing(chat_id)
+        if not pairing:
+            await update.message.reply_text(
+                "Unknown command. Available commands: /connect, /disconnect, /new, /help"
+            )
+            return
+
+        # Forward to daemon — it might handle /conversations, /continue, etc.
+        client_id = pairing.client_id
+        sent = await self.ws_manager.send_to_client(client_id, {
+            "type": "incoming_message",
+            "chat_id": chat_id,
+            "text": text,
+        })
+
+        if sent:
+            self._logger.info(
+                f"Routed unknown command from chat {chat_id} to client {client_id[:12]}"
+            )
+        else:
+            await update.message.reply_text(
+                "Your daemon appears to be offline. Try again when it reconnects."
+            )
 
     async def _handle_message(self, update: Any, context: Any):
         """Handle a text message from a Telegram user.
