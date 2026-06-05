@@ -14,7 +14,7 @@ local function qr_lines(text)
   end
 
   if vim.fn.executable("qrencode") == 1 then
-    local cmd = "qrencode -t UTF8 -m 1 " .. shell_escape_single(text)
+    local cmd = "qrencode -t UTF8 -m 2 " .. shell_escape_single(text)
     local out = vim.fn.systemlist(cmd)
     if vim.v.shell_error == 0 and out and #out > 0 then
       return out
@@ -28,10 +28,10 @@ try:
     import qrcode
 except Exception:
     sys.exit(2)
-qr = qrcode.QRCode(border=1)
+qr = qrcode.QRCode(border=0)
 qr.add_data(sys.argv[1])
 qr.make(fit=True)
-qr.print_ascii(tty=True, invert=False)
+qr.print_ascii(tty=False, invert=False)
 ]]
     local cmd = "python3 -c " .. shell_escape_single(py) .. " " .. shell_escape_single(text)
     local out = vim.fn.systemlist(cmd)

@@ -447,9 +447,9 @@ function files.new(_opts)
         table.insert(items, {
           label = item_data.path,
           kind = 17, -- File
-          insertText = item_data.path,
+          insertText = item_data.path:match("%s") and item_data.path:gsub(" ", "\\ ") or item_data.path,
           textEdit = {
-            newText = item_data.path,
+            newText = item_data.path:match("%s") and item_data.path:gsub(" ", "\\ ") or item_data.path,
             range = {
               start = {
                 line = ctx.cursor[1] - 1,

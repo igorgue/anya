@@ -158,7 +158,7 @@ local function highlight_refs()
           -- Backslash starts an escape sequence
           end_col = j
           in_escape = true
-        elseif c:match("[A-Za-z0-9_./~ -]") then
+        elseif c:match("[A-Za-z0-9_./~-]") then
           -- Regular path characters (including space when not escaped, but we allow it)
           end_col = j
         else

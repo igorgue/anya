@@ -133,7 +133,7 @@ local function highlight_refs()
         elseif c == "\\" then
           end_col = j
           in_escape = true
-        elseif c:match("[A-Za-z0-9_./~ -]") then
+        elseif c:match("[A-Za-z0-9_./~-]") then
           end_col = j
         else
           break
