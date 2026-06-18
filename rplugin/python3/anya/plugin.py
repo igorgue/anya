@@ -416,7 +416,9 @@ class AnyaPlugin:
             self.nvim.async_call(self._open_interface, "tab")
         elif subcommand == "splash":
             # Toggle splash screen
-            self.nvim.command("lua vim.schedule(function() require('anya.splash').toggle() end)")
+            self.nvim.command(
+                "lua vim.schedule(function() require('anya.splash').toggle() end)"
+            )
         elif subcommand == "pane":
             # Check for selected code
             selection = None
@@ -576,7 +578,11 @@ class AnyaPlugin:
         def show_info(message: str, code: str = "", url: str = ""):
             if not code:
                 code_line = next(
-                    (line for line in message.splitlines() if line.startswith("Send this")),
+                    (
+                        line
+                        for line in message.splitlines()
+                        if line.startswith("Send this")
+                    ),
                     "",
                 )
                 code = code_line.rsplit(" ", 1)[-1] if code_line else ""
@@ -584,7 +590,9 @@ class AnyaPlugin:
                 self.nvim.vars["anya_telegram_pairing_message"] = message
                 self.nvim.vars["anya_telegram_pairing_code"] = code
                 self.nvim.vars["anya_telegram_pairing_url"] = url
-                self.nvim.exec_lua("require('anya.telegram').show_pairing(...)", message, code, url)
+                self.nvim.exec_lua(
+                    "require('anya.telegram').show_pairing(...)", message, code, url
+                )
             except Exception:
                 for line in message.splitlines():
                     self.nvim.command(f"echom {json.dumps(line)}")
@@ -610,7 +618,9 @@ class AnyaPlugin:
                     timeout=10.0,
                 )
                 if response is None:
-                    self.nvim.async_call(show_error, "Anya Telegram: daemon did not respond.")
+                    self.nvim.async_call(
+                        show_error, "Anya Telegram: daemon did not respond."
+                    )
                     return
                 if response.type != ResponseType.SUCCESS:
                     self.nvim.async_call(
@@ -627,7 +637,9 @@ class AnyaPlugin:
                 elif isinstance(payload, dict):
                     code = payload.get("code") or payload.get("pairing_code")
                     expires_in = payload.get("expires_in", 300)
-                    telegram_url = payload.get("telegram_url") or payload.get("url") or ""
+                    telegram_url = (
+                        payload.get("telegram_url") or payload.get("url") or ""
+                    )
                 else:
                     code = None
                     expires_in = 300
@@ -648,10 +660,12 @@ class AnyaPlugin:
                     "",
                 ]
                 if telegram_url:
-                    lines.extend([
-                        "Or scan the QR code below to open Telegram directly.",
-                        "",
-                    ])
+                    lines.extend(
+                        [
+                            "Or scan the QR code below to open Telegram directly.",
+                            "",
+                        ]
+                    )
                 lines.append(f"Expires in {expires_in} seconds.")
                 message = "\n".join(lines)
                 self.nvim.async_call(show_info, message, code, telegram_url)
@@ -677,7 +691,9 @@ class AnyaPlugin:
         self.chat_buf, self.prompt_buf = buffers.new(
             self.nvim, layout, direction, force_open
         )
-        self.nvim.command("lua vim.schedule(function() require('anya.splash').show_if_empty() end)")
+        self.nvim.command(
+            "lua vim.schedule(function() require('anya.splash').show_if_empty() end)"
+        )
 
     def _handle_copilot_command(self, args):
         """Handle :Anya copilot subcommands."""
@@ -855,7 +871,9 @@ class AnyaPlugin:
             if self._current_request_id:
                 self._silent_cancel_request_ids.add(self._current_request_id)
                 try:
-                    self._client.cancel_request(self.session_id, self._current_request_id)
+                    self._client.cancel_request(
+                        self.session_id, self._current_request_id
+                    )
                 except Exception:
                     pass
             self._current_task.cancel()
@@ -1105,6 +1123,11 @@ class AnyaPlugin:
             # Note: We don't check send_task.done() anymore because the daemon
             # returns immediately after starting the background task. We rely on
             # MESSAGE_END event to know when streaming is complete.
+            stream_start_time = time.monotonic()
+            last_health_check = time.monotonic()
+            MAX_STREAM_DURATION = 600.0  # 10 minutes max streaming time
+            HEALTH_CHECK_INTERVAL = 5.0  # Check daemon health every 5 seconds
+            
             while True:
                 # Check cancellation flag before waiting for events
                 if self._request_cancelled:
@@ -1113,7 +1136,32 @@ class AnyaPlugin:
                 # Use shorter timeout (0.2s) for responsive cancellation
                 chunk = await subscriber.receive(timeout=0.2)
                 if chunk is None:
-                    # Timeout - check cancellation and continue waiting
+                    # Timeout - check daemon health periodically.
+                    # When the daemon crashes mid-stream, ZMQ PUB/SUB doesn't
+                    # detect the peer disconnection, so receive() returns None
+                    # forever. Without this check the streaming loop would run
+                    # indefinitely, leaving the UI stuck in "receiving" state.
+                    now = time.monotonic()
+                    
+                    # Check if overall stream has exceeded max duration
+                    if now - stream_start_time > MAX_STREAM_DURATION:
+                        raise Exception(
+                            "Response stream timed out. The daemon may have disconnected."
+                        )
+                    
+                    # Periodically verify daemon is still alive
+                    if now - last_health_check > HEALTH_CHECK_INTERVAL:
+                        last_health_check = now
+                        # Lightweight check: verify daemon process is still running
+                        pid = daemon_mgmt.read_pid_file()
+                        if pid is None or not daemon_mgmt.is_process_running(pid):
+                            # If user also cancelled, treat as cancellation (not error)
+                            if self._request_cancelled:
+                                raise asyncio.CancelledError()
+                            raise Exception(
+                                "Daemon disconnected mid-stream. "
+                                "Run :Anya daemon status to check, then send a new message to restart it."
+                            )
                     continue
 
                 self._streaming_started = True
@@ -1813,10 +1861,16 @@ end
                                             )
                                         elif evt_kind == "notify":
                                             _msg = evt.get("message", "")
-                                            _level = str(evt.get("level", "info") or "info").lower()
+                                            _level = str(
+                                                evt.get("level", "info") or "info"
+                                            ).lower()
                                             _title = evt.get("title", "Anya")
 
-                                            def _run_notify(__msg=_msg, __level=_level, __title=_title):
+                                            def _run_notify(
+                                                __msg=_msg,
+                                                __level=_level,
+                                                __title=_title,
+                                            ):
                                                 level_map = {
                                                     "trace": "TRACE",
                                                     "debug": "DEBUG",
@@ -1826,7 +1880,9 @@ end
                                                     "error": "ERROR",
                                                     "off": "OFF",
                                                 }
-                                                _lua_level = level_map.get(__level, "INFO")
+                                                _lua_level = level_map.get(
+                                                    __level, "INFO"
+                                                )
                                                 self.nvim.exec_lua(
                                                     "local args = ...; vim.notify(args[1], vim.log.levels[args[2]] or vim.log.levels.INFO, { title = args[3] })",
                                                     [__msg, _lua_level, __title],
@@ -2072,7 +2128,9 @@ end
                     )
                 except Exception as e:
                     try:
-                        self.nvim.err_write(f"Error saving cancelled message to DB: {e}\n")
+                        self.nvim.err_write(
+                            f"Error saving cancelled message to DB: {e}\n"
+                        )
                     except Exception:
                         pass
 
@@ -2340,7 +2398,9 @@ end
             # Clean up the placeholder row from DB so it doesn't pollute history,
             # and return silently (do NOT use err_write -- it throws a Vim error
             # that can propagate through greenlet switching and break queued sends).
-            logging.debug("Empty message content for %s, cleaning up placeholder", msg_id)
+            logging.debug(
+                "Empty message content for %s, cleaning up placeholder", msg_id
+            )
             try:
                 db.delete_message(msg_id)
             except Exception:
@@ -2619,9 +2679,7 @@ pcall(vim.keymap.del, "n", "<C-c>")
         try:
             if mode == "replace":
                 current = self.nvim.api.buf_get_lines(buf_number, 0, -1, False)
-                self._replace_lines_with_diff(
-                    self.nvim.api, buf_number, current, lines
-                )
+                self._replace_lines_with_diff(self.nvim.api, buf_number, current, lines)
             elif mode == "append":
                 lc = self.nvim.api.buf_line_count(buf_number)
                 self.nvim.api.buf_set_lines(buf_number, lc, lc, False, lines)
@@ -3186,7 +3244,6 @@ pcall(vim.keymap.del, "n", "<C-c>")
         self._streaming_started = False
         self._cancel_in_progress = False
 
-
     @pynvim.function("AnyaPing", sync=True)
     def anya_ping(self, args):
         """Lightweight health check for the Python remote plugin host."""
@@ -3683,6 +3740,13 @@ Usage:
 
             # Update the manual override height
             buffers._anya_state["manual_prompt_height"] = new_height
+
+            # Mirror to window variable so Lua resize handler can read it
+            prompt_win = buffers._anya_state.get("prompt_win")
+            if prompt_win and self.nvim.api.win_is_valid(prompt_win):
+                self.nvim.api.win_set_var(
+                    prompt_win, "anya_manual_prompt_height", new_height
+                )
 
             # Reposition the floats to apply the new height
             buffers.reposition_floats(self.nvim)

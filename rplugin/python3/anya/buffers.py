@@ -255,6 +255,14 @@ def _close_anya_windows(nvim: Nvim):
     _anya_state["prompt_win"] = None
     _anya_state["layout_win"] = None
 
+    # Clear vim globals so Lua resize handler knows windows are gone
+    try:
+        nvim.api.set_var("anya_chat_win", 0)
+        nvim.api.set_var("anya_prompt_win", 0)
+        nvim.api.set_var("anya_layout_win", 0)
+    except Exception:
+        pass
+
 
 def get_buffer_content(nvim: Nvim, bufnr: int) -> str:
     """Read entire buffer content as a single string with markers intact.
@@ -602,6 +610,15 @@ def new(
     _anya_state["chat_win"] = chat_win
     _anya_state["prompt_win"] = prompt_win
 
+    # Store window IDs in vim globals so Lua resize handler can access them
+    # without a synchronous RPC call (which can block when chat has many lines)
+    _win_id_val = _win_id(chat_win)
+    _prompt_win_id = _win_id(prompt_win)
+    _layout_win_id = _win_id(layout_win)
+    nvim.api.set_var("anya_chat_win", _win_id_val)
+    nvim.api.set_var("anya_prompt_win", _prompt_win_id)
+    nvim.api.set_var("anya_layout_win", _layout_win_id)
+
     # Recalculate height based on actual display height (accounts for wrapped lines)
     reposition_floats(nvim)
 
@@ -638,13 +655,101 @@ def new(
     )
 
     # Set up resize autocmd to keep floats positioned
-    group = nvim.api.create_augroup("AnyaFloatPrompt", {"clear": True})
-    nvim.api.create_autocmd(
-        ["VimResized", "WinResized"],
-        {
-            "group": group,
-            "command": "silent! call AnyaRepositionFloats()",
-        },
+    # Pure Lua implementation with debounce - avoids synchronous RPC calls
+    # that can block Neovim's event loop when the chat buffer has many lines
+    nvim.api.create_augroup("AnyaFloatPrompt", {"clear": True})
+    nvim.exec_lua(
+        """
+        local group = vim.api.nvim_create_augroup("AnyaFloatPrompt", { clear = true })
+        local resize_timer = nil
+
+        local function do_reposition()
+          local layout_win = vim.g.anya_layout_win
+          local chat_win = vim.g.anya_chat_win
+          local prompt_win = vim.g.anya_prompt_win
+
+          if not layout_win or not chat_win or not prompt_win then
+            return
+          end
+          if not vim.api.nvim_win_is_valid(layout_win)
+             or not vim.api.nvim_win_is_valid(chat_win)
+             or not vim.api.nvim_win_is_valid(prompt_win) then
+            return
+          end
+
+          local layout_width = vim.api.nvim_win_get_width(layout_win)
+          local layout_height = vim.api.nvim_win_get_height(layout_win)
+
+          -- Calculate prompt height based on content
+          local prompt_buf = vim.api.nvim_win_get_buf(prompt_win)
+          local line_count = vim.api.nvim_buf_line_count(prompt_buf)
+          local display_height = line_count
+
+          -- Try to get actual display height (accounts for wrapped lines)
+          local ok, result = pcall(vim.api.nvim_win_text_height, prompt_win, {})
+          if ok and type(result) == "table" then
+            local all = result.all or line_count
+            local fill = result.fill or 0
+            local computed = all - fill
+            if type(computed) == "number" and computed >= 1 then
+              display_height = computed
+            end
+          end
+
+          -- Respect manual height override if set
+          local manual_override = vim.w[prompt_win] and vim.w[prompt_win].anya_manual_prompt_height
+          local prompt_max = 30
+          local prompt_height
+          if manual_override then
+            prompt_height = math.min(math.max(1, math.max(display_height, manual_override)), prompt_max)
+          else
+            prompt_height = math.min(math.max(1, display_height), prompt_max)
+          end
+
+          -- Prompt border takes 2 lines
+          local real_prompt_height = prompt_height + 2
+          local chat_height = math.max(1, layout_height - real_prompt_height)
+
+          -- Update chat float
+          pcall(vim.api.nvim_win_set_config, chat_win, {
+            relative = "win",
+            win = layout_win,
+            row = 0,
+            col = 0,
+            width = math.max(1, layout_width),
+            height = chat_height,
+          })
+
+          -- Update prompt float
+          pcall(vim.api.nvim_win_set_config, prompt_win, {
+            relative = "win",
+            win = layout_win,
+            row = chat_height,
+            col = 0,
+            width = math.max(1, layout_width - 2),
+            height = prompt_height,
+          })
+        end
+
+        vim.api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
+          group = group,
+          callback = function()
+            -- Debounce: collapse rapid resize events into one reposition
+            if resize_timer then
+              resize_timer:again()
+              return
+            end
+            resize_timer = vim.uv.new_timer()
+            resize_timer:start(16, 0, function()
+              resize_timer:stop()
+              resize_timer:close()
+              resize_timer = nil
+              vim.schedule(do_reposition)
+            end)
+          end,
+        })
+        """,
+        [],
     )
 
     # Set up autocmd to close all Anya windows when either the chat or prompt
@@ -842,8 +947,12 @@ def reposition_floats(nvim: Nvim):
         }
 
         nvim.api.win_set_config(prompt_win, prompt_config)
-    except Exception:
-        pass
+    except Exception as _e:
+        # Log to daemon log instead of silently swallowing
+        import logging
+        logging.getLogger("anya").warning(
+            "reposition_floats failed: %s", _e, exc_info=True
+        )
 
 
 def get_file_completions_async(nvim: Nvim, base: str, callback_id: str):
