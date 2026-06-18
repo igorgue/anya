@@ -14,7 +14,10 @@ from ..skills import Skill, discover_skills
 def _resolve_skill(skill_name_or_path: str, cwd: str | None = None) -> Skill:
     skills = discover_skills(cwd=cwd)
     for skill in skills:
-        if skill.name == skill_name_or_path or skill.skill_md_path == skill_name_or_path:
+        if (
+            skill.name == skill_name_or_path
+            or skill.skill_md_path == skill_name_or_path
+        ):
             return skill
     raise ValueError(f"Skill not found: {skill_name_or_path}")
 
@@ -27,11 +30,17 @@ def _fingerprint(path: str) -> str:
 
 def _format_skill_message(skill: Skill, content: str, fingerprint: str) -> str:
     parts = [
-        '<loaded_skill name="' + skill.name + '" path="' + skill.skill_md_path + '" fingerprint="' + fingerprint + '">',
+        '<loaded_skill name="'
+        + skill.name
+        + '" path="'
+        + skill.skill_md_path
+        + '" fingerprint="'
+        + fingerprint
+        + '">',
         content.strip(),
-        '</loaded_skill>',
+        "</loaded_skill>",
     ]
-    return '\n'.join(parts)
+    return "\n".join(parts)
 
 
 def _resolve_conversation_id(conversation_id: str | None) -> str:
@@ -54,7 +63,10 @@ def _notify(message: str, level: str = "info"):
         os.makedirs(ui_dir, exist_ok=True)
         event_file = os.path.join(ui_dir, uuid.uuid4().hex + ".event.json")
         with open(event_file, "w") as f:
-            json.dump({"kind": "notify", "message": message, "level": level, "title": "Anya"}, f)
+            json.dump(
+                {"kind": "notify", "message": message, "level": level, "title": "Anya"},
+                f,
+            )
     except Exception:
         pass
 

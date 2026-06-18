@@ -421,6 +421,11 @@ class RequestHandler:
             cleaned_content, markers_json = history.extract_markers_from_content(content)
 
         if not cleaned_content:
+            # Even with no content, persist ended_at if provided so the
+            # duration virtual text always shows in the UI.
+            if ended_at:
+                db.update_message(request_id, ended_at=ended_at)
+                db.update_conversation_timestamp(conversation_id, ended_at)
             return
 
         updated = db.update_message(

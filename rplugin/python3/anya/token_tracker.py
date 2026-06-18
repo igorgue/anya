@@ -12,13 +12,13 @@ from dataclasses import dataclass
 from typing import Any
 
 # Import comprehensive model list for partial matching
-from .openrouter_models import OPENROUTER_CONTEXT_WINDOWS as ALL_OPENROUTER_MODELS
+from .openrouter_models import OPENROUTER_CONTEXT_WINDOWS
 
 # Default context window fallback
-DEFAULT_CONTEXT_WINDOW = 128000
+DEFAULT_CONTEXT_WINDOW = 200000
 
 # Default max output tokens (conservative estimate)
-DEFAULT_MAX_OUTPUT = 32000
+DEFAULT_MAX_OUTPUT = 64000
 
 # Characters per token estimate (4:1 ratio)
 CHARS_PER_TOKEN = 4
@@ -221,21 +221,21 @@ def _match_model(model: str) -> int | None:
     model_lower = model.lower()
 
     # 1. Exact match (case-insensitive)
-    for full_model_name, context_size in ALL_OPENROUTER_MODELS.items():
+    for full_model_name, context_size in OPENROUTER_CONTEXT_WINDOWS.items():
         if full_model_name.lower() == model_lower:
             return context_size
 
     # 2. Try with common provider prefixes (e.g., "gpt-4.1" -> "openai/gpt-4.1")
     for prefix in PROVIDER_PREFIXES:
         prefixed = f"{prefix}/{model_lower}"
-        for full_model_name, context_size in ALL_OPENROUTER_MODELS.items():
+        for full_model_name, context_size in OPENROUTER_CONTEXT_WINDOWS.items():
             if full_model_name.lower() == prefixed:
                 return context_size
 
     # 3. Partial match: match only the model name part after the slash
     # This handles cases like "glm-4.7" matching "z-ai/glm-4.7"
     base_model = model_lower.split("/")[-1]
-    for full_model_name, context_size in ALL_OPENROUTER_MODELS.items():
+    for full_model_name, context_size in OPENROUTER_CONTEXT_WINDOWS.items():
         if full_model_name.lower().split("/")[-1] == base_model:
             return context_size
 

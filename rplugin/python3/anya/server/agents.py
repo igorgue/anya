@@ -200,7 +200,9 @@ class AgentManager:
 
         return False
 
-    def set_active_request(self, session_id: str, request_id: str, task: asyncio.Task | None = None):
+    def set_active_request(
+        self, session_id: str, request_id: str, task: asyncio.Task | None = None
+    ):
         """Set the active request for a session."""
         if session_id in self._sessions:
             session = self._sessions[session_id]
@@ -219,7 +221,10 @@ class AgentManager:
             was_detached = session.detached
             session.detached = False
             if was_detached:
-                self.logger.info("Request finished for detached session %s; cleaning up session", session_id)
+                self.logger.info(
+                    "Request finished for detached session %s; cleaning up session",
+                    session_id,
+                )
                 session.agents.clear()
                 self._sessions.pop(session_id, None)
 

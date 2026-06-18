@@ -25,8 +25,6 @@ def get_db_path() -> pathlib.Path:
         return pathlib.Path.home() / ".local" / "share" / "anya" / "conversations.db"
 
 
-
-
 def _memory_regexp(pattern: str, value: str | None) -> int:
     if value is None:
         return 0
@@ -38,6 +36,7 @@ def _memory_term_pattern(term: str) -> str:
     if re.fullmatch(r"[a-z0-9']+", term):
         return rf"(?<![a-z0-9']){escaped}(?![a-z0-9'])"
     return escaped
+
 
 def get_connection() -> sqlite3.Connection:
     """Get a sqlite3 connection with row_factory set."""
@@ -155,7 +154,6 @@ def init_db() -> None:
             # Set all existing messages to have empty marker list
             conn.execute("UPDATE messages SET markers = '[]' WHERE markers IS NULL")
             conn.commit()
-
 
         # Migration: Add hidden/message_type/meta columns to messages if they don't exist
         cursor = conn.execute("PRAGMA table_info(messages)")
@@ -457,7 +455,9 @@ def save_message_dict(
         conn.close()
 
 
-def get_messages(conversation_id: str, include_hidden: bool = True) -> list[dict[str, Any]]:
+def get_messages(
+    conversation_id: str, include_hidden: bool = True
+) -> list[dict[str, Any]]:
     """Get all messages for a conversation ordered by created_at."""
     conn = get_connection()
     try:
@@ -662,7 +662,11 @@ def _memory_query_terms(query: str) -> list[str]:
 
     # Keep a few meaningful quoted / multi-word phrases intact.
     for phrase in re.findall(r"[a-z0-9]+(?:[\s-]+[a-z0-9]+){1,3}", normalized):
-        words = [w for w in re.findall(r"[a-z0-9']+", phrase) if w not in _MEMORY_QUERY_STOP_WORDS]
+        words = [
+            w
+            for w in re.findall(r"[a-z0-9']+", phrase)
+            if w not in _MEMORY_QUERY_STOP_WORDS
+        ]
         if len(words) >= 2:
             add(" ".join(words))
 
@@ -677,7 +681,9 @@ def _memory_query_terms(query: str) -> list[str]:
         if word in _MEMORY_QUERY_STOP_WORDS:
             continue
         add(word)
-        for synonym in _MEMORY_QUERY_SYNONYMS.get(word, ()):  # targeted durable-fact aliases
+        for synonym in _MEMORY_QUERY_SYNONYMS.get(
+            word, ()
+        ):  # targeted durable-fact aliases
             add(synonym)
 
     return terms[:20]
@@ -921,7 +927,6 @@ def rebuild_buffer_content(
                 lines.append(msg["content"])
 
     return "\n".join(lines)
-
 
 
 def find_hidden_message(

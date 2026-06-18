@@ -431,7 +431,6 @@ function files.new(_opts)
           if matches then
             table.insert(scored_items, { path = completion_path, score = score })
           end
-
         end
       end
 

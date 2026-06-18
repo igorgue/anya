@@ -115,7 +115,9 @@ class TelegramClient:
     ):
         self.router_url = router_url
         self.on_message = on_message
-        self.on_new_conversation = on_new_conversation or (lambda chat_id, text=None: None)
+        self.on_new_conversation = on_new_conversation or (
+            lambda chat_id, text=None: None
+        )
         self._running = False
         self._ws = None
         self._task: asyncio.Task | None = None
@@ -146,11 +148,15 @@ class TelegramClient:
             self._logger.warning("Cannot send response: not connected")
             return
         try:
-            await self._ws.send(json.dumps({
-                "type": "response",
-                "chat_id": chat_id,
-                "text": text,
-            }))
+            await self._ws.send(
+                json.dumps(
+                    {
+                        "type": "response",
+                        "chat_id": chat_id,
+                        "text": text,
+                    }
+                )
+            )
         except Exception as e:
             self._logger.error(f"Failed to send response: {e}")
 
@@ -197,16 +203,21 @@ class TelegramClient:
 
                     # Authenticate: sign the client_id + current timestamp
                     import time as _time
+
                     timestamp = int(_time.time())
                     msg = f"ws_auth:{self.client_id}:{timestamp}".encode()
                     signature = _sign_message(self.private_key, msg)
 
-                    await ws.send(json.dumps({
-                        "type": "hello",
-                        "client_id": self.client_id,
-                        "signature": signature.hex(),
-                        "timestamp": timestamp,
-                    }))
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "hello",
+                                "client_id": self.client_id,
+                                "signature": signature.hex(),
+                                "timestamp": timestamp,
+                            }
+                        )
+                    )
 
                     # Wait for auth response
                     raw = await ws.recv()
@@ -217,7 +228,6 @@ class TelegramClient:
                         continue
 
                     self._logger.info(f"Authenticated as {self.client_id[:12]}")
-
 
                     # Main message loop
                     await self._message_loop(ws)
@@ -253,7 +263,9 @@ class TelegramClient:
                 if resp.status_code == 200:
                     self._logger.info(f"Registered with router: {self.client_id[:12]}")
                 else:
-                    self._logger.warning(f"Registration returned {resp.status_code}: {resp.text}")
+                    self._logger.warning(
+                        f"Registration returned {resp.status_code}: {resp.text}"
+                    )
         except httpx.ConnectError:
             self._logger.warning(f"Cannot reach router at {router_base}")
         except Exception as e:

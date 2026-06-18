@@ -206,7 +206,11 @@ class AnthropicModel:
                         reasoning_item = ResponseReasoningItem(
                             id=response_id,
                             summary=[],
-                            content=[ReasoningContent(text=thinking_text, type="reasoning_text")],
+                            content=[
+                                ReasoningContent(
+                                    text=thinking_text, type="reasoning_text"
+                                )
+                            ],
                             type="reasoning",
                         )
                         if signature:
@@ -540,7 +544,7 @@ class AnthropicModel:
                 thinking_text = ""
                 if summary:
                     texts = []
-                    for s in (summary if isinstance(summary, list) else [summary]):
+                    for s in summary if isinstance(summary, list) else [summary]:
                         if isinstance(s, dict):
                             texts.append(s.get("text", ""))
                         elif hasattr(s, "text"):
@@ -548,7 +552,11 @@ class AnthropicModel:
                     thinking_text = " ".join(texts)
                 elif item_content:
                     texts = []
-                    for c in (item_content if isinstance(item_content, list) else [item_content]):
+                    for c in (
+                        item_content
+                        if isinstance(item_content, list)
+                        else [item_content]
+                    ):
                         if isinstance(c, dict) and c.get("type") == "reasoning_text":
                             texts.append(c.get("text", ""))
                         elif hasattr(c, "text"):
@@ -594,47 +602,129 @@ class AnthropicModel:
         # unknown item types, orphaned tool_results can appear.  Strip them.
         messages = self._strip_orphaned_tool_results(messages)
 
-        return messages
+        # After stripping orphaned blocks, consecutive messages with the same
+        # role may have re-appeared. Re-merge them (Anthropic requirement).
+        merged: list[dict] = []
+        for msg in messages:
+            if merged and merged[-1]["role"] == msg["role"]:
+                prev = merged[-1]
+                if isinstance(prev["content"], str):
+                    prev["content"] = [{"type": "text", "text": prev["content"]}]
+                new_content = msg["content"]
+                if isinstance(new_content, str):
+                    new_content = [{"type": "text", "text": new_content}]
+                prev["content"].extend(new_content)
+            else:
+                merged.append({"role": msg["role"], "content": msg["content"]})
+
+        # Anthropic also requires the conversation to end with a user message.
+        # If stripping left a trailing assistant message, drop it.
+        while merged and merged[-1]["role"] == "assistant":
+            merged.pop()
+
+        return merged
 
     @staticmethod
     def _strip_orphaned_tool_results(messages: list[dict]) -> list[dict]:
-        """Remove tool_result blocks whose tool_use_id has no matching tool_use.
+        """Remove unmatched tool_use and tool_result blocks.
 
-        Anthropic requires that every tool_result in a user message references a
-        tool_use block from the *immediately preceding* assistant message.  When
-        items are dropped (e.g. reasoning) or history is reconstructed
-        imperfectly, orphaned tool_results cause a 400 error.
+        Anthropic (and Anthropic-compatible APIs like DeepSeek via z.ai) require:
+        1. Every tool_result in a user message must reference a tool_use block from
+           the *immediately preceding* assistant message.
+        2. Every tool_use in an assistant message must have a matching tool_result
+           in the *immediately following* user message.
+
+        When items are dropped (e.g. reasoning) or history is reconstructed
+        imperfectly, orphaned blocks cause a 400 error from strict providers.
         """
+        # First pass: collect all tool_use_ids that have matching tool_results
+        result_ids: set[str] = set()
+        for msg in messages:
+            if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+                for block in msg["content"]:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        result_ids.add(block.get("tool_use_id", ""))
+
+        # Second pass: build cleaned messages, stripping orphaned tool_use blocks
+        # from assistant messages and orphaned tool_result blocks from user messages
         cleaned: list[dict] = []
         for i, msg in enumerate(messages):
-            if msg["role"] != "user" or isinstance(msg["content"], str):
+            role = msg.get("role", "user")
+            content = msg.get("content")
+
+            if isinstance(content, str):
                 cleaned.append(msg)
                 continue
 
-            # Collect tool_use IDs from the preceding assistant message
-            prev_tool_ids: set[str] = set()
-            if cleaned and cleaned[-1]["role"] == "assistant":
-                prev_content = cleaned[-1]["content"]
-                if isinstance(prev_content, list):
-                    for block in prev_content:
-                        if isinstance(block, dict) and block.get("type") == "tool_use":
-                            prev_tool_ids.add(block.get("id", ""))
+            if not isinstance(content, list):
+                cleaned.append(msg)
+                continue
 
-            # Filter content blocks
-            filtered = []
-            for block in msg["content"]:
-                if isinstance(block, dict) and block.get("type") == "tool_result":
-                    if block.get("tool_use_id", "") not in prev_tool_ids:
-                        logger.warning(
-                            "Dropping orphaned tool_result for tool_use_id=%s",
-                            block.get("tool_use_id"),
-                        )
-                        continue
-                filtered.append(block)
+            if role == "assistant":
+                # Collect tool_use IDs from the FOLLOWING user message
+                next_result_ids: set[str] = set()
+                if i + 1 < len(messages):
+                    next_msg = messages[i + 1]
+                    if next_msg.get("role") == "user" and isinstance(
+                        next_msg.get("content"), list
+                    ):
+                        for block in next_msg["content"]:
+                            if (
+                                isinstance(block, dict)
+                                and block.get("type") == "tool_result"
+                            ):
+                                next_result_ids.add(block.get("tool_use_id", ""))
 
-            if filtered:
-                cleaned.append({"role": "user", "content": filtered})
-            # else: drop empty user message entirely
+                # Also check our own tool_use IDs against the global result_ids set
+                filtered = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        tool_id = block.get("id", "")
+                        if tool_id not in result_ids:
+                            logger.warning(
+                                "Dropping orphaned tool_use (no matching tool_result) "
+                                "id=%s name=%s",
+                                tool_id,
+                                block.get("name"),
+                            )
+                            continue
+                    filtered.append(block)
+
+                if filtered:
+                    cleaned.append({"role": role, "content": filtered})
+                # else: drop empty assistant message entirely
+
+            elif role == "user":
+                # Collect tool_use IDs from the preceding assistant message
+                prev_tool_ids: set[str] = set()
+                if cleaned and cleaned[-1]["role"] == "assistant":
+                    prev_content = cleaned[-1]["content"]
+                    if isinstance(prev_content, list):
+                        for block in prev_content:
+                            if (
+                                isinstance(block, dict)
+                                and block.get("type") == "tool_use"
+                            ):
+                                prev_tool_ids.add(block.get("id", ""))
+
+                # Filter content blocks
+                filtered = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        if block.get("tool_use_id", "") not in prev_tool_ids:
+                            logger.warning(
+                                "Dropping orphaned tool_result for tool_use_id=%s",
+                                block.get("tool_use_id"),
+                            )
+                            continue
+                    filtered.append(block)
+
+                if filtered:
+                    cleaned.append({"role": role, "content": filtered})
+                # else: drop empty user message entirely
+
+            else:
+                cleaned.append(msg)
 
         return cleaned
 
@@ -750,7 +840,9 @@ class AnthropicModel:
                 reasoning_item = ResponseReasoningItem(
                     id=response.id,
                     summary=[],
-                    content=[ReasoningContent(text=thinking_text, type="reasoning_text")],
+                    content=[
+                        ReasoningContent(text=thinking_text, type="reasoning_text")
+                    ],
                     type="reasoning",
                 )
                 if signature:

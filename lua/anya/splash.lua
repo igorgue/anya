@@ -3,14 +3,14 @@
 local M = {}
 
 -- Configuration (feel free to tweak these)
-M.interval = 1000  -- milliseconds between Game of Life generations
-M.orbit_speed = 0.02  -- counter-clockwise orbit speed (radians per frame)
-M.grid_size = 20  -- 20x20 grid
-M.min_grid_size = 4  -- smallest responsive grid before hiding the splash
-M.float_width = 60  -- preferred float width; shrinks in narrow panes
-M.horizontal_padding = 2  -- spaces on each side of the grid/footer
-M.footer_padding_bottom = 1  -- keep the footer visually clear in small panes
-M.use_shape_chars = true  -- render living cells with varied 2-column glyph pairs
+M.interval = 1000 -- milliseconds between Game of Life generations
+M.orbit_speed = 0.02 -- counter-clockwise orbit speed (radians per frame)
+M.grid_size = 20 -- 20x20 grid
+M.min_grid_size = 4 -- smallest responsive grid before hiding the splash
+M.float_width = 60 -- preferred float width; shrinks in narrow panes
+M.horizontal_padding = 2 -- spaces on each side of the grid/footer
+M.footer_padding_bottom = 1 -- keep the footer visually clear in small panes
+M.use_shape_chars = true -- render living cells with varied 2-column glyph pairs
 
 -- State
 M.state = {
@@ -52,20 +52,58 @@ local HL_SOURCE_GROUPS = {
 -- Every glyph must occupy exactly 2 display columns. Single-width symbols get a trailing space;
 -- double-width symbols stand alone. This keeps each Life cell aligned in the grid.
 local CELL_CHARS = {
-  "■ ", "□ ", "▪ ", "▫ ", "◆ ", "◇ ", "● ", "○ ",
-  "◼ ", "◻ ", "◾", "◽", "▣ ", "▢ ", "▰ ", "▱ ",
-  "▴ ", "▾ ", "◂ ", "▸ ", "▲ ", "▼ ", "◀ ", "▶ ",
-  "✦ ", "✧ ", "✺ ", "✹ ", "✶ ", "✷ ", "✸ ", "✳ ",
-  "✴ ", "✵ ", "✚ ", "✖ ", "✕ ", "✱ ", "✲ ", "✻ ",
+  "■ ",
+  "□ ",
+  "▪ ",
+  "▫ ",
+  "◆ ",
+  "◇ ",
+  "● ",
+  "○ ",
+  "◼ ",
+  "◻ ",
+  "◾",
+  "◽",
+  "▣ ",
+  "▢ ",
+  "▰ ",
+  "▱ ",
+  "▴ ",
+  "▾ ",
+  "◂ ",
+  "▸ ",
+  "▲ ",
+  "▼ ",
+  "◀ ",
+  "▶ ",
+  "✦ ",
+  "✧ ",
+  "✺ ",
+  "✹ ",
+  "✶ ",
+  "✷ ",
+  "✸ ",
+  "✳ ",
+  "✴ ",
+  "✵ ",
+  "✚ ",
+  "✖ ",
+  "✕ ",
+  "✱ ",
+  "✲ ",
+  "✻ ",
 }
 
 --- Initialize highlight groups
 local function init_highlights()
   -- Orbiting light: bright cyan/white
-  vim.cmd(string.format([[
+  vim.cmd(string.format(
+    [[
     highlight %s guifg=#87ceeb gui=bold
-  ]], HL_ORBIT))
-  
+  ]],
+    HL_ORBIT
+  ))
+
   for i, group in ipairs(HL_SOURCE_GROUPS) do
     local ok_source, source = pcall(vim.api.nvim_get_hl, 0, { name = group, link = false })
     if ok_source and source and source.fg then
@@ -79,13 +117,20 @@ local function init_highlights()
   local ok, float_border = pcall(vim.api.nvim_get_hl, 0, { name = "FloatBorder", link = false })
   if ok and float_border and float_border.fg then
     local hex = string.format("#%06x", float_border.fg)
-    vim.cmd(string.format([[
+    vim.cmd(string.format(
+      [[
       highlight %s guifg=%s gui=bold
-    ]], HL_CURSOR, hex))
+    ]],
+      HL_CURSOR,
+      hex
+    ))
   else
-    vim.cmd(string.format([[
+    vim.cmd(string.format(
+      [[
       highlight %s guifg=#7cb8bb gui=bold
-    ]], HL_CURSOR))
+    ]],
+      HL_CURSOR
+    ))
   end
 end
 
@@ -114,10 +159,18 @@ local function count_neighbors(row, col)
         local r = row + dr
         local c = col + dc
         -- Wrap around edges
-        if r < 1 then r = M.state.active_grid_size end
-        if r > M.state.active_grid_size then r = 1 end
-        if c < 1 then c = M.state.active_grid_size end
-        if c > M.state.active_grid_size then c = 1 end
+        if r < 1 then
+          r = M.state.active_grid_size
+        end
+        if r > M.state.active_grid_size then
+          r = 1
+        end
+        if c < 1 then
+          c = M.state.active_grid_size
+        end
+        if c > M.state.active_grid_size then
+          c = 1
+        end
         count = count + (M.state.grid[r][c] or 0)
       end
     end
@@ -151,7 +204,7 @@ end
 
 --- Calculate distance between two points
 local function distance(r1, c1, r2, c2)
-  return math.sqrt((r1 - r2)^2 + (c2 - c1)^2)
+  return math.sqrt((r1 - r2) ^ 2 + (c2 - c1) ^ 2)
 end
 
 local function cell_char(row, col)
@@ -174,7 +227,7 @@ local function get_orbit_pos()
   local radius = M.state.active_grid_size * 0.4
   local x = center + radius * math.cos(M.state.orbit_angle)
   local y = center + radius * math.sin(M.state.orbit_angle)
-  return y, x  -- row, col
+  return y, x -- row, col
 end
 
 --- Render the grid to buffer lines
@@ -182,28 +235,28 @@ local function render_grid()
   if not M.state.buf or not vim.api.nvim_buf_is_valid(M.state.buf) then
     return
   end
-  
+
   local lines = {}
   local highlights = {}
-  
+
   -- Get orbit position
   local orbit_row, orbit_col = get_orbit_pos()
-  
+
   for i = 1, M.state.active_grid_size do
     local line = ""
     for j = 1, M.state.active_grid_size do
       if M.state.grid[i][j] == 1 then
         line = line .. cell_char(i, j)
-        
+
         -- Calculate distances for color intensity
         local dist_orbit = distance(i, j, orbit_row, orbit_col)
         local dist_cursor = distance(i, j, M.state.prompt_cursor.row, M.state.prompt_cursor.col)
-        
+
         -- Determine highlight based on proximity to light sources
         local max_dist = M.state.active_grid_size * 0.5
         local orbit_intensity = math.max(0, 1 - dist_orbit / max_dist)
         local cursor_intensity = math.max(0, 1 - dist_cursor / max_dist)
-        
+
         local palette_index = ((i + j + math.floor(M.state.orbit_angle * 3)) % #HL_PALETTE) + 1
         local hl_group = HL_PALETTE[palette_index]
         if orbit_intensity > cursor_intensity and orbit_intensity > 0.42 then
@@ -211,21 +264,21 @@ local function render_grid()
         elseif cursor_intensity > 0.42 then
           hl_group = HL_CURSOR
         end
-        
-        local buf_col = (j - 1) * 2 + M.state.horizontal_padding  -- each cell is 2 chars
+
+        local buf_col = (j - 1) * 2 + M.state.horizontal_padding -- each cell is 2 chars
         table.insert(highlights, {
           group = hl_group,
-          row = i - 1,  -- 0-indexed
+          row = i - 1, -- 0-indexed
           col = buf_col,
-          length = 2
+          length = 2,
         })
       else
-        line = line .. "  "  -- Two spaces for dead cells
+        line = line .. "  " -- Two spaces for dead cells
       end
     end
     table.insert(lines, string.rep(" ", M.state.horizontal_padding) .. line)
   end
-  
+
   -- Add empty line and footer
   table.insert(lines, "")
   local footer_text = "Ask anything... ask about anything"
@@ -238,18 +291,18 @@ local function render_grid()
     group = HL_BASE,
     row = footer_row,
     col = footer_col,
-    length = #footer_text
+    length = #footer_text,
   })
 
   for _ = 1, M.footer_padding_bottom do
     table.insert(lines, "")
   end
-  
+
   -- Update buffer
   vim.api.nvim_buf_set_option(M.state.buf, "modifiable", true)
   vim.api.nvim_buf_set_lines(M.state.buf, 0, -1, false, lines)
   vim.api.nvim_buf_set_option(M.state.buf, "modifiable", false)
-  
+
   -- Apply highlights
   vim.api.nvim_buf_clear_namespace(M.state.buf, -1, 0, -1)
   for _, hl in ipairs(highlights) do
@@ -263,16 +316,16 @@ local function tick()
     M.hide()
     return
   end
-  
+
   -- Update orbit angle (counter-clockwise = increasing angle)
   M.state.orbit_angle = M.state.orbit_angle + M.orbit_speed
   if M.state.orbit_angle > 2 * math.pi then
     M.state.orbit_angle = M.state.orbit_angle - 2 * math.pi
   end
-  
+
   -- Next generation
   next_generation()
-  
+
   -- Render
   render_grid()
 end
@@ -290,48 +343,52 @@ local function setup_cursor_tracking()
       end
     end
   end
-  
+
   if not prompt_buf then
     return
   end
-  
+
   M.state.prompt_buf = prompt_buf
-  
+
   -- Update cursor position periodically
   M.state.cursor_timer = vim.loop.new_timer()
-  M.state.cursor_timer:start(0, 100, vim.schedule_wrap(function()
-    if not M.state.win or not vim.api.nvim_win_is_valid(M.state.win) then
-      if M.state.cursor_timer then
-        M.state.cursor_timer:stop()
-        M.state.cursor_timer = nil
+  M.state.cursor_timer:start(
+    0,
+    100,
+    vim.schedule_wrap(function()
+      if not M.state.win or not vim.api.nvim_win_is_valid(M.state.win) then
+        if M.state.cursor_timer then
+          M.state.cursor_timer:stop()
+          M.state.cursor_timer = nil
+        end
+        return
       end
-      return
-    end
-    
-    -- Get cursor position in prompt buffer if available
-    if M.state.prompt_buf and vim.api.nvim_buf_is_valid(M.state.prompt_buf) then
-      -- Find window for prompt buffer
-      local prompt_win = nil
-      for _, win in ipairs(vim.api.nvim_list_wins()) do
-        if vim.api.nvim_win_is_valid(win) then
-          if vim.api.nvim_win_get_buf(win) == M.state.prompt_buf then
-            prompt_win = win
-            break
+
+      -- Get cursor position in prompt buffer if available
+      if M.state.prompt_buf and vim.api.nvim_buf_is_valid(M.state.prompt_buf) then
+        -- Find window for prompt buffer
+        local prompt_win = nil
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+          if vim.api.nvim_win_is_valid(win) then
+            if vim.api.nvim_win_get_buf(win) == M.state.prompt_buf then
+              prompt_win = win
+              break
+            end
+          end
+        end
+
+        if prompt_win then
+          local ok, cursor = pcall(vim.api.nvim_win_get_cursor, prompt_win)
+          if ok then
+            M.state.prompt_cursor = {
+              row = math.floor(cursor[1] / 2),
+              col = math.floor(cursor[2] / 4),
+            }
           end
         end
       end
-      
-      if prompt_win then
-        local ok, cursor = pcall(vim.api.nvim_win_get_cursor, prompt_win)
-        if ok then
-          M.state.prompt_cursor = {
-            row = math.floor(cursor[1] / 2),
-            col = math.floor(cursor[2] / 4)
-          }
-        end
-      end
-    end
-  end))
+    end)
+  )
 end
 
 local function calculate_layout(chat_win)
@@ -348,7 +405,11 @@ local function calculate_layout(chat_win)
   end
 
   local content_width = grid_size * 2 + (M.horizontal_padding * 2)
-  local splash_width = math.min(M.float_width, win_width, math.max(content_width, #"Ask anything... ask about anything" + (M.horizontal_padding * 2)))
+  local splash_width = math.min(
+    M.float_width,
+    win_width,
+    math.max(content_width, #"Ask anything... ask about anything" + (M.horizontal_padding * 2))
+  )
   local splash_height = math.min(win_height, grid_size + reserved_height)
 
   return {
@@ -367,7 +428,7 @@ function M.show()
   if M.state.win and vim.api.nvim_win_is_valid(M.state.win) then
     return
   end
-  
+
   -- Find the chat buffer
   local chat_buf = nil
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
@@ -379,11 +440,11 @@ function M.show()
       end
     end
   end
-  
+
   if not chat_buf then
     return
   end
-  
+
   -- Check if chat buffer is empty
   local lines = vim.api.nvim_buf_get_lines(chat_buf, 0, -1, false)
   local is_empty = true
@@ -393,11 +454,11 @@ function M.show()
       break
     end
   end
-  
+
   if not is_empty then
     return
   end
-  
+
   -- Find chat window
   local chat_win = nil
   for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -409,24 +470,24 @@ function M.show()
       end
     end
   end
-  
+
   if not chat_win then
     return
   end
-  
+
   -- Initialize highlights
   init_highlights()
-  
+
   -- Create the splash buffer
   M.state.buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_option(M.state.buf, "buftype", "nofile")
   vim.api.nvim_buf_set_option(M.state.buf, "swapfile", false)
   vim.api.nvim_buf_set_option(M.state.buf, "modifiable", false)
-  
+
   -- Calculate position (centered on chat window)
   local win_width = vim.api.nvim_win_get_width(chat_win)
   local win_height = vim.api.nvim_win_get_height(chat_win)
-  
+
   local layout = calculate_layout(chat_win)
   if not layout then
     return
@@ -444,20 +505,20 @@ function M.show()
     border = "none",
     zindex = 50,
   })
-  
+
   -- Keep the floating window background transparent/inherited; text is highlighted separately.
   vim.api.nvim_win_set_option(M.state.win, "winhl", "NormalFloat:Normal,FloatBorder:FloatBorder")
   vim.api.nvim_win_set_option(M.state.win, "wrap", false)
   vim.api.nvim_win_set_option(M.state.win, "winblend", 0)
-  
+
   -- Initialize grid with random seed
   M.state.active_grid_size = layout.grid_size
   M.state.horizontal_padding = layout.padding
   init_grid()
-  
+
   -- Setup cursor tracking
   setup_cursor_tracking()
-  
+
   -- Start animation timer
   M.state.timer = vim.loop.new_timer()
   M.state.timer:start(0, M.interval, vim.schedule_wrap(tick))
@@ -470,22 +531,22 @@ function M.hide()
     M.state.timer:stop()
     M.state.timer = nil
   end
-  
+
   if M.state.cursor_timer then
     M.state.cursor_timer:stop()
     M.state.cursor_timer = nil
   end
-  
+
   -- Close window
   if M.state.win and vim.api.nvim_win_is_valid(M.state.win) then
     vim.api.nvim_win_close(M.state.win, true)
   end
-  
+
   -- Delete buffer
   if M.state.buf and vim.api.nvim_buf_is_valid(M.state.buf) then
     vim.api.nvim_buf_delete(M.state.buf, { force = true })
   end
-  
+
   M.state.win = nil
   M.state.buf = nil
   M.state.prompt_buf = nil

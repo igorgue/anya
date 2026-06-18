@@ -219,7 +219,9 @@ class AnyaDaemon:
             created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             db.save_conversation(conversation_id, created_at, cwd=str(Path.home()))
             try:
-                db.update_conversation_title(conversation_id, f"Telegram {chat_id} #{timestamp_ms}")
+                db.update_conversation_title(
+                    conversation_id, f"Telegram {chat_id} #{timestamp_ms}"
+                )
             except Exception:
                 pass
             telegram_conversations[chat_id] = conversation_id
@@ -243,6 +245,7 @@ class AnyaDaemon:
             def _rel_time(updated_at: str) -> str:
                 try:
                     from datetime import datetime, timezone
+
                     # Handle ISO 8601 formats with or without fractional seconds
                     # e.g. 2026-06-02T07:07:18.097Z or 2026-06-02T07:07:18Z
                     ts = updated_at.replace("Z", "+00:00")
@@ -284,12 +287,16 @@ class AnyaDaemon:
             if not results:
                 msg = "No conversations found."
                 if query:
-                    msg = f"No conversations found matching \"{query}\"."
+                    msg = f'No conversations found matching "{query}".'
                 await self.telegram_client.send_response(chat_id, msg)
                 return True
 
             telegram_search_cache[chat_id] = results
-            header = "Recent conversations:" if not query else f"Conversations matching \"{query}\"\:"
+            header = (
+                "Recent conversations:"
+                if not query
+                else f'Conversations matching "{query}"\:'
+            )
             body = _format_conversations_list(results)
             reply = f"{header}\n\n{body}\n\nUse /continue N to resume one."
             await self.telegram_client.send_response(chat_id, reply)
@@ -330,7 +337,10 @@ class AnyaDaemon:
             telegram_conversations[chat_id] = conversation_id
             self.logger.info(
                 "Chat %s continuing conversation %s (%s) with cwd %s",
-                chat_id, conversation_id, title, cwd,
+                chat_id,
+                conversation_id,
+                title,
+                cwd,
             )
 
             await self.telegram_client.send_response(
@@ -356,13 +366,13 @@ class AnyaDaemon:
 
             # Handle /conversations [query]
             if stripped.startswith("/conversations"):
-                rest = stripped[len("/conversations"):].strip()
+                rest = stripped[len("/conversations") :].strip()
                 await handle_conversations_command(chat_id, rest)
                 return
 
             # Handle /continue N
             if stripped.startswith("/continue"):
-                rest = stripped[len("/continue"):].strip()
+                rest = stripped[len("/continue") :].strip()
                 await handle_continue_command(chat_id, rest)
                 return
 
@@ -371,7 +381,9 @@ class AnyaDaemon:
 
             # Resolve cwd from the stored conversation (supports /continue switching)
             conv_record = db.get_conversation(conversation_id)
-            conv_cwd = (conv_record.get("cwd") if conv_record else None) or str(Path.home())
+            conv_cwd = (conv_record.get("cwd") if conv_record else None) or str(
+                Path.home()
+            )
 
             timestamp_ms = int(time.time() * 1000)
             request_id = f"tg-assistant-{chat_id}-{timestamp_ms}"
@@ -379,8 +391,10 @@ class AnyaDaemon:
 
             telegram_agent_settings = AgentSettings(
                 model=os.environ.get("ANYA_MODEL", "gpt-4.1"),
-                api_key=os.environ.get("ANYA_API_KEY") or os.environ.get("OPENAI_API_KEY"),
-                api_base=os.environ.get("ANYA_API_BASE") or os.environ.get("OPENAI_API_BASE"),
+                api_key=os.environ.get("ANYA_API_KEY")
+                or os.environ.get("OPENAI_API_KEY"),
+                api_base=os.environ.get("ANYA_API_BASE")
+                or os.environ.get("OPENAI_API_BASE"),
                 api_type=os.environ.get("ANYA_API_TYPE", "responses"),
                 thinking_budget=os.environ.get("ANYA_THINKING_BUDGET"),
                 disable_mcp=os.environ.get("ANYA_DISABLE_MCP", "0") == "1",

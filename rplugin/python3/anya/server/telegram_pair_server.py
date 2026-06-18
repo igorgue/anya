@@ -18,7 +18,9 @@ logger = logging.getLogger("anya.telegram_pair_server")
 
 
 class TelegramPairServer:
-    def __init__(self, telegram_client: Any, host: str | None = None, port: int | None = None):
+    def __init__(
+        self, telegram_client: Any, host: str | None = None, port: int | None = None
+    ):
         self.telegram_client = telegram_client
         self.host = host or os.environ.get("ANYA_TELEGRAM_PAIR_HOST", "127.0.0.1")
         self.port = int(port or os.environ.get("ANYA_TELEGRAM_PAIR_PORT", "8081"))
@@ -58,7 +60,9 @@ class TelegramPairServer:
             def _get_pairing_payload(self, owner: "TelegramPairServer") -> dict:
                 if not owner._loop:
                     raise RuntimeError("Pairing server loop unavailable")
-                future = asyncio.run_coroutine_threadsafe(owner.telegram_client.get_pairing_code(), owner._loop)
+                future = asyncio.run_coroutine_threadsafe(
+                    owner.telegram_client.get_pairing_code(), owner._loop
+                )
                 result = future.result(timeout=15)
                 if not result:
                     raise RuntimeError("Router did not return a pairing code")
@@ -97,9 +101,15 @@ class TelegramPairServer:
                     self.wfile.write(body)
 
         self._server = ThreadingHTTPServer((self.host, self.port), Handler)
-        self._thread = Thread(target=self._server.serve_forever, name="anya-telegram-pair-server", daemon=True)
+        self._thread = Thread(
+            target=self._server.serve_forever,
+            name="anya-telegram-pair-server",
+            daemon=True,
+        )
         self._thread.start()
-        logger.info("Telegram pairing page available at http://%s:%s/pair", self.host, self.port)
+        logger.info(
+            "Telegram pairing page available at http://%s:%s/pair", self.host, self.port
+        )
 
     async def stop(self):
         if not self._server:
@@ -112,14 +122,18 @@ class TelegramPairServer:
         logger.info("Telegram pairing page stopped")
 
 
-def _render_pair_page(code: str, command: str, url: str, qr_target: str, expires: Any) -> str:
+def _render_pair_page(
+    code: str, command: str, url: str, qr_target: str, expires: Any
+) -> str:
     safe_code = html.escape(code)
     safe_command = html.escape(command)
     safe_url = html.escape(url, quote=True)
     safe_expires = html.escape(str(expires))
     command_json = html.escape(json.dumps(command), quote=True)
     qr_json = html.escape(json.dumps(qr_target), quote=True)
-    open_telegram = f'<p><a class="button" href="{safe_url}">Open Telegram</a></p>' if url else ''
+    open_telegram = (
+        f'<p><a class="button" href="{safe_url}">Open Telegram</a></p>' if url else ""
+    )
     qr_markup = _render_qr_markup(qr_target)
 
     return f"""<!doctype html>
@@ -176,13 +190,22 @@ def _render_pair_page(code: str, command: str, url: str, qr_target: str, expires
 
 def _render_qr_markup(text: str) -> str:
     if not text:
-        return '<div>No QR target available</div>'
+        return "<div>No QR target available</div>"
 
     qrencode = shutil.which("qrencode")
     if qrencode:
         try:
             result = subprocess.run(
-                [qrencode, "-t", "SVG", "-m", "1", "--foreground=000000", "--background=FFFFFF", text],
+                [
+                    qrencode,
+                    "-t",
+                    "SVG",
+                    "-m",
+                    "1",
+                    "--foreground=000000",
+                    "--background=FFFFFF",
+                    text,
+                ],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -205,7 +228,8 @@ def _render_qr_markup(text: str) -> str:
     except Exception:
         logger.exception("Failed to render QR with python qrcode")
 
-    return '<pre>' + html.escape(text) + '</pre>'
+    return "<pre>" + html.escape(text) + "</pre>"
+
 
 def _render_error_page(message: str) -> str:
     return f"""<!doctype html><meta charset=\"utf-8\"><title>Anya Telegram Pairing Error</title>

@@ -140,7 +140,11 @@ require("which-key").setup({
 })
 require("snacks").setup({
   input = { enabled = true },
-  picker = { enabled = true, ui_select = true, win = { input = { keys = { ["<Esc>"] = { "close", mode = { "n", "i" } } } } } },
+  picker = {
+    enabled = true,
+    ui_select = true,
+    win = { input = { keys = { ["<Esc>"] = { "close", mode = { "n", "i" } } } } },
+  },
   notifier = {
     enabled = true,
     style = "fancy",

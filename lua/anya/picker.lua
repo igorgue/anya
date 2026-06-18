@@ -346,7 +346,6 @@ function M.open()
   })
 end
 
-
 --- Restore the last (most recently updated) conversation session
 --- @return boolean True if a conversation was loaded
 function M.restore_last_session()

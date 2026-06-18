@@ -145,7 +145,9 @@ local function highlight_refs()
     while true do
       -- Use a custom scanner to handle \-escaped spaces in file paths
       local start_col = line:find("@", pos)
-      if not start_col then break end
+      if not start_col then
+        break
+      end
       local end_col = start_col
       local in_escape = false
       for j = start_col + 1, #line do
@@ -316,8 +318,6 @@ vim.keymap.set("n", "<C-w><C-w>", function()
   require("anya.float_focus").focus_chat()
 end, { buffer = true, desc = "Cycle to chat window" })
 
-
-
 vim.keymap.set("n", "<C-w>k", function()
   require("anya.float_focus").focus_chat()
 end, { buffer = true, desc = "Navigate to chat window" })
@@ -407,7 +407,6 @@ end, { buffer = true, desc = "Restore last session" })
 vim.keymap.set("n", "<localleader>T", function()
   require("anya.telegram").reopen_pairing()
 end, { buffer = true, desc = "Reopen Telegram pairing info" })
-
 
 vim.keymap.set("n", "<localleader>u", function()
   vim.cmd("UpdateRemotePlugins")

@@ -24,6 +24,7 @@ Usage::
     await page.goto("https://example.com")
     await session["close"]()
 """
+
 import asyncio
 
 import builtins
@@ -35,37 +36,22 @@ import traceback
 from typing import Any
 
 
-
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
-
 
 
 DEFAULT_USER_DATA_DIR = os.path.expanduser("~/.config/google-chrome/Default")
 
 
-
-
-
 async def run(
-
     script: str,
-
     url: str | None = None,
-
     headless: bool = True,
-
     timeout: int = 60_000,
-
     viewport: dict | None = None,
-
     user_agent: str | None = None,
-
     user_data_dir: str | None = None,
-
     launch_args: list[str] | None = None,
-
 ) -> Any:
-
     """Run an async Playwright script inside a fresh Google Chrome page.
 
 
@@ -115,20 +101,14 @@ async def run(
     """
 
     if viewport is None:
-
         viewport = {"width": 1280, "height": 720}
 
     if launch_args is None:
-
         launch_args = []
-
-
 
     import io
 
     captured = io.StringIO()
-
-
 
     def _capturing_print(*args, **kwargs):
 
@@ -136,81 +116,53 @@ async def run(
 
         builtins.print(*args, **kwargs)
 
-
-
-    indented_script = chr(10).join('        ' + line for line in script.splitlines())
-
-
+    indented_script = chr(10).join("        " + line for line in script.splitlines())
 
     template = (
-
-        'async def _pw_user_script(page, context, browser):' + chr(10)
-
-        + indented_script + chr(10)
-
+        "async def _pw_user_script(page, context, browser):"
+        + chr(10)
+        + indented_script
+        + chr(10)
     )
 
-
-
-    ns: dict[str, Any] = {'print': _capturing_print}
+    ns: dict[str, Any] = {"print": _capturing_print}
 
     try:
-
         exec(compile(template, "<playwright_script>", "exec"), ns)
 
     except SyntaxError as exc:
-
-        raise RuntimeError(f"Script syntax error: {exc}" + chr(10) + "--- script ---" + chr(10) + script) from exc
-
-
+        raise RuntimeError(
+            f"Script syntax error: {exc}"
+            + chr(10)
+            + "--- script ---"
+            + chr(10)
+            + script
+        ) from exc
 
     data_dir = user_data_dir or DEFAULT_USER_DATA_DIR
 
     os.makedirs(data_dir, exist_ok=True)
 
-
-
     args = [
-
         "--disable-blink-features=AutomationControlled",
-
     ] + launch_args
 
-
-
     if headless:
-
         args.append("--headless=new")
 
-
-
     async with async_playwright() as p:
-
         context: BrowserContext = await p.chromium.launch_persistent_context(
-
             user_data_dir=data_dir,
-
             channel="chrome",
-
             headless=headless,
-
             viewport=viewport,
-
             args=args,
-
             no_viewport=False,
-
         )
-
-
 
         await context.add_init_script(
-
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-
         )
-
-
 
         page: Page = context.pages[0] if context.pages else await context.new_page()
 
@@ -218,60 +170,42 @@ async def run(
 
         page.set_default_navigation_timeout(timeout)
 
-
-
         try:
-
             if url:
-
                 await page.goto(url, wait_until="domcontentloaded")
 
-            result = await ns['_pw_user_script'](page, context, context.browser)
+            result = await ns["_pw_user_script"](page, context, context.browser)
 
             captured_text = captured.getvalue()
 
             if captured_text and result is not None:
-
                 return captured_text.rstrip() + chr(10) + str(result)
 
             elif captured_text:
-
                 return captured_text.rstrip()
 
             return result
 
         except Exception as exc:
-
             raise RuntimeError(
-
-                f"Playwright script error: {exc}" + chr(10) + chr(10) + traceback.format_exc()
-
+                f"Playwright script error: {exc}"
+                + chr(10)
+                + chr(10)
+                + traceback.format_exc()
             ) from exc
 
         finally:
-
             await context.close()
 
 
-
-
-
 async def start(
-
     headless: bool = False,
-
     timeout: int = 60_000,
-
     viewport: dict | None = None,
-
     user_agent: str | None = None,
-
     user_data_dir: str | None = None,
-
     launch_args: list[str] | None = None,
-
 ) -> dict[str, Any]:
-
     """Start a persistent Google Chrome session and return handles.
 
 
@@ -315,62 +249,36 @@ async def start(
     """
 
     if viewport is None:
-
         viewport = {"width": 1280, "height": 720}
 
     if launch_args is None:
-
         launch_args = []
-
-
 
     data_dir = user_data_dir or DEFAULT_USER_DATA_DIR
 
     os.makedirs(data_dir, exist_ok=True)
 
-
-
     args = [
-
         "--disable-blink-features=AutomationControlled",
-
     ] + launch_args
 
-
-
     if headless:
-
         args.append("--headless=new")
-
-
 
     p = await async_playwright().start()
 
     context: BrowserContext = await p.chromium.launch_persistent_context(
-
         user_data_dir=data_dir,
-
         channel="chrome",
-
         headless=headless,
-
         viewport=viewport,
-
         args=args,
-
         no_viewport=False,
-
     )
-
-
 
     await context.add_init_script(
-
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-
     )
-
-
 
     page: Page = context.pages[0] if context.pages else await context.new_page()
 
@@ -378,27 +286,16 @@ async def start(
 
     page.set_default_navigation_timeout(timeout)
 
-
-
     async def _close():
 
         await context.close()
 
         await p.stop()
 
-
-
     return {
-
         "page": page,
-
         "context": context,
-
         "browser": context.browser,
-
         "playwright": p,
-
         "close": _close,
-
     }
-

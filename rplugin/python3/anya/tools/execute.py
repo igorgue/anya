@@ -505,7 +505,8 @@ async def _serve_ui_events(ui_dir: str, plugin_context: "NvimPluginContext"):
                     lvl = level_map.get(level, "vim.log.levels.INFO")
                     plugin_context.nvim.exec_lua(
                         "vim.notify(..., %s, {title = ...})" % lvl,
-                        msg, title,
+                        msg,
+                        title,
                     )
         finally:
             try:
@@ -577,9 +578,7 @@ async def _nvim_modify_buffer(
 
             if mode == "replace":
                 current = nvim.api.buf_get_lines(target_buf.number, 0, -1, False)
-                _replace_lines_with_diff(
-                    nvim.api, target_buf.number, current, lines
-                )
+                _replace_lines_with_diff(nvim.api, target_buf.number, current, lines)
             elif mode == "append":
                 lc = nvim.api.buf_line_count(target_buf.number)
                 nvim.api.buf_set_lines(target_buf.number, lc, lc, False, lines)
@@ -709,7 +708,10 @@ async def execute(
     """
     plugin_context = ctx.context
 
-    if re.search(r"from\s+anya\.libs\s+import\s+[^\n]*\bmemory\b|import\s+anya\.libs\.memory\b", code):
+    if re.search(
+        r"from\s+anya\.libs\s+import\s+[^\n]*\bmemory\b|import\s+anya\.libs\.memory\b",
+        code,
+    ):
         return (
             "The memory library is internal and not available from execute(). "
             "Relevant memories are injected automatically before each run."
@@ -732,7 +734,7 @@ async def execute(
     extra_env = {
         "ANYA_UI_DIR": ui_dir,
         "ANYA_CURRENT_BUFFER": plugin_context.current_buffer or "",
-        "ANYA_OPEN_BUFFERS": json.dumps(plugin_context.open_buffers)
+        "ANYA_OPEN_BUFFERS": json.dumps(plugin_context.open_buffers),
     }
 
     command, script_path = _build_python_command(

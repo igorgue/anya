@@ -174,7 +174,9 @@ def normalize_memory_payload(raw: Any) -> list[dict[str, Any]]:
     return normalized[:5]
 
 
-def _extract_simple_memories(message: str, conversation_context: str | None = None) -> list[dict[str, Any]]:
+def _extract_simple_memories(
+    message: str, conversation_context: str | None = None
+) -> list[dict[str, Any]]:
     """Deterministic extraction for obvious durable facts.
 
     This avoids relying on a second LLM call for common statements like
@@ -192,12 +194,14 @@ def _extract_simple_memories(message: str, conversation_context: str | None = No
     if name_match:
         name = name_match.group(1).strip()
         if name:
-            memories.append({
-                "text": f"User's name is {name}.",
-                "category": "personal",
-                "confidence": 1.0,
-                "deduplication_key": "user-name",
-            })
+            memories.append(
+                {
+                    "text": f"User's name is {name}.",
+                    "category": "personal",
+                    "confidence": 1.0,
+                    "deduplication_key": "user-name",
+                }
+            )
 
     fav_match = re.search(
         r"\b(?:my favorite (?:programming )?language is|favorite (?:programming )?language[:=]?|my favorite is)\s+[\"']?([A-Za-z][A-Za-z0-9+#._ -]{0,40})",
@@ -206,13 +210,19 @@ def _extract_simple_memories(message: str, conversation_context: str | None = No
     )
     if fav_match:
         value = fav_match.group(1).strip().strip(".!,?;:\"'")
-        if value and ("programming language" in lower or "programming language" in context or "my favorite is" in lower):
-            memories.append({
-                "text": f"User's favorite programming language is {value}.",
-                "category": "preference",
-                "confidence": 1.0,
-                "deduplication_key": "favorite-programming-language",
-            })
+        if value and (
+            "programming language" in lower
+            or "programming language" in context
+            or "my favorite is" in lower
+        ):
+            memories.append(
+                {
+                    "text": f"User's favorite programming language is {value}.",
+                    "category": "preference",
+                    "confidence": 1.0,
+                    "deduplication_key": "favorite-programming-language",
+                }
+            )
 
     return memories
 
@@ -235,17 +245,23 @@ async def extract_memories_from_message(
         if context:
             content = f"Recent conversation context:\n{context}\n\n{content}"
         prompt = [{"role": "user", "content": content}]
-        result = await Runner.run(agent, input=prompt, max_turns=1, run_config=run_config)
+        result = await Runner.run(
+            agent, input=prompt, max_turns=1, run_config=run_config
+        )
         final_output = getattr(result, "final_output", "")
         model_memories = normalize_memory_payload(final_output)
     except Exception:
-        logger.exception("Memory model extraction failed; using deterministic memories only")
+        logger.exception(
+            "Memory model extraction failed; using deterministic memories only"
+        )
         model_memories = []
 
     combined: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in [*deterministic, *model_memories]:
-        key = str(item.get("deduplication_key") or item.get("text") or "").strip().lower()
+        key = (
+            str(item.get("deduplication_key") or item.get("text") or "").strip().lower()
+        )
         if not key or key in seen:
             continue
         seen.add(key)
