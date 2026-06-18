@@ -303,8 +303,8 @@ def main():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-    host = os.environ.get("ROUTER_HOST", "0.0.0.0")
-    port = int(os.environ.get("ROUTER_PORT", "8080"))
+    host = os.environ.get("ROUTER_HOST", "anya-router.fly.dev")
+    port = int(os.environ.get("ROUTER_PORT", "80"))
 
     logger.info(f"Starting Anya Telegram Router on {host}:{port}")
     uvicorn.run(
