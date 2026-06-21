@@ -32,29 +32,6 @@ local function is_chat_window(win)
   return vim.api.nvim_get_option_value("filetype", { buf = bufnr }) == "anya-chat"
 end
 
--- Check whether the window is visually showing the bottom of the buffer
--- by examining the last visible line of the window.
--- This is more robust than cursor-position checks because it works
--- regardless of how the user scrolled (mouse wheel, C-y, scrollbar, etc.)
--- and doesn't rely on autocmd timing to update a window variable.
-local function is_window_at_visual_bottom(win, bufnr)
-  if not is_chat_window(win) then
-    return false
-  end
-  if not vim.api.nvim_buf_is_valid(bufnr) then
-    return false
-  end
-
-  -- Get the last visible line of the window (1-indexed)
-  local last_visible = vim.api.nvim_win_call(win, function()
-    return vim.fn.line("w$")
-  end)
-
-  local line_count = vim.api.nvim_buf_line_count(bufnr)
-  -- Consider "at bottom" if the last visible line is on or past the last buffer line
-  return last_visible >= line_count
-end
-
 function M._set_autoscroll_enabled(win, enabled)
   if not vim.api.nvim_win_is_valid(win) then
     return
@@ -73,9 +50,11 @@ function M._is_autoscroll_enabled(win)
     return enabled == true
   end
 
-  -- Use visual bottom check as fallback (more reliable than cursor position)
+  -- Fallback: check if cursor is on the last line (synchronous, always accurate)
   local bufnr = vim.api.nvim_win_get_buf(win)
-  local at_bottom = is_window_at_visual_bottom(win, bufnr)
+  local cursor = vim.api.nvim_win_get_cursor(win)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local at_bottom = cursor[1] >= line_count
   M._set_autoscroll_enabled(win, at_bottom)
   return at_bottom
 end
@@ -85,10 +64,12 @@ function M._refresh_window_autoscroll_state(win)
     return
   end
 
-  -- Use visual bottom check: looks at the actual viewport to determine
-  -- whether the window is showing the bottom of the buffer.
+  -- Check if cursor is on the last buffer line. This is synchronous and
+  -- always accurate, unlike line("w$") which reflects the pre-redraw viewport.
   local bufnr = vim.api.nvim_win_get_buf(win)
-  M._set_autoscroll_enabled(win, is_window_at_visual_bottom(win, bufnr))
+  local cursor = vim.api.nvim_win_get_cursor(win)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  M._set_autoscroll_enabled(win, cursor[1] >= line_count)
 end
 
 function M._setup_autoscroll_tracking()
@@ -137,24 +118,13 @@ function M._autoscroll_to_bottom(bufnr)
 
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     if vim.api.nvim_win_get_buf(win) == bufnr and M._is_autoscroll_enabled(win) then
-      -- Double-check: only scroll if the window is actually showing the bottom
-      -- of the buffer. This catches cases where the user scrolled away but the
-      -- window variable wasn't updated in time (e.g. scroll methods that don't
-      -- reliably trigger WinScrolled/CursorMoved, or race conditions with the
-      -- streaming timer callback).
-      if not is_window_at_visual_bottom(win, bufnr) then
-        -- User has scrolled away from the bottom -- disable autoscroll for
-        -- this window so it stays put on future chunks too.
-        M._set_autoscroll_enabled(win, false)
-      else
-        local new_line_count = vim.api.nvim_buf_line_count(bufnr)
-        pcall(vim.api.nvim_win_set_cursor, win, { new_line_count, 0 })
-        M._set_autoscroll_enabled(win, true)
+      local new_line_count = vim.api.nvim_buf_line_count(bufnr)
+      pcall(vim.api.nvim_win_set_cursor, win, { new_line_count, 0 })
+      M._set_autoscroll_enabled(win, true)
 
-        -- Trigger render-markdown to refresh this buffer
-        if ft == "anya-chat" then
-          vim.api.nvim_exec_autocmds("CursorMoved", { buffer = bufnr })
-        end
+      -- Trigger render-markdown to refresh this buffer
+      if ft == "anya-chat" then
+        vim.api.nvim_exec_autocmds("CursorMoved", { buffer = bufnr })
       end
     end
   end
