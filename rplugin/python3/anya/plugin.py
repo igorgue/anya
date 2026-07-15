@@ -137,16 +137,17 @@ class AnyaPlugin:
             is_running = await loop.run_in_executor(None, daemon_mgmt.is_daemon_running)
 
             if not is_running:
-                self.nvim.async_call(
-                    self.nvim.out_write,
-                    "Anya: Starting daemon...\n",
-                )
+                # self.nvim.async_call(
+                #     self.nvim.out_write,
+                #     "Anya: Starting daemon...\n",
+                # )
                 started = await loop.run_in_executor(None, daemon_mgmt.start_daemon)
                 if started:
-                    self.nvim.async_call(
-                        self.nvim.out_write,
-                        "Anya: Daemon started.\n",
-                    )
+                    # self.nvim.async_call(
+                    #     self.nvim.out_write,
+                    #     "Anya: Daemon started.\n",
+                    # )
+                    pass
                 else:
                     self.nvim.async_call(
                         self.nvim.err_write,
@@ -928,10 +929,10 @@ class AnyaPlugin:
         is_running = await loop.run_in_executor(None, daemon_mgmt.is_daemon_running)
 
         if not is_running:
-            self.nvim.async_call(
-                self.nvim.out_write,
-                "Anya: Starting daemon...\n",
-            )
+            # self.nvim.async_call(
+            #     self.nvim.out_write,
+            #     "Anya: Starting daemon...\n",
+            # )
             started = await loop.run_in_executor(None, daemon_mgmt.start_daemon)
             if not started:
                 self.nvim.async_call(
@@ -945,10 +946,10 @@ class AnyaPlugin:
                     {"id": request_id, "status": "error"},
                 )
                 return
-            self.nvim.async_call(
-                self.nvim.out_write,
-                "Anya: Daemon started.\n",
-            )
+            # self.nvim.async_call(
+            #     self.nvim.out_write,
+            #     "Anya: Daemon started.\n",
+            # )
 
         # Ensure system event listener is running (for title generation, etc.)
         if not self._system_listener_running:
