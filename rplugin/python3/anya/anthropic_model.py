@@ -386,9 +386,6 @@ class AnthropicModel:
                 )
             )
 
-        # Total cache tokens (read + creation)
-        total_cache_tokens = cache_read_tokens + cache_creation_tokens
-
         logger.debug(
             f"Anthropic usage: input={input_tokens}, output={output_tokens}, "
             f"cache_read={cache_read_tokens}, cache_creation={cache_creation_tokens}"
@@ -398,7 +395,10 @@ class AnthropicModel:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=input_tokens + output_tokens,
-            input_tokens_details=InputTokensDetails(cached_tokens=total_cache_tokens),
+            input_tokens_details=InputTokensDetails(
+                cached_tokens=cache_read_tokens,
+                cache_write_tokens=cache_creation_tokens,
+            ),
             output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
         )
 

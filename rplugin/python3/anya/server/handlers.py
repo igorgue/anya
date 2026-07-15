@@ -465,6 +465,25 @@ class RequestHandler:
             {"message_id": request_id},
         )
 
+        async def _keepalive_loop():
+            """Send periodic keepalive events during long operations.
+
+            This prevents the client's inactivity timeout from firing while
+            the agent is busy (e.g. running a long tool call, waiting for
+            model response, or waiting for user confirmation).
+            """
+            while True:
+                await asyncio.sleep(120.0)  # Every 2 minutes
+                try:
+                    await self._send_stream_chunk(
+                        session_id,
+                        request_id,
+                        StreamEventType.KEEPALIVE,
+                        {},
+                    )
+                except Exception:
+                    pass
+
         try:
             nvim_context = NvimContext.from_dict(payload.nvim_context)
             agent_settings = nvim_context.get_agent_settings()
@@ -485,12 +504,22 @@ class RequestHandler:
                 )
             )
 
+            # Start keepalive heartbeat
+            keepalive_task = asyncio.create_task(_keepalive_loop())
+
             # Run agent streaming
             final_message = await self._run_agent_streaming(
                 session_id,
                 request_id,
                 payload,
             )
+
+            # Stop keepalive
+            keepalive_task.cancel()
+            try:
+                await keepalive_task
+            except asyncio.CancelledError:
+                pass
 
             try:
                 await memory_task
@@ -518,12 +547,17 @@ class RequestHandler:
                     )
                 )
 
-            # Send stream end
+            # Send stream end with timestamps so the client can immediately
+            # render the message duration without waiting for the next turn.
             await self._send_stream_chunk(
                 session_id,
                 request_id,
                 StreamEventType.MESSAGE_END,
-                {"status": "success"},
+                {
+                    "status": "success",
+                    "created_at": created_at,
+                    "ended_at": end_timestamp,
+                },
             )
 
             # Call Telegram response callback for this request if set.
@@ -559,11 +593,16 @@ class RequestHandler:
                 end_timestamp,
                 locals().get("final_message", ""),
             )
+            cancelled_created_at = created_at if "created_at" in locals() else end_timestamp
             await self._send_stream_chunk(
                 session_id,
                 request_id,
                 StreamEventType.MESSAGE_END,
-                {"status": "cancelled"},
+                {
+                    "status": "cancelled",
+                    "created_at": cancelled_created_at,
+                    "ended_at": end_timestamp,
+                },
             )
 
         except Exception as e:
@@ -606,6 +645,13 @@ class RequestHandler:
             )
 
         finally:
+            # Ensure keepalive is stopped regardless of outcome
+            if "keepalive_task" in locals() and not keepalive_task.done():
+                keepalive_task.cancel()
+                try:
+                    await keepalive_task
+                except (asyncio.CancelledError, Exception):
+                    pass
             self.agent_manager.clear_active_request(session_id)
             self._active_tools.pop(session_id, None)
 

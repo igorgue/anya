@@ -36,6 +36,14 @@ DEFAULT_MODEL = os.environ.get("ANYA_MODEL", "gpt-4.1")
 DEFAULT_THINKING_BUDGET = os.environ.get("ANYA_THINKING_BUDGET")
 
 
+class StreamInactivityError(Exception):
+    """Raised when no stream events are received within the inactivity timeout.
+
+    This usually indicates the daemon has crashed or the ZMQ connection was
+    silently broken.  The caller can safely retry the request.
+    """
+
+
 @pynvim.plugin
 class AnyaPlugin:
     def __init__(self, nvim):
@@ -912,6 +920,7 @@ class AnyaPlugin:
         chat_bufnr,
         request_id,
         is_new_conversation=False,
+        _retry_attempt: int = 0,
     ):
         """Run the agent via the daemon and handle streaming responses."""
         # Ensure daemon is running (run blocking check in thread pool)
@@ -1123,11 +1132,11 @@ class AnyaPlugin:
             # Note: We don't check send_task.done() anymore because the daemon
             # returns immediately after starting the background task. We rely on
             # MESSAGE_END event to know when streaming is complete.
-            stream_start_time = time.monotonic()
+            last_chunk_time = time.monotonic()
             last_health_check = time.monotonic()
-            MAX_STREAM_DURATION = 600.0  # 10 minutes max streaming time
+            INACTIVITY_TIMEOUT = 600.0  # 10 min of *no events* => likely dead
             HEALTH_CHECK_INTERVAL = 5.0  # Check daemon health every 5 seconds
-            
+
             while True:
                 # Check cancellation flag before waiting for events
                 if self._request_cancelled:
@@ -1142,11 +1151,17 @@ class AnyaPlugin:
                     # forever. Without this check the streaming loop would run
                     # indefinitely, leaving the UI stuck in "receiving" state.
                     now = time.monotonic()
-                    
-                    # Check if overall stream has exceeded max duration
-                    if now - stream_start_time > MAX_STREAM_DURATION:
-                        raise Exception(
-                            "Response stream timed out. The daemon may have disconnected."
+
+                    # Check if we've had no stream events for too long.
+                    # This is measured from the *last received event*, not from
+                    # stream start, so legitimately long-running tool calls
+                    # (builds, test suites, etc.) won't trigger a false timeout
+                    # as long as the daemon periodically sends keepalive events.
+                    if now - last_chunk_time > INACTIVITY_TIMEOUT:
+                        raise StreamInactivityError(
+                            "No stream events received for "
+                            f"{int(INACTIVITY_TIMEOUT)}s. "
+                            "The daemon may have disconnected."
                         )
                     
                     # Periodically verify daemon is still alive
@@ -1158,13 +1173,13 @@ class AnyaPlugin:
                             # If user also cancelled, treat as cancellation (not error)
                             if self._request_cancelled:
                                 raise asyncio.CancelledError()
-                            raise Exception(
-                                "Daemon disconnected mid-stream. "
-                                "Run :Anya daemon status to check, then send a new message to restart it."
+                            raise StreamInactivityError(
+                                "Daemon process disappeared mid-stream."
                             )
                     continue
 
                 self._streaming_started = True
+                last_chunk_time = time.monotonic()
 
                 # Handle different event types
                 if chunk.event_type == StreamEventType.TEXT_DELTA:
@@ -1369,13 +1384,32 @@ class AnyaPlugin:
                 elif chunk.event_type == StreamEventType.MESSAGE_END:
                     # Flush queue and clean up trailing blank lines in the buffer
                     # on Neovim's main thread to avoid cross-thread RPC errors.
-                    def _safe_finish_message():
+                    # Also re-process markers so the message duration (ended_at)
+                    # renders immediately instead of on the next user turn.
+                    _conv_id = conversation_id
+                    _chat_buf = chat_bufnr
+
+                    def _safe_finish_message(
+                        _conv_id=_conv_id, _chat_buf=_chat_buf
+                    ):
                         try:
                             ui.flush_queue(self.nvim)
                         except Exception:
                             pass
                         try:
-                            ui.cleanup_trailing_blanks(self.nvim, chat_bufnr)
+                            ui.cleanup_trailing_blanks(self.nvim, _chat_buf)
+                        except Exception:
+                            pass
+                        # Re-render marker virtual text (duration, etc.) now
+                        # that the daemon has persisted ended_at to the DB.
+                        try:
+                            if _conv_id:
+                                self._ensure_db()
+                                data = db.load_conversation(_conv_id)
+                                if data and data.get("messages"):
+                                    ui.process_markers(
+                                        self.nvim, _chat_buf, data["messages"]
+                                    )
                         except Exception:
                             pass
 
@@ -2139,6 +2173,90 @@ end
             # Note: we do NOT re-emit AnyaRequestFinished here because
             # cancel_agent() already emitted it (with the correct status)
             # before the coroutine was cancelled.
+
+        except StreamInactivityError:
+            # The stream went silent for too long.  Try to recover by
+            # restarting the daemon and re-entering the streaming flow, but
+            # only when no content was already streamed to the buffer (a
+            # retry after partial output would duplicate text).
+            MAX_RETRIES = 1
+            if (
+                not collected_content
+                and _retry_attempt < MAX_RETRIES
+            ):
+                self.nvim.async_call(
+                    ui.append_to_chat_buffer,
+                    self.nvim,
+                    chat_bufnr,
+                    "\n\n_Stream timed out. Restarting daemon and retrying..._\n",
+                )
+
+                # Clean up the empty assistant placeholder left by the
+                # failed attempt so it doesn't show as an empty message.
+                try:
+                    db.delete_message(request_id)
+                except Exception:
+                    pass
+
+                # Restart daemon if it died
+                is_running = await loop.run_in_executor(
+                    None, daemon_mgmt.is_daemon_running
+                )
+                if not is_running:
+                    started = await loop.run_in_executor(
+                        None, daemon_mgmt.start_daemon
+                    )
+                    if not started:
+                        self.nvim.async_call(
+                            self.nvim.err_write,
+                            "Anya: Failed to restart daemon.\n",
+                        )
+                        fidget.emit_user_event(
+                            self.nvim,
+                            "AnyaRequestFinished",
+                            {"id": request_id, "status": "error"},
+                        )
+                        return
+                    # Give the daemon a moment to be ready
+                    await asyncio.sleep(0.5)
+
+                # Generate a new request ID for the retry attempt so the
+                # daemon's request tracking doesn't conflict with the old one.
+                retry_request_id = ids.new()
+                self._current_request_id = retry_request_id
+
+                # Recursively retry the whole streaming flow
+                await self._run_agent_via_daemon(
+                    text,
+                    conversation_id,
+                    chat_bufnr,
+                    retry_request_id,
+                    is_new_conversation=False,
+                    _retry_attempt=_retry_attempt + 1,
+                )
+                return
+
+            # Can't safely retry — content was already streamed
+            error_msg = (
+                "Stream went silent (the daemon may have disconnected). "
+                + ("Partial response was received." if collected_content else "")
+            )
+
+            def _safe_append_retry_err(msg=error_msg):
+                try:
+                    ui.append_to_chat_buffer(
+                        self.nvim, chat_bufnr, f"\n\n**Error:** {msg}\n"
+                    )
+                except Exception:
+                    pass
+
+            self.nvim.async_call(_safe_append_retry_err)
+
+            fidget.emit_user_event(
+                self.nvim,
+                "AnyaRequestFinished",
+                {"id": request_id, "status": "error"},
+            )
 
         except Exception as err:
             # Capture error for use in closures

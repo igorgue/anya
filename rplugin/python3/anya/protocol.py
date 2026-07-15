@@ -36,6 +36,9 @@ class ResponseType(Enum):
     STREAM_END = "stream_end"
     PONG = "pong"
     STATUS = "status"
+    # Heartbeat sent during long operations (tool calls, model thinking)
+    # so the client knows the daemon is still alive and working
+    KEEPALIVE = "keepalive"
 
 
 class StreamEventType(Enum):
@@ -69,6 +72,9 @@ class StreamEventType(Enum):
     MODIFY_BUFFER_REQUEST = "modify_buffer_request"
     TASK_LIST_UPDATE = "task_list_update"
     STATUS = "status"
+    # Heartbeat sent during long operations (tool calls, model thinking)
+    # so the client knows the daemon is still alive and working
+    KEEPALIVE = "keepalive"
 
 
 @dataclass
