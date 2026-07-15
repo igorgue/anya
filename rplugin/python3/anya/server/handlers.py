@@ -236,7 +236,6 @@ def _is_retryable_error(exception: Exception) -> bool:
     return False
 
 
-
 def _is_tool_call_order_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return (
@@ -269,6 +268,7 @@ def _drop_tool_tail(items: list[dict]) -> list[dict]:
         return items
 
     return items[:last_tool_call_idx]
+
 
 def _should_retry(exception: Exception) -> bool:
     """Determine if we should retry based on the exception type."""
@@ -334,7 +334,6 @@ class RequestHandler:
             self.logger.exception(f"Error handling request: {e}")
             return make_error_response(request.request_id, str(e))
 
-
     async def _handle_telegram_pair(self, request: Request) -> Response:
         """Create a Telegram pairing code for the connected router client."""
         telegram_client = getattr(self, "telegram_client", None)
@@ -362,7 +361,9 @@ class RequestHandler:
         self.logger.info(f"Handling SEND_MESSAGE for session {request.session_id}")
         payload = SendMessagePayload.from_dict(request.payload)
 
-        session_state = await self.agent_manager.get_or_create_session(request.session_id)
+        session_state = await self.agent_manager.get_or_create_session(
+            request.session_id
+        )
 
         # Start agent processing in background task
         task = asyncio.create_task(
@@ -372,7 +373,9 @@ class RequestHandler:
                 payload,
             )
         )
-        self.agent_manager.set_active_request(request.session_id, request.request_id, task)
+        self.agent_manager.set_active_request(
+            request.session_id, request.request_id, task
+        )
         session_state.last_activity = asyncio.get_event_loop().time()
 
         # Return immediately so the REP socket can receive other requests
@@ -403,7 +406,9 @@ class RequestHandler:
             if not inserted:
                 db.update_message(request_id, content="", ended_at=None, markers=None)
         except Exception as e:
-            self.logger.warning("Failed to persist assistant placeholder for %s: %s", request_id, e)
+            self.logger.warning(
+                "Failed to persist assistant placeholder for %s: %s", request_id, e
+            )
 
     def _persist_assistant_message(
         self,
@@ -416,9 +421,13 @@ class RequestHandler:
         if not conversation_id:
             return
         try:
-            cleaned_content, markers_json = history.extract_markers_from_content(content)
+            cleaned_content, markers_json = history.extract_markers_from_content(
+                content
+            )
         except Exception:
-            cleaned_content, markers_json = history.extract_markers_from_content(content)
+            cleaned_content, markers_json = history.extract_markers_from_content(
+                content
+            )
 
         if not cleaned_content:
             # Even with no content, persist ended_at if provided so the
@@ -593,7 +602,9 @@ class RequestHandler:
                 end_timestamp,
                 locals().get("final_message", ""),
             )
-            cancelled_created_at = created_at if "created_at" in locals() else end_timestamp
+            cancelled_created_at = (
+                created_at if "created_at" in locals() else end_timestamp
+            )
             await self._send_stream_chunk(
                 session_id,
                 request_id,
@@ -744,7 +755,11 @@ class RequestHandler:
             try:
                 db.update_conversation_title(conversation_id, title)
             except Exception as e:
-                self.logger.warning("Failed to persist title for conversation %s: %s", conversation_id, e)
+                self.logger.warning(
+                    "Failed to persist title for conversation %s: %s",
+                    conversation_id,
+                    e,
+                )
 
         # Always emit result so the plugin can finish the fidget
         # Use system topic so all instances receive it, but include session_id
@@ -837,7 +852,9 @@ class RequestHandler:
             extracted = await extract_memories_from_message(
                 payload.text,
                 agent_settings,
-                conversation_context=self._build_recent_memory_extraction_context(payload),
+                conversation_context=self._build_recent_memory_extraction_context(
+                    payload
+                ),
             )
         except asyncio.CancelledError:
             raise
@@ -862,8 +879,9 @@ class RequestHandler:
             except Exception as e:
                 self.logger.warning(f"Failed to persist memory: {e}")
 
-
-    def _build_recent_memory_extraction_context(self, payload: SendMessagePayload) -> str:
+    def _build_recent_memory_extraction_context(
+        self, payload: SendMessagePayload
+    ) -> str:
         """Build a compact recent context for resolving short memory statements."""
         messages = payload.history or []
         if not messages:
@@ -1082,6 +1100,7 @@ class RequestHandler:
             # Telegram sessions execute commands directly on the daemon
             if session_id.startswith("telegram:"):
                 import asyncio
+
                 self.logger.info(f"Telegram exec: {command[:120]}...")
                 proc = await asyncio.create_subprocess_shell(
                     command,
@@ -1090,7 +1109,9 @@ class RequestHandler:
                     cwd=cwd,
                 )
                 try:
-                    effective_timeout = (timeout + 30.0) if timeout is not None else None
+                    effective_timeout = (
+                        (timeout + 30.0) if timeout is not None else None
+                    )
                     stdout, stderr = await asyncio.wait_for(
                         proc.communicate(), timeout=effective_timeout
                     )
@@ -1217,16 +1238,18 @@ class RequestHandler:
 
         llm_history = list(payload.history)
         if memory_context:
-            llm_history.append({
-                "role": "system",
-                "content": (
-                    "Use these durable user facts naturally when relevant. "
-                    "Do not mention memories, memory search, or memory storage. "
-                    "If asked whether a fact was saved or will be remembered, answer briefly and naturally; "
-                    "do not claim persistent memory is unavailable.\n"
-                    f"{memory_context.strip()}"
-                ),
-            })
+            llm_history.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Use these durable user facts naturally when relevant. "
+                        "Do not mention memories, memory search, or memory storage. "
+                        "If asked whether a fact was saved or will be remembered, answer briefly and naturally; "
+                        "do not claim persistent memory is unavailable.\n"
+                        f"{memory_context.strip()}"
+                    ),
+                }
+            )
         assistant_parts: list[str] = []
         last_partial_save = 0
         detached_instruction_added = False
@@ -1270,7 +1293,12 @@ class RequestHandler:
                             self.agent_manager.is_session_detached(session_id)
                             and not detached_instruction_added
                         ):
-                            llm_history.append({"role": "system", "content": _background_mode_instruction()})
+                            llm_history.append(
+                                {
+                                    "role": "system",
+                                    "content": _background_mode_instruction(),
+                                }
+                            )
                             detached_instruction_added = True
                             context.detached = True
                             self.logger.info(
@@ -1538,11 +1566,17 @@ class RequestHandler:
                                     continue
                                 assistant_parts.append(delta)
                                 current_message = "".join(assistant_parts)
-                                if payload.conversation_id and (len(current_message) - last_partial_save >= 200):
+                                if payload.conversation_id and (
+                                    len(current_message) - last_partial_save >= 200
+                                ):
                                     self._persist_assistant_message(
                                         payload.conversation_id,
                                         request_id,
-                                        _extract_history_timestamp(llm_history[-1], _utc_timestamp()) if llm_history else _utc_timestamp(),
+                                        _extract_history_timestamp(
+                                            llm_history[-1], _utc_timestamp()
+                                        )
+                                        if llm_history
+                                        else _utc_timestamp(),
                                         None,
                                         current_message,
                                     )

@@ -950,6 +950,7 @@ def reposition_floats(nvim: Nvim):
     except Exception as _e:
         # Log to daemon log instead of silently swallowing
         import logging
+
         logging.getLogger("anya").warning(
             "reposition_floats failed: %s", _e, exc_info=True
         )

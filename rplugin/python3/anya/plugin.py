@@ -1163,7 +1163,7 @@ class AnyaPlugin:
                             f"{int(INACTIVITY_TIMEOUT)}s. "
                             "The daemon may have disconnected."
                         )
-                    
+
                     # Periodically verify daemon is still alive
                     if now - last_health_check > HEALTH_CHECK_INTERVAL:
                         last_health_check = now
@@ -1389,9 +1389,7 @@ class AnyaPlugin:
                     _conv_id = conversation_id
                     _chat_buf = chat_bufnr
 
-                    def _safe_finish_message(
-                        _conv_id=_conv_id, _chat_buf=_chat_buf
-                    ):
+                    def _safe_finish_message(_conv_id=_conv_id, _chat_buf=_chat_buf):
                         try:
                             ui.flush_queue(self.nvim)
                         except Exception:
@@ -2180,10 +2178,7 @@ end
             # only when no content was already streamed to the buffer (a
             # retry after partial output would duplicate text).
             MAX_RETRIES = 1
-            if (
-                not collected_content
-                and _retry_attempt < MAX_RETRIES
-            ):
+            if not collected_content and _retry_attempt < MAX_RETRIES:
                 self.nvim.async_call(
                     ui.append_to_chat_buffer,
                     self.nvim,
@@ -2203,9 +2198,7 @@ end
                     None, daemon_mgmt.is_daemon_running
                 )
                 if not is_running:
-                    started = await loop.run_in_executor(
-                        None, daemon_mgmt.start_daemon
-                    )
+                    started = await loop.run_in_executor(None, daemon_mgmt.start_daemon)
                     if not started:
                         self.nvim.async_call(
                             self.nvim.err_write,
@@ -2237,9 +2230,8 @@ end
                 return
 
             # Can't safely retry — content was already streamed
-            error_msg = (
-                "Stream went silent (the daemon may have disconnected). "
-                + ("Partial response was received." if collected_content else "")
+            error_msg = "Stream went silent (the daemon may have disconnected). " + (
+                "Partial response was received." if collected_content else ""
             )
 
             def _safe_append_retry_err(msg=error_msg):
