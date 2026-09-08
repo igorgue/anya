@@ -608,7 +608,7 @@ function M.setup_autocmd()
 
   M.state.augroup = vim.api.nvim_create_augroup("AnyaSplash", { clear = true })
 
-  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP", "BufModifiedSet" }, {
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP" }, {
     group = M.state.augroup,
     callback = function(args)
       if is_anya_chat(args.buf) then

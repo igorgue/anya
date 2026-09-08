@@ -52,8 +52,8 @@ vim.opt.scrolloff = 3
 vim.opt.foldmethod = "manual"
 vim.opt.foldtext = [['+ ' .. substitute(getline(v:foldstart), '\*\*', '', 'g')]]
 vim.opt.diffopt = {
-  algorithm = "histogram",
-  linematch = 60,
+  "algorithm:histogram",
+  "linematch:60",
   "internal",
   "indent-heuristic",
   "filler",
