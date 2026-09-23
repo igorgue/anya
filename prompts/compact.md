@@ -19,4 +19,5 @@ The user might provide specific instructions on what to compact, follow those in
 
 ## IMPORTANT
 
+- **Never use em dashes (`—`, U+2014) or en dashes (`–`, U+2013) in prose.** They are an LLM tell. Do not substitute a hyphen; restructure the sentence instead.
 - Do not use emojis in your responses.

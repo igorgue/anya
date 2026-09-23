@@ -201,7 +201,7 @@ class SpacingManager:
             if not result.startswith("\n") and prefix.startswith("\n"):
                 result = "\n" + result
 
-            return result
+            return normalize_dashes(result)
 
         # Consecutive TOOL_HEADERs: each one on its own line, tightly grouped
         if content_type == ContentType.TOOL_HEADER:
@@ -211,9 +211,9 @@ class SpacingManager:
             isolated = self.ensure_marker_isolation(delta)
             if isolated.endswith("-->"):
                 isolated += "\n"
-            return isolated
+            return normalize_dashes(isolated)
 
-        return delta
+        return normalize_dashes(delta)
 
     def format_content(
         self,
@@ -311,3 +311,38 @@ def normalize_spacing(text: str) -> str:
     Preserves single blank lines.
     """
     return re.sub(r"\n{3,}", "\n\n", text)
+
+
+# Em dash (U+2014) and en dash (U+2013). Anya's style rules forbid both in prose.
+# A dash with surrounding spaces is removed along with the padding; a dash glued
+# to a word (word\u2014word) collapses to a single space so words stay separated.
+_DASH_RE = re.compile(r"\s*[\u2014\u2013]\s*")
+
+
+def normalize_dashes(text: str) -> str:
+    """Delete em/en dashes from assistant prose.
+
+    This is a deterministic backstop for the "no em dashes" style rule in the
+    system prompt. It removes the dash entirely rather than substituting another
+    character, since typographic dashes are a strong "written by an LLM" tell.
+    Applied only to assistant-authored prose deltas, never to code blocks or
+    tool output.
+
+    Cleanup rules:
+      "a \u2014 b"  -> "a b"   (dash plus its surrounding spaces removed)
+      "a\u2014b"    -> "a b"   (glued dash becomes a single space)
+      "a \u2014\u2014 b" -> "a b"   (repeated dashes collapse)
+    """
+    if not text:
+        return text
+    if "\u2014" not in text and "\u2013" not in text:
+        return text
+    # A dash glued directly to non-space characters becomes a single space.
+    dash_glued = re.compile(r"(\S)[\u2014\u2013](\S)")
+    while dash_glued.search(text):
+        text = dash_glued.sub(r"\1 \2", text)
+    # Remaining dashes (spaced, leading, trailing) are dropped with their padding.
+    text = _DASH_RE.sub(" ", text)
+    # Collapse any doubled spaces the deletion may have introduced.
+    text = re.sub(r"  +", " ", text)
+    return text
