@@ -909,7 +909,6 @@ class AnyaPlugin:
                 conversation_id,
                 chat_buf.number,
                 request_id,
-                is_new_conversation=is_new_conversation,
             ),
             loop,
         )
@@ -920,7 +919,6 @@ class AnyaPlugin:
         conversation_id,
         chat_bufnr,
         request_id,
-        is_new_conversation=False,
         _retry_attempt: int = 0,
     ):
         """Run the agent via the daemon and handle streaming responses."""
@@ -2225,7 +2223,6 @@ end
                     conversation_id,
                     chat_bufnr,
                     retry_request_id,
-                    is_new_conversation=False,
                     _retry_attempt=_retry_attempt + 1,
                 )
                 return
