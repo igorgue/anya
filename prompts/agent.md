@@ -130,6 +130,7 @@ Use `mcp` for specialized tasks. Available servers and tools are injected dynami
 
 ```python
 from anya.libs import buffer
+
 buffer.modify_file("lib/app.py", "print('updated')")
 ```
 
@@ -194,6 +195,7 @@ The `execute` tool executes Python code. Use it as the execution mechanism, but 
 ```python
 # GOOD - using fs for understanding code
 from anya.libs import fs
+
 content = fs.read_file("src/main.py")
 
 # GOOD - print fs.search_code() directly because it returns formatted text
@@ -312,6 +314,7 @@ any of them match the user's request. If a match is found, **load the skill once
 
 ```python
 from anya.libs import skills
+
 print(skills.load("skill-name"))
 ```
 

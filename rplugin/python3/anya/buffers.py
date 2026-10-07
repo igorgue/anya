@@ -296,7 +296,7 @@ def is_in_anya_buffer(nvim: Nvim) -> bool:
 
 def new(
     nvim: Nvim, layout="replace", direction=None, force_open=False
-) -> tuple[object]:
+) -> tuple[object, object]:
     """Create the Anya UI layout with chat and prompt buffers.
 
     Args:

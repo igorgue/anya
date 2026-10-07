@@ -1,26 +1,19 @@
 """Anya Neovim Plugin"""
 
-import pynvim
 import asyncio
 import concurrent.futures
 import json
-import threading
-import os
-import uuid
-import time
 import logging
-from datetime import datetime, timezone
+import os
+import threading
+import time
+import uuid
+from datetime import UTC, datetime
 
-from . import buffers
-from . import db
-from . import ids
-from . import markers
-from . import history
-from . import fidget
-from . import ui
-from . import utils
+import pynvim
+
+from . import buffers, db, fidget, history, ids, markers, ui, utils
 from . import daemon as daemon_mgmt
-from .spacing import SpacingManager, ContentType
 from .client import AnyaClient, StreamSubscriber, SystemSubscriber
 from .protocol import (
     AgentSettings,
@@ -29,6 +22,7 @@ from .protocol import (
     ResponseType,
     StreamEventType,
 )
+from .spacing import ContentType, SpacingManager
 
 VERSION = "0.0.1"
 
@@ -122,6 +116,8 @@ class AnyaPlugin:
                         )
                     )
                 f.write("---\n")
+
+        assert self._loop is not None, "Invalid loop object"
 
         self._loop.set_exception_handler(exception_handler)
         self._loop.run_forever()
@@ -312,7 +308,7 @@ class AnyaPlugin:
 
     def _apply_compaction(self, conversation_id: str, summary: str):
         """Apply compaction: replace buffer content and DB messages with the summary."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         chat_buf = ui.get_chat_buffer(self.nvim)
         if not chat_buf or not self.nvim.api.buf_is_valid(chat_buf):
@@ -325,7 +321,7 @@ class AnyaPlugin:
         except Exception:
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         timestamp = (
             now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         )
@@ -748,7 +744,7 @@ class AnyaPlugin:
                     message = data.get("message", "")
                     self.nvim.async_call(
                         lambda: self.nvim.exec_lua(
-                            f"vim.notify({repr(message)}, vim.log.levels.INFO, {{title = 'Anya Copilot'}})"
+                            f"vim.notify({message!r}, vim.log.levels.INFO, {{title = 'Anya Copilot'}})"
                         )
                     )
                     # Also write to messages
@@ -771,7 +767,7 @@ class AnyaPlugin:
                 error_msg = str(e)
                 self.nvim.async_call(
                     lambda: self.nvim.exec_lua(
-                        f"vim.notify({repr(error_msg)}, vim.log.levels.ERROR, {{title = 'Anya Copilot'}})"
+                        f"vim.notify({error_msg!r}, vim.log.levels.ERROR, {{title = 'Anya Copilot'}})"
                     )
                 )
                 self.nvim.async_call(
@@ -799,8 +795,9 @@ class AnyaPlugin:
     def _copilot_status(self):
         """Show Copilot authentication status."""
         try:
-            from .copilot_auth import get_auth
             import time
+
+            from .copilot_auth import get_auth
 
             auth = get_auth()
             status = auth.get_status()
@@ -1005,7 +1002,7 @@ class AnyaPlugin:
         # Use the request ID as the assistant message ID so the daemon and plugin
         # refer to the same persisted message row.
         msg_id = request_id
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         timestamp = (
             now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         )
@@ -1785,7 +1782,7 @@ end
                                                     await asyncio.wait_for(
                                                         mod_done.wait(), timeout=5.0
                                                     )
-                                                except asyncio.TimeoutError:
+                                                except TimeoutError:
                                                     pass
                                                 ui_result = (
                                                     result_slot[0] or "Error: timeout"
@@ -2004,7 +2001,7 @@ end
                         self.nvim.async_call(_apply)
                         try:
                             await asyncio.wait_for(done.wait(), timeout=5.0)
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             pass
 
                         result_str = result_container[0] or "Error: timeout"
@@ -2081,7 +2078,7 @@ end
             # extra thinking block when the server already finalized reasoning.
 
             # Save message to database
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             end_timestamp = (
                 now.strftime("%Y-%m-%dT%H:%M:%S.")
                 + f"{int(now.microsecond / 1000):03d}Z"
@@ -2133,7 +2130,7 @@ end
 
         except asyncio.CancelledError:
             # Handle cancellation
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             end_timestamp = (
                 now.strftime("%Y-%m-%dT%H:%M:%S.")
                 + f"{int(now.microsecond / 1000):03d}Z"
@@ -2991,7 +2988,7 @@ end)
 
         try:
             await asyncio.wait_for(done.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
         result_str = result_container[0] or "Error: timeout"
@@ -3170,7 +3167,7 @@ end)
                                 self.nvim.async_call(_apply_modification)
                                 try:
                                     await asyncio.wait_for(done.wait(), timeout=5.0)
-                                except asyncio.TimeoutError:
+                                except TimeoutError:
                                     pass
                                 ui_result = result_container[0] or "Error: timeout"
                         except Exception as e:
@@ -3390,9 +3387,9 @@ pcall(vim.keymap.del, "n", "<C-c>")
                     return None
 
             # Generate IDs and timestamp on server side
-            from datetime import datetime, timezone
+            from datetime import datetime
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             timestamp = (
                 now.strftime("%Y-%m-%dT%H:%M:%S.")
                 + f"{int(now.microsecond / 1000):03d}Z"
@@ -3540,7 +3537,7 @@ For more help, see :h anya"""
             pass
 
         msg_id = ids.new(conversation=conv_id)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         timestamp = (
             now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         )
@@ -3668,7 +3665,7 @@ For more help, see :h anya"""
     @pynvim.function("AnyaTimestamp", sync=True)
     def timestamp(self, args):
         """Get current UTC timestamp in ISO 8601 format with milliseconds."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return (
             now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(now.microsecond / 1000):03d}Z"
         )
@@ -4233,7 +4230,7 @@ Usage:
                 # Display in snacks scratch buffer via Lua
                 self.nvim.async_call(
                     lambda: self.nvim.exec_lua(
-                        f"require('anya.system_prompt').display({repr(prompt)})"
+                        f"require('anya.system_prompt').display({prompt!r})"
                     )
                 )
             except Exception as e:
@@ -4265,7 +4262,7 @@ Usage:
         try:
             self._ensure_db()
             return db.search_conversation_mentions(query, limit)
-        except Exception as e:
+        except Exception:
             return []
 
     @pynvim.function("AnyaGetMentionContent", sync=True)
